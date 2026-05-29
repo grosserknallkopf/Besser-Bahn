@@ -632,7 +632,10 @@ class _StopRow extends StatelessWidget {
             // Station info
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.only(bottom: 22),
+                // Inter-stop gap below the row — dropped to a minimum on the
+                // last visible stop (no line continues), so there's no dead
+                // space under e.g. the alight station.
+                padding: EdgeInsets.only(bottom: hasBottom ? 22 : 4),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
