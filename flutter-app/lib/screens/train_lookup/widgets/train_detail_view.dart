@@ -9,7 +9,6 @@ import 'coach_sequence_view.dart';
 import 'seat_map_view.dart';
 import 'stop_timeline.dart';
 import 'train_info_header.dart';
-import 'train_map_view.dart';
 
 /// The full detail of one train: header, live map, coach sequence and stop
 /// timeline. Used standalone on the train screen and stacked per leg in the
@@ -94,7 +93,6 @@ class _TrainDetailViewState extends ConsumerState<TrainDetailView> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         TrainInfoHeader(trip: trip, action: widget.headerAction),
-        TrainMapView(trip: trip),
         if (widget.coach != null)
           CoachSequenceView(
             sequence: widget.coach!,
@@ -118,31 +116,66 @@ class _TrainDetailViewState extends ConsumerState<TrainDetailView> {
           onStopTap: widget.onStopTap,
           boardingId: widget.boardingId,
           alightingId: widget.alightingId,
-          legAmenities: _legAmenities(widget.coach),
+          legAmenities: _legAmenities(trip, widget.coach),
         ),
       ],
     );
   }
 
-  /// Leg-wide amenities derived from the Wagenreihung — shown in the gap
-  /// between the boarding and alighting stop (bike spaces, quiet zone, …).
-  List<({IconData icon, String label})> _legAmenities(CoachSequence? cs) {
-    if (cs == null) return const [];
-    final coaches = cs.allCoaches;
+  /// Leg-wide amenities shown in the gap between the boarding and alighting
+  /// stop. Primary source is the train's own `zugattribute` (bike,
+  /// accessibility, AC, …) — present for an RE just as for an IC, regardless
+  /// of whether a Wagenreihung exists. Family/quiet zones, which live only in
+  /// the Wagenreihung, are merged in when available.
+  List<({IconData icon, String label})> _legAmenities(
+      Trip trip, CoachSequence? cs) {
     final out = <({IconData icon, String label})>[];
-    if (coaches.any((c) => c.hasBikeSpace)) {
-      out.add((icon: Icons.directions_bike, label: 'Fahrradmitnahme'));
+    final seen = <String>{};
+    void add(IconData icon, String label) {
+      if (label.isEmpty || !seen.add(label)) return;
+      out.add((icon: icon, label: label));
     }
-    if (coaches.any((c) => c.hasWheelchairSpace)) {
-      out.add((icon: Icons.accessible, label: 'Rollstuhlplatz'));
+
+    for (final a in trip.attributes) {
+      final icon = _attrIcon(a);
+      if (icon != null) add(icon, a.value);
     }
-    if (coaches.any((c) => c.hasFamilyZone)) {
-      out.add((icon: Icons.family_restroom, label: 'Familienbereich'));
-    }
-    if (coaches.any((c) => c.hasQuietZone)) {
-      out.add((icon: Icons.volume_off, label: 'Ruhebereich'));
+
+    if (cs != null) {
+      final coaches = cs.allCoaches;
+      if (coaches.any((c) => c.hasFamilyZone)) {
+        add(Icons.family_restroom, 'Familienbereich');
+      }
+      if (coaches.any((c) => c.hasQuietZone)) {
+        add(Icons.volume_off, 'Ruhebereich');
+      }
     }
     return out;
+  }
+
+  /// Icon for a train attribute, or null to skip it (reservation hints, the
+  /// operator name, "Halt nur bei Bedarf" — not amenities worth a chip).
+  IconData? _attrIcon(TripAttribute a) {
+    switch (a.kategorie) {
+      case 'FAHRRADMITNAHME':
+        return Icons.directions_bike;
+      case 'BARRIEREFREI':
+        return Icons.accessible;
+    }
+    switch (a.key.toUpperCase()) {
+      case 'EH': // Fahrzeuggebundene Einstiegshilfe
+        return Icons.accessible;
+      case 'KL': // Klimaanlage
+        return Icons.ac_unit;
+      case 'WV':
+      case 'WL':
+      case 'WI': // WLAN
+        return Icons.wifi;
+      case 'BR': // Bordrestaurant
+      case 'BT': // Bordbistro
+        return Icons.restaurant;
+    }
+    return null;
   }
 
   int? _effectiveWagon(SeatMap? map) {

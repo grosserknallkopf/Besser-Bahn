@@ -412,6 +412,13 @@ class HafasService {
     final displayName =
         kategorie.isNotEmpty ? '$kategorie $nummer' : zugName;
 
+    // Train-wide attributes (bike, accessibility, AC, …) — present for RE/IC
+    // alike, independent of any Wagenreihung.
+    final attributes = (data['zugattribute'] as List<dynamic>? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .map(TripAttribute.fromDbWeb)
+        .toList();
+
     return Trip(
       id: journeyId,
       line: TransitLine(
@@ -424,6 +431,7 @@ class HafasService {
       origin: origin,
       destination: dest,
       stopovers: stopovers,
+      attributes: attributes,
     );
   }
 

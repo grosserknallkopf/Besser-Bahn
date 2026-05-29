@@ -182,6 +182,47 @@ def check_bahn_occupancy() -> str:
     raise CheckError("no auslastungsmeldungen with klasse/stufe in any sampled run")
 
 
+def check_bahn_train_attributes() -> str:
+    """fahrt carries top-level `zugattribute` (train-wide amenities).
+
+    Each is {kategorie, key, value}, e.g. FAHRRADMITNAHME/FB/"Fahrradmitnahme
+    begrenzt möglich" or BARRIEREFREI/RO/"Rollstuhlstellplatz". Powers the
+    amenity row in the stop timeline gap — and unlike the Wagenreihung it's
+    present for an RE just as for an IC. Soft: a stray Bus/tram reports none,
+    so absence across all samples is a warning, not a hard failure.
+    """
+    now = datetime.now()
+    dep = requests.get(
+        "https://www.bahn.de/web/api/reiseloesung/abfahrten",
+        params={"datum": now.strftime("%Y-%m-%d"),
+                "zeit": now.strftime("%H:%M:00"),
+                "ortExtId": KOELN_HBF, "mitVias": "false"},
+        headers=_browser_headers(), timeout=TIMEOUT,
+    )
+    dep.raise_for_status()
+    entries = dep.json().get("entries", [])
+    if not entries:
+        raise CheckError("no departures to derive a journeyId")
+    for entry in entries[:8]:
+        r = requests.get(
+            "https://www.bahn.de/web/api/reiseloesung/fahrt",
+            params={"journeyId": entry["journeyId"]},
+            headers=_browser_headers(), timeout=TIMEOUT,
+        )
+        if r.status_code != 200:
+            continue
+        attrs = r.json().get("zugattribute") or []
+        hit = next(
+            (a for a in attrs
+             if a.get("kategorie") in ("FAHRRADMITNAHME", "BARRIEREFREI")
+             and a.get("value")),
+            None,
+        )
+        if hit:
+            return f"{len(attrs)} zugattribute, e.g. {hit['kategorie']}: {hit['value']}"
+    raise CheckError("no FAHRRADMITNAHME/BARRIEREFREI zugattribute in any sampled run")
+
+
 def check_vendo_location() -> str:
     media = "application/x.db.vendo.mob.location.v3+json"
     r = requests.post(
@@ -699,6 +740,7 @@ CHECKS = [
     ("bahn.de departures (abfahrten)", check_bahn_departures, False),
     ("bahn.de train run (fahrt)", check_bahn_train_run, False),
     ("bahn.de occupancy (auslastung)", check_bahn_occupancy, True),
+    ("bahn.de train attributes (zugattribute)", check_bahn_train_attributes, True),
     ("vendo location search", check_vendo_location, False),
     ("vendo journey + prices (v9)", check_vendo_journey, False),
     ("vendo journey pagination (context)", check_vendo_journey_pagination, False),

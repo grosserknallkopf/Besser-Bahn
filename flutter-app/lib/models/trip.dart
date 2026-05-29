@@ -4,6 +4,28 @@ import 'departure.dart';
 import 'journey.dart' show OccupancyLevel;
 import 'station.dart';
 
+/// A train-wide attribute from the bahn.de `fahrt` `zugattribute` list, e.g.
+/// `{kategorie: FAHRRADMITNAHME, key: FB, value: "Fahrradmitnahme begrenzt
+/// möglich"}`. [kategorie] groups them (FAHRRADMITNAHME, BARRIEREFREI,
+/// INFORMATION); [key] is the stable short code (FB, RO, EH, KL, …).
+class TripAttribute {
+  final String kategorie;
+  final String key;
+  final String value;
+
+  const TripAttribute({
+    required this.kategorie,
+    required this.key,
+    required this.value,
+  });
+
+  factory TripAttribute.fromDbWeb(Map<String, dynamic> json) => TripAttribute(
+        kategorie: json['kategorie'] as String? ?? '',
+        key: json['key'] as String? ?? '',
+        value: json['value'] as String? ?? '',
+      );
+}
+
 class Trip {
   final String id;
   final TransitLine line;
@@ -13,6 +35,12 @@ class Trip {
   final List<Stopover> stopovers;
   final List<Map<String, double>>? polyline; // lat/lng points
 
+  /// Train-wide attributes ("Fahrradmitnahme begrenzt möglich", "Rollstuhl-
+  /// stellplatz", "Klimaanlage", …) from the bahn.de `fahrt` `zugattribute`.
+  /// Belongs to the whole ride, regardless of whether a Wagenreihung exists —
+  /// so even an RE without coach data still carries its bike/accessibility info.
+  final List<TripAttribute> attributes;
+
   const Trip({
     required this.id,
     required this.line,
@@ -21,6 +49,7 @@ class Trip {
     required this.destination,
     required this.stopovers,
     this.polyline,
+    this.attributes = const [],
   });
 
   Trip copyWith({List<Map<String, double>>? polyline, TransitLine? line}) {
@@ -32,6 +61,7 @@ class Trip {
       destination: destination,
       stopovers: stopovers,
       polyline: polyline ?? this.polyline,
+      attributes: attributes,
     );
   }
 
