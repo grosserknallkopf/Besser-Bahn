@@ -197,6 +197,49 @@ class CoachSequenceView extends StatelessWidget {
   }
 }
 
+/// Free-seat indicator on a coach: a seat icon with the free count, or a
+/// struck-through seat (like the DB app) when the coach is fully reserved.
+class _FreeSeatBadge extends StatelessWidget {
+  final int free;
+  const _FreeSeatBadge({required this.free});
+
+  @override
+  Widget build(BuildContext context) {
+    final full = free == 0;
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        SizedBox(
+          width: 14,
+          height: 14,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Icon(Icons.event_seat,
+                  size: 13,
+                  color: full ? AppColors.closedCoach : AppColors.onTime),
+              if (full)
+                Transform.rotate(
+                  angle: -0.7,
+                  child: Container(width: 16, height: 1.8, color: AppColors.delay),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 3),
+        Text(
+          full ? 'voll' : '$free',
+          style: TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            color: full ? AppColors.closedCoach : AppColors.onTime,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 /// Coupler bar drawn between two cars to make the train look connected.
 class _Coupler extends StatelessWidget {
   const _Coupler();
@@ -277,20 +320,11 @@ class _Car extends StatelessWidget {
                     ),
                   ),
                 ),
-                // free-seat count when selecting; amenity icons otherwise.
+                // free-seat badge when selecting; amenity icons otherwise.
                 SizedBox(
                   height: 15,
                   child: freeCount != null
-                      ? Center(
-                          child: Text('$freeCount frei',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                                color: freeCount! > 0
-                                    ? AppColors.onTime
-                                    : AppColors.closedCoach,
-                              )),
-                        )
+                      ? _FreeSeatBadge(free: freeCount!)
                       : Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
@@ -366,22 +400,24 @@ class _NosePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Build the silhouette nose-left, then mirror for a rear car.
+    // Drawn as a SIDE view of an ICE: the roof sweeps down at the front into a
+    // low, rounded nose; the underframe is flat. Built nose-left, then mirrored
+    // for a rear car.
     if (!front) {
       canvas.translate(size.width, 0);
       canvas.scale(-1, 1);
     }
     final w = size.width, h = size.height;
-    const c = 6.0; // rounding of the inner (coupling) end
+    const c = 5.0; // rounding of the inner (coupling) end
 
     final body = Path()
-      ..moveTo(w - c, 0)
-      ..lineTo(w * 0.40, 0)
-      // upper sweep into the nose tip
-      ..cubicTo(w * 0.12, 0, 0, h * 0.18, 0, h * 0.5)
-      // lower sweep back out
-      ..cubicTo(0, h * 0.82, w * 0.12, h, w * 0.40, h)
-      ..lineTo(w - c, h)
+      ..moveTo(w - c, 0) // back roof corner
+      ..lineTo(w * 0.46, 0) // roof runs forward, then…
+      // …windscreen sweeps down to the low nose tip at the front
+      ..cubicTo(w * 0.20, 0, 0, h * 0.34, w * 0.04, h * 0.56)
+      // belly curves back under the nose to the flat underframe
+      ..cubicTo(0, h * 0.80, w * 0.10, h, w * 0.26, h)
+      ..lineTo(w - c, h) // underframe to the back
       ..arcToPoint(Offset(w, h - c), radius: const Radius.circular(c))
       ..lineTo(w, c)
       ..arcToPoint(Offset(w - c, 0), radius: const Radius.circular(c))
@@ -393,15 +429,25 @@ class _NosePainter extends CustomPainter {
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.5
-        ..color = Colors.black.withValues(alpha: 0.25),
+        ..color = Colors.black.withValues(alpha: 0.3),
     );
 
-    // Windscreen near the tip.
-    final screen = RRect.fromRectAndRadius(
-      Rect.fromLTWH(w * 0.10, h * 0.30, w * 0.20, h * 0.40),
-      const Radius.circular(3),
+    // Slanted windscreen following the nose sweep.
+    final windscreen = Path()
+      ..moveTo(w * 0.30, h * 0.16)
+      ..lineTo(w * 0.46, h * 0.16)
+      ..lineTo(w * 0.16, h * 0.50)
+      ..lineTo(w * 0.08, h * 0.46)
+      ..close();
+    canvas.drawPath(
+        windscreen, Paint()..color = Colors.black.withValues(alpha: 0.40));
+
+    // A thin side window band along the body.
+    final band = RRect.fromRectAndRadius(
+      Rect.fromLTWH(w * 0.50, h * 0.30, w * 0.46, h * 0.20),
+      const Radius.circular(2),
     );
-    canvas.drawRRect(screen, Paint()..color = Colors.black.withValues(alpha: 0.38));
+    canvas.drawRRect(band, Paint()..color = Colors.black.withValues(alpha: 0.28));
   }
 
   @override

@@ -629,7 +629,9 @@ def check_vendo_seat_map() -> str:
     plaetze = coaches[0].get("plaetze", [])
     if not plaetze or "status" not in plaetze[0] or "nummer" not in plaetze[0]:
         raise CheckError("coach plaetze missing status/nummer")
-    free = sum(1 for w in coaches for p in w["plaetze"] if p.get("status") == 0)
+    # DB status enum: 0=NICHT_AUSWAEHLBAR (reserved), 1=AUSWAEHLBAR (free),
+    # 2=VORGESCHLAGEN (suggested, also free). So free = status in {1, 2}.
+    free = sum(1 for w in coaches for p in w["plaetze"] if p.get("status") in (1, 2))
     total = sum(len(w["plaetze"]) for w in coaches)
 
     # Per-coach geometry endpoint.

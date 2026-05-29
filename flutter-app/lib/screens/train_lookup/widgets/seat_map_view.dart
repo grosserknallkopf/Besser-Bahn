@@ -202,8 +202,7 @@ class SeatPlanBody extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
       child: Wrap(spacing: 16, runSpacing: 8, children: [
         chip(AppColors.onTime, 'frei'),
-        chip(AppColors.closedCoach, 'reserviert / belegt'),
-        chip(AppColors.dbRed, 'ausgewählt'),
+        chip(AppColors.closedCoach, 'reserviert'),
       ]),
     );
   }
@@ -226,8 +225,6 @@ Color _statusColor(SeatStatus s) {
   switch (s) {
     case SeatStatus.free:
       return AppColors.onTime;
-    case SeatStatus.selected:
-      return AppColors.dbRed;
     case SeatStatus.occupied:
     case SeatStatus.unknown:
       return AppColors.closedCoach;
@@ -522,35 +519,69 @@ class _CoachPainter extends CustomPainter {
   }
 
   void _paintSymbol(Canvas canvas, LayoutElement el, Offset o) {
-    final icon = _symbolIcon(el.subtype);
-    if (icon == null) {
-      final label = _symbolLabel(el.subtype);
-      if (label == null) return;
-      final tp = TextPainter(
-        text: TextSpan(
-            text: label,
-            style: TextStyle(
-                fontSize: unit * 1.6,
-                fontWeight: FontWeight.bold,
-                color: onSurfaceVariant)),
-        textDirection: TextDirection.ltr,
-      )..layout();
-      tp.paint(canvas, o);
+    final box = Rect.fromLTWH(o.dx, o.dy, unit * 2.8, unit * 2.8);
+    final rr = RRect.fromRectAndRadius(box, Radius.circular(unit * 0.5));
+
+    // Class markers ("1"/"2") render as a coloured chip — green for 2nd class,
+    // gold for 1st — like DB's own coach class badge.
+    final cls = _classMarker(el.subtype);
+    if (cls != null) {
+      final col = cls == '1' ? AppColors.firstClass : AppColors.onTime;
+      canvas.drawRRect(rr, Paint()..color = col.withValues(alpha: 0.20));
+      canvas.drawRRect(
+          rr,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 1.2
+            ..color = col);
+      _centerText(
+        canvas,
+        box,
+        cls,
+        TextStyle(
+          fontSize: unit * 1.7,
+          height: 1.0,
+          fontWeight: FontWeight.w800,
+          color: cls == '1' ? const Color(0xFF8A6D00) : AppColors.onTime,
+        ),
+      );
       return;
     }
-    final tp = TextPainter(
-      text: TextSpan(
-        text: String.fromCharCode(icon.codePoint),
-        style: TextStyle(
-          fontSize: unit * 2.4,
-          fontFamily: icon.fontFamily,
-          package: icon.fontPackage,
-          color: onSurfaceVariant,
-        ),
+
+    final icon = _symbolIcon(el.subtype);
+    if (icon == null) return;
+    // Framed pictogram so symbols read as boxed amenities, not loose glyphs.
+    canvas.drawRRect(rr, Paint()..color = onSurfaceVariant.withValues(alpha: 0.10));
+    canvas.drawRRect(
+        rr,
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.0
+          ..color = onSurfaceVariant.withValues(alpha: 0.4));
+    _centerText(
+      canvas,
+      box,
+      String.fromCharCode(icon.codePoint),
+      TextStyle(
+        fontSize: unit * 1.9,
+        height: 1.0,
+        fontFamily: icon.fontFamily,
+        package: icon.fontPackage,
+        color: onSurfaceVariant,
       ),
+    );
+  }
+
+  void _centerText(Canvas canvas, Rect box, String text, TextStyle style) {
+    final tp = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textAlign: TextAlign.center,
       textDirection: TextDirection.ltr,
     )..layout();
-    tp.paint(canvas, o);
+    tp.paint(
+        canvas,
+        Offset(box.left + (box.width - tp.width) / 2,
+            box.top + (box.height - tp.height) / 2));
   }
 
   IconData? _symbolIcon(String? subtype) {
@@ -583,7 +614,7 @@ class _CoachPainter extends CustomPainter {
     }
   }
 
-  String? _symbolLabel(String? subtype) {
+  String? _classMarker(String? subtype) {
     switch (subtype) {
       case 'KLASSE_1':
         return '1';

@@ -8,17 +8,19 @@
 /// drive it straight from a [Trip]'s leg data. See [seat_map_service.dart].
 library;
 
-/// Reservation state of a single seat, as DB's `status` field encodes it.
+/// Reservation state of a single seat. The codes come straight from DB's own
+/// `status` enum in the gsd bundle (`fD`):
+///   0 = NICHT_AUSWAEHLBAR (reserved / occupied — NOT free)
+///   1 = AUSWAEHLBAR       (free / reservable)
+///   2 = VORGESCHLAGEN     (the seat the backend auto-suggests — also free)
+/// NB: 0 is *occupied*, not free — the opposite of what the value might
+/// suggest. We don't book, so the suggested seat (2) is just another free one.
 enum SeatStatus {
-  /// `0` — free and reservable (this is what the user wants to find).
+  /// Reservable / available (status 1 or 2).
   free,
 
-  /// `1` — already reserved / occupied.
+  /// Already reserved / occupied (status 0).
   occupied,
-
-  /// `2` — the seat currently selected in the booking flow. We never select,
-  /// so this only appears when replaying a booking context; treat as occupied.
-  selected,
 
   /// Seat present in the layout but absent from the status payload.
   unknown,
@@ -26,12 +28,11 @@ enum SeatStatus {
 
 SeatStatus seatStatusFromCode(int? code) {
   switch (code) {
-    case 0:
+    case 1: // AUSWAEHLBAR
+    case 2: // VORGESCHLAGEN (system-suggested, but free)
       return SeatStatus.free;
-    case 1:
+    case 0: // NICHT_AUSWAEHLBAR
       return SeatStatus.occupied;
-    case 2:
-      return SeatStatus.selected;
     default:
       return SeatStatus.unknown;
   }
