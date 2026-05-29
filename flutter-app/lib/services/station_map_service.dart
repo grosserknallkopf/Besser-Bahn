@@ -220,15 +220,43 @@ class StationMapService {
 
   /// Reassemble the RSC payload by concatenating every
   /// `self.__next_f.push([N,"<json-string>"])` chunk.
+  ///
+  /// We match only the cheap, fixed prefix with a regex, then scan the quoted
+  /// string literal by hand. The previous one-shot regex used a nested
+  /// quantifier (`("(?:[^"\\]|\\.)*")`) which backtracks/recurses per character
+  /// and blew the stack (`StackOverflowError`) on big pages like Hamburg Hbf
+  /// (~228 KB). The manual scan is linear and recursion-free.
   String _decodeRscBlob(String html) {
-    final re = RegExp(r'self\.__next_f\.push\(\[\d+,("(?:[^"\\]|\\.)*")\]\)',
-        dotAll: true);
+    final marker = RegExp(r'self\.__next_f\.push\(\[\d+,');
     final buf = StringBuffer();
-    for (final m in re.allMatches(html)) {
+    for (final m in marker.allMatches(html)) {
+      var i = m.end;
+      while (i < html.length && html[i] == ' ') {
+        i++;
+      }
+      // Only string-valued chunks carry payload; module tables start with `[`.
+      if (i >= html.length || html[i] != '"') continue;
+      final start = i;
+      i++;
+      var escaped = false;
+      var closed = false;
+      while (i < html.length) {
+        final c = html[i];
+        if (escaped) {
+          escaped = false;
+        } else if (c == '\\') {
+          escaped = true;
+        } else if (c == '"') {
+          closed = true;
+          break;
+        }
+        i++;
+      }
+      if (!closed) continue;
       try {
-        buf.write(json.decode(m.group(1)!) as String);
+        buf.write(json.decode(html.substring(start, i + 1)) as String);
       } catch (_) {
-        // skip non-string chunks (e.g. module tables)
+        // skip anything that isn't a clean JSON string
       }
     }
     return buf.toString();

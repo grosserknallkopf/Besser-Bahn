@@ -8,8 +8,8 @@ class HomeScreen extends StatelessWidget {
 
   int _currentIndex(BuildContext context) {
     final location = GoRouterState.of(context).uri.path;
-    if (location.startsWith('/train')) return 0;
-    if (location.startsWith('/search')) return 1;
+    if (location.startsWith('/search')) return 0;
+    if (location.startsWith('/train')) return 1;
     if (location.startsWith('/departures')) return 2;
     if (location.startsWith('/map')) return 3;
     if (location.startsWith('/split')) return 4;
@@ -20,15 +20,18 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // Don't lift the bottom nav bar above the soft keyboard — it should sit
+      // behind it. Per-tab scaffolds keep their own resize behaviour.
+      resizeToAvoidBottomInset: false,
       body: child,
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex(context),
         onDestinationSelected: (index) {
           switch (index) {
             case 0:
-              context.go('/train');
-            case 1:
               context.go('/search');
+            case 1:
+              context.go('/train');
             case 2:
               context.go('/departures');
             case 3:

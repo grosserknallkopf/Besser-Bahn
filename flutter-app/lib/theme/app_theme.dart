@@ -54,9 +54,16 @@ class AppTheme {
       ),
       navigationBarTheme: NavigationBarThemeData(
         elevation: 0,
+        height: 64,
         backgroundColor: colorScheme.surface,
         indicatorColor: colorScheme.primaryContainer,
-        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+        // 6 tabs on a phone → long labels (e.g. "Einstellungen") wrap to two
+        // lines and shove the icon up out of alignment. Only render the label
+        // for the active tab; the rest stay clean, centred icons.
+        labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
+        labelTextStyle: WidgetStateProperty.all(
+          const TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
+        ),
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,

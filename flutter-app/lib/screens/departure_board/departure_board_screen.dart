@@ -21,6 +21,9 @@ class DepartureBoardScreen extends ConsumerWidget {
     final theme = Theme.of(context);
 
     return Scaffold(
+      // Station search dropdown is an overlay; don't resize the body when the
+      // keyboard opens (avoids the list jumping under the search field).
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         title: Text(state.station?.name ?? 'Abfahrtstafel'),
         actions: [
@@ -167,16 +170,18 @@ class _DepartureTile extends StatelessWidget {
 
     return ListTile(
       onTap: onTap,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      dense: true,
+      visualDensity: VisualDensity.compact,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
       leading: SizedBox(
-        width: 48,
+        width: 44,
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Text(
               time,
               style: TextStyle(
-                fontSize: 16,
+                fontSize: 14,
                 fontWeight: FontWeight.bold,
                 decoration:
                     departure.cancelled ? TextDecoration.lineThrough : null,
@@ -198,7 +203,7 @@ class _DepartureTile extends StatelessWidget {
             child: Text(
               departure.line.displayName,
               style: const TextStyle(
-                  fontSize: 13, fontWeight: FontWeight.bold),
+                  fontSize: 12, fontWeight: FontWeight.bold),
             ),
           ),
           const SizedBox(width: 8),
@@ -206,7 +211,7 @@ class _DepartureTile extends StatelessWidget {
             child: Text(
               departure.direction,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 14),
+              style: const TextStyle(fontSize: 13),
             ),
           ),
         ],

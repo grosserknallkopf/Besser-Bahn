@@ -53,6 +53,10 @@ class _ConnectionSearchScreenState
     final theme = Theme.of(context);
 
     return Scaffold(
+      // Keyboard shouldn't squeeze the form — the station dropdown is an
+      // overlay floating above everything, so resizing just makes the layout
+      // jump. Form stays anchored under the AppBar.
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         title: const Text('Verbindungen'),
         actions: [
