@@ -123,15 +123,7 @@ class TrainMap extends StatelessWidget {
         ),
       ),
       children: [
-        TileLayer(
-          urlTemplate:
-              'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-          subdomains: const ['a', 'b', 'c', 'd'],
-          retinaMode: RetinaMode.isHighDensity(context),
-          userAgentPackageName: 'de.chuk.besserebahn',
-          tileProvider: TileCache.provider(),
-          maxZoom: 20,
-        ),
+        TileCache.outdoorLayer(),
         PolylineLayer(
           polylines: [
             Polyline(

@@ -329,15 +329,7 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
             // Clean, low-clutter light base map (CartoDB Positron): streets
             // and place labels only, no shop/restaurant POIs competing with
             // our station markers. Free, no API key.
-            TileLayer(
-              urlTemplate:
-                  'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-              subdomains: const ['a', 'b', 'c', 'd'],
-              retinaMode: RetinaMode.isHighDensity(context),
-              userAgentPackageName: 'de.chuk.besserebahn',
-              tileProvider: TileCache.provider(),
-              maxZoom: 20,
-            ),
+            TileCache.outdoorLayer(),
             // Real Deutsche Bahn indoor floor plan for the selected floor —
             // the actual building outline, platform halls and track geometry,
             // straight from the tile service bahnhof.de itself renders. The
@@ -1389,15 +1381,7 @@ class _FallbackLocationMapState extends ConsumerState<_FallbackLocationMap> {
             maxZoom: 19,
           ),
           children: [
-            TileLayer(
-              urlTemplate:
-                  'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-              subdomains: const ['a', 'b', 'c', 'd'],
-              retinaMode: RetinaMode.isHighDensity(context),
-              userAgentPackageName: 'de.chuk.besserebahn',
-              tileProvider: TileCache.provider(),
-              maxZoom: 20,
-            ),
+            TileCache.outdoorLayer(),
             if (_userFix != null) ...[
               PolylineLayer(
                 polylines: [

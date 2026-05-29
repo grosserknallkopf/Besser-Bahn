@@ -58,4 +58,24 @@ class TileCache {
     }
     return NetworkTileProvider(headers: headers ?? const {});
   }
+
+  /// German OpenStreetMap tiles (`tile.openstreetmap.de`) — the OSM standard
+  /// style rendered with German labels (`name:de`), so place names read
+  /// "München", "Köln", … instead of international/English forms. No API key.
+  /// No retina (`{r}`) variant exists on this server, so we upscale tiles past
+  /// the native max instead.
+  static const String outdoorTileUrl =
+      'https://{s}.tile.openstreetmap.de/{z}/{x}/{y}.png';
+
+  /// The shared outdoor base layer (German OSM), cached on disk. Used by every
+  /// outdoor map (route, departures, station fallback) so the style/source lives
+  /// in one place.
+  static TileLayer outdoorLayer() => TileLayer(
+        urlTemplate: outdoorTileUrl,
+        subdomains: const ['a', 'b', 'c'],
+        userAgentPackageName: 'de.chuk.besserebahn',
+        tileProvider: provider(),
+        maxNativeZoom: 18, // osm.de serves to ~18; flutter_map upscales above
+        maxZoom: 20,
+      );
 }
