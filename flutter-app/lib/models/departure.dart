@@ -131,6 +131,20 @@ class TransitLine {
     return '$label ($nr)';
   }
 
+  /// Just the line's running number/identifier, with the product prefix
+  /// stripped — "RE7" → "7", "ICE 571" → "571", "S 1" → "1". Used next to the
+  /// product badge so the product ("RE") isn't shown twice. Falls back to the
+  /// full label/number when there's no alphabetic prefix to strip.
+  String get lineNumber {
+    final n = name.trim();
+    if (n.isNotEmpty) {
+      final m = RegExp(r'^[A-Za-zÄÖÜäöü]+\s*(.+)$').firstMatch(n);
+      if (m != null) return m.group(1)!.trim();
+      return n;
+    }
+    return fahrtNr;
+  }
+
   /// Same line but with a different label (the real line, e.g. "RE7"), carried
   /// over from a departure/leg into a freshly fetched trip whose API omits it.
   TransitLine withName(String newName) => TransitLine(

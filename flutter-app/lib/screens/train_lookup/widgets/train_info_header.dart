@@ -66,9 +66,11 @@ class TrainInfoHeader extends StatelessWidget {
                 _productBadge(context, trip.line.productName),
                 const SizedBox(width: 8),
                 Expanded(
+                  // Product lives in the badge; show only the line number after
+                  // it (no repeated "RE", no parenthesised train number).
                   child: Text(
-                    trip.line.titleWithNumber,
-                    style: theme.textTheme.titleLarge
+                    trip.line.lineNumber,
+                    style: theme.textTheme.titleMedium
                         ?.copyWith(fontWeight: FontWeight.bold),
                   ),
                 ),

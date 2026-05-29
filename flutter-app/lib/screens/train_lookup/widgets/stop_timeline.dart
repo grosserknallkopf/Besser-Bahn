@@ -267,8 +267,10 @@ class _StopTimelineState extends State<StopTimeline> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         child: Row(
           children: [
-            // align under the timeline dots
-            const SizedBox(width: 48 + 12),
+            // Match the stop rows: spine (52) + gap (12) puts the expander icon
+            // on the timeline axis, and the label lines up with the stop names.
+            const SizedBox(width: 52),
+            const SizedBox(width: 12),
             SizedBox(
               width: 20,
               child: Icon(

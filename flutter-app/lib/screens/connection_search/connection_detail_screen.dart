@@ -52,6 +52,25 @@ class _ConnectionDetailScreenState
   late Journey _journey = widget.journey;
   Journey get journey => _journey;
 
+  /// Bumped on pull-to-refresh — part of each leg section's key, so bumping it
+  /// rebuilds them fresh and re-triggers their trip fetch.
+  int _refreshTick = 0;
+
+  /// Pull-to-refresh: drop cached trips for this journey and rebuild the leg
+  /// sections so every leg re-fetches its live data.
+  Future<void> _refreshAll() async {
+    for (final leg in journey.legs) {
+      final id = leg.tripId;
+      if (id != null) {
+        _tripCache.remove(id);
+        _coachCache.remove(id);
+      }
+    }
+    if (mounted) setState(() => _refreshTick++);
+    // Keep the spinner up briefly while the rebuilt sections kick off fetches.
+    await Future.delayed(const Duration(milliseconds: 600));
+  }
+
   /// Swap leg [index] for [newLeg] picked from "Weitere Abfahrten".
   void _replaceLeg(int index, JourneyLeg newLeg) {
     final legs = List<JourneyLeg>.of(_journey.legs);
@@ -87,15 +106,35 @@ class _ConnectionDetailScreenState
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
-          IconButton(
+          // Teilen + Öffnen folded into one button → a small menu asks which.
+          PopupMenuButton<int>(
             icon: const Icon(Icons.ios_share),
-            tooltip: 'Reise teilen',
-            onPressed: () => _shareJourney(context, ref),
-          ),
-          IconButton(
-            icon: const Icon(Icons.open_in_new),
-            tooltip: 'Auf bahn.de öffnen / buchen',
-            onPressed: () => _openOnBahn(context, ref),
+            tooltip: 'Teilen / Öffnen',
+            onSelected: (v) {
+              if (v == 0) {
+                _shareJourney(context, ref);
+              } else {
+                _openOnBahn(context, ref);
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: 0,
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.ios_share),
+                  title: Text('Reise teilen'),
+                ),
+              ),
+              PopupMenuItem(
+                value: 1,
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.open_in_new),
+                  title: Text('Auf bahn.de öffnen'),
+                ),
+              ),
+            ],
           ),
           IconButton(
             icon: const Icon(Icons.call_split),
@@ -123,8 +162,15 @@ class _ConnectionDetailScreenState
           }),
         ],
       ),
-      body: ListView(
+      body: RefreshIndicator(
+        // Pull down → drop every cached trip for this journey and rebuild the
+        // leg sections fresh (new keys), so all live data re-fetches.
+        onRefresh: _refreshAll,
+        child: ListView(
         padding: const EdgeInsets.only(bottom: 32),
+        // Always scrollable so the pull-to-refresh gesture works even when the
+        // content is short.
+        physics: const AlwaysScrollableScrollPhysics(),
         children: [
           _summary(context),
           for (var i = 0; i < legs.length; i++) ...[
@@ -135,6 +181,7 @@ class _ConnectionDetailScreenState
                   i + 1 < legs.length ? legs[i + 1] : null)
             else
               _LegSection(
+                key: ValueKey('leg-$i-${legs[i].tripId}-$_refreshTick'),
                 leg: legs[i],
                 index: i,
                 nextTransitLeg: _nextTransitLeg(legs, i),
@@ -147,6 +194,7 @@ class _ConnectionDetailScreenState
               ),
           ],
         ],
+        ),
       ),
     );
   }
@@ -671,6 +719,7 @@ class _LegSection extends ConsumerStatefulWidget {
   final JourneyLeg? nextTransitLeg;
 
   const _LegSection({
+    super.key,
     required this.leg,
     required this.index,
     this.onTripUpdated,
