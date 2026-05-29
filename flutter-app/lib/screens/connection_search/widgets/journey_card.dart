@@ -233,81 +233,95 @@ class JourneyCard extends ConsumerWidget {
     );
   }
 
-  /// Trains shown the way the DB app does it: one block per leg — a coloured
-  /// line pill with the expected occupancy "Männchen" and the leg duration
-  /// underneath it. Blocks wrap, so 1–4 trains all stay readable; no fill bars,
-  /// no duplicated labels.
+  /// Proportional length comparison: each train is a coloured segment whose
+  /// WIDTH ∝ time spent on it (RE70 longer than IC, etc.). The line name sits
+  /// inside the segment; the occupancy "Männchen" and the % sit underneath it.
+  /// No arrows, no separate legend — one aligned structure.
   Widget _legLengthBar(BuildContext context, List<JourneyLeg> legs) {
     if (legs.isEmpty) return const SizedBox.shrink();
-    return Wrap(
-      spacing: 10,
-      runSpacing: 8,
-      crossAxisAlignment: WrapCrossAlignment.start,
+    int legMinutes(JourneyLeg l) {
+      final d = l.departure ?? l.plannedDeparture;
+      final a = l.arrival ?? l.plannedArrival;
+      if (d != null && a != null) {
+        final m = a.difference(d).inMinutes;
+        if (m > 0) return m;
+      }
+      return 1;
+    }
+
+    final mins = legs.map(legMinutes).toList();
+    final total = mins.fold<int>(0, (s, m) => s + m);
+    if (total <= 0) return const SizedBox.shrink();
+    final multi = legs.length > 1;
+    // Floor so even a short leg keeps enough width for its line label.
+    final minFlex = (total * 0.16).round().clamp(1, total);
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         for (var i = 0; i < legs.length; i++) ...[
-          if (i > 0)
-            Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: Icon(Icons.chevron_right,
-                  size: 16, color: Theme.of(context).colorScheme.onSurfaceVariant),
+          if (i > 0) const SizedBox(width: 4),
+          Expanded(
+            flex: mins[i] < minFlex ? minFlex : mins[i],
+            child: _legSegment(
+              context,
+              legs[i].line?.displayName ?? '–',
+              _productColor(context, legs[i]),
+              legs[i].occupancy?.level,
+              multi ? (mins[i] / total * 100).round() : null,
             ),
-          _legBlock(context, legs[i]),
+          ),
         ],
       ],
     );
   }
 
-  Widget _legBlock(BuildContext context, JourneyLeg leg) {
+  Widget _legSegment(BuildContext context, String label, Color color,
+      OccupancyLevel? occupancy, int? percent) {
     final theme = Theme.of(context);
-    final color = _productColor(context, leg);
-    final label = leg.line?.displayName ?? '–';
-    final occ = leg.occupancy?.level;
     return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Bigger line pill.
+        // Proportional coloured segment with the line name inside.
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+          height: 26,
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 4),
           decoration: BoxDecoration(
-            color: color.withAlpha(28),
-            border: Border.all(color: color.withAlpha(150)),
-            borderRadius: BorderRadius.circular(7),
+            color: color,
+            borderRadius: BorderRadius.circular(6),
           ),
-          child: Text(
-            label,
-            style: TextStyle(
-                fontSize: 13, fontWeight: FontWeight.w700, color: color),
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              label,
+              maxLines: 1,
+              style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white),
+            ),
           ),
         ),
-        const SizedBox(height: 3),
-        // Occupancy "Männchen" directly under the name.
-        if (occ != null && occ != OccupancyLevel.unknown)
-          OccupancyIndicator(level: occ),
-        // Leg duration as the per-train length cue (no bars).
-        Builder(builder: (_) {
-          final dur = _legDuration(leg);
-          if (dur == null) return const SizedBox.shrink();
-          return Padding(
+        // Occupancy "Männchen" under the name.
+        if (occupancy != null && occupancy != OccupancyLevel.unknown)
+          Padding(
+            padding: const EdgeInsets.only(top: 3),
+            child: Center(child: OccupancyIndicator(level: occupancy)),
+          ),
+        // Proportional share, underneath.
+        if (percent != null)
+          Padding(
             padding: const EdgeInsets.only(top: 1),
-            child: Text(dur,
-                style: TextStyle(
-                    fontSize: 10, color: theme.colorScheme.onSurfaceVariant)),
-          );
-        }),
+            child: Text(
+              '$percent%',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                  fontSize: 10, color: theme.colorScheme.onSurfaceVariant),
+            ),
+          ),
       ],
     );
-  }
-
-  /// "1h 20" / "45 min" for a single leg, or null if times are missing.
-  String? _legDuration(JourneyLeg leg) {
-    final d = leg.departure ?? leg.plannedDeparture;
-    final a = leg.arrival ?? leg.plannedArrival;
-    if (d == null || a == null) return null;
-    final m = a.difference(d).inMinutes;
-    if (m <= 0) return null;
-    final h = m ~/ 60, mm = m % 60;
-    return h > 0 ? '${h}h ${mm.toString().padLeft(2, '0')}' : '$mm min';
   }
 
   /// Colour per train product, so segments are visually distinct.

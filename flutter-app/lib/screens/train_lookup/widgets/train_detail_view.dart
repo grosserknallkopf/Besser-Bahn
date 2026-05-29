@@ -34,6 +34,10 @@ class TrainDetailView extends ConsumerStatefulWidget {
   /// connection view passes its compact "Weitere Abfahrten" button here).
   final Widget? headerAction;
 
+  /// Per-train reliability strip (Anschluss/Pünktlichkeit for this leg), shown
+  /// in the inline train block. Only the connection leg view passes it.
+  final Widget? predictionStrip;
+
   const TrainDetailView({
     super.key,
     required this.trip,
@@ -42,6 +46,7 @@ class TrainDetailView extends ConsumerStatefulWidget {
     this.boardingId,
     this.alightingId,
     this.headerAction,
+    this.predictionStrip,
   });
 
   @override
@@ -89,21 +94,29 @@ class _TrainDetailViewState extends ConsumerState<TrainDetailView> {
           )
         : null;
 
+    // A leg of a connection (vs. a standalone train lookup) when an endpoint is
+    // set — then the train header folds inline onto the route spine.
+    final isLeg = widget.boardingId != null || widget.alightingId != null;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         // One block: train name/info folded into the same card as the Halte
-        // timeline (the duplicate origin→destination times are gone).
+        // timeline (the duplicate origin→destination times are gone). On a leg,
+        // the header renders inline on the route line (DB-Navigator style).
         StopTimeline(
           stopovers: trip.stopovers,
           onStopTap: widget.onStopTap,
           boardingId: widget.boardingId,
           alightingId: widget.alightingId,
           legAmenities: _legAmenities(trip, widget.coach),
+          inlineHeader: true,
           header: TrainInfoHeader(
             trip: trip,
             action: widget.headerAction,
             embedded: true,
+            padding: isLeg ? EdgeInsets.zero : null,
+            predictionStrip: isLeg ? widget.predictionStrip : null,
           ),
         ),
         if (widget.coach != null)

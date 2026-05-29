@@ -34,6 +34,12 @@ class StopTimeline extends StatefulWidget {
   /// embedded in a shared card.
   final bool embedded;
 
+  /// When true *and* this is a leg (boarding/alighting resolved), the [header]
+  /// content renders inline on the route spine between the board and alight
+  /// stops (DB-Navigator style) instead of above a "Halte" title. No effect on
+  /// the standalone train view (no endpoints → not a leg).
+  final bool inlineHeader;
+
   const StopTimeline({
     super.key,
     required this.stopovers,
@@ -43,6 +49,7 @@ class StopTimeline extends StatefulWidget {
     this.legAmenities = const [],
     this.header,
     this.embedded = false,
+    this.inlineHeader = false,
   });
 
   @override
@@ -86,6 +93,13 @@ class _StopTimelineState extends State<StopTimeline> {
 
     final beforeCount = board;
     final afterCount = stops.length - 1 - alight;
+    final middleCount = alight - board - 1;
+
+    // DB-Navigator-style leg view: fold the train header inline onto the route
+    // spine between the board and alight stops (no top header / "Halte" title).
+    // Requires a real leg with a header and a board→alight span.
+    final useInline =
+        widget.inlineHeader && isLeg && widget.header != null && alight > board;
 
     final rows = <Widget>[];
 
@@ -107,57 +121,60 @@ class _StopTimelineState extends State<StopTimeline> {
       }
     }
 
-    // --- the ridden segment -----------------------------------------------
-    // Endpoints (board, alight) are always shown. On a journey leg the stops
-    // between them collapse behind a "N Zwischenhalte" header; on a standalone
-    // train lookup every stop stays visible.
-    final middleCount = alight - board - 1;
-    final collapseMiddle = isLeg && middleCount > 0;
-
-    if (collapseMiddle) {
-      // Leg duration (board departure → alight arrival), shown on the spine of
-      // the collapsed middle so the gap still carries information.
-      final depT =
-          stops[board].departure ?? stops[board].plannedDeparture;
-      final arrT =
-          stops[alight].arrival ?? stops[alight].plannedArrival;
-      String? legDur;
-      if (depT != null && arrT != null) {
-        final d = arrT.difference(depT);
-        if (!d.isNegative) {
-          final h = d.inHours;
-          final m = d.inMinutes % 60;
-          legDur = h > 0 ? '${h}h ${m}min' : '${m}min';
-        }
-      }
-      // board endpoint
+    if (useInline) {
+      // board endpoint (big Gleis) → train card on the spine → (expanded
+      // intermediate stops) → alight endpoint (big Gleis).
       rows.add(_stopRow(board, board, alight,
           hasTop: beforeCount > 0 && _expandedBefore, hasBottom: true));
-      // collapsible middle — continuous spine line + duration
-      rows.add(_middleHeader(
+      rows.add(_inlineTrainBlock(
         context,
-        expanded: _expandedMiddle,
-        count: middleCount,
-        duration: legDur,
-        onTap: () => setState(() => _expandedMiddle = !_expandedMiddle),
+        middleCount: middleCount,
+        duration: _legDuration(stops, board, alight),
+        expandable: middleCount > 0,
       ));
-      if (_expandedMiddle) {
+      if (_expandedMiddle && middleCount > 0) {
         for (var i = board + 1; i < alight; i++) {
           rows.add(_stopRow(i, board, alight, hasTop: true, hasBottom: true));
         }
       }
-      // alight endpoint
       rows.add(_stopRow(alight, board, alight,
           hasTop: true, hasBottom: afterCount > 0));
     } else {
-      for (var i = board; i <= alight; i++) {
-        rows.add(_stopRow(
-          i,
-          board,
-          alight,
-          hasTop: i != board || (beforeCount > 0 && _expandedBefore),
-          hasBottom: i != alight || (afterCount > 0),
+      // --- the ridden segment (header-on-top layout) ----------------------
+      // Endpoints (board, alight) are always shown. On a journey leg the stops
+      // between them collapse behind a "N Zwischenhalte" header; on a standalone
+      // train lookup every stop stays visible.
+      final collapseMiddle = isLeg && middleCount > 0;
+      if (collapseMiddle) {
+        // board endpoint
+        rows.add(_stopRow(board, board, alight,
+            hasTop: beforeCount > 0 && _expandedBefore, hasBottom: true));
+        // collapsible middle — continuous spine line + duration
+        rows.add(_middleHeader(
+          context,
+          expanded: _expandedMiddle,
+          count: middleCount,
+          duration: _legDuration(stops, board, alight),
+          onTap: () => setState(() => _expandedMiddle = !_expandedMiddle),
         ));
+        if (_expandedMiddle) {
+          for (var i = board + 1; i < alight; i++) {
+            rows.add(_stopRow(i, board, alight, hasTop: true, hasBottom: true));
+          }
+        }
+        // alight endpoint
+        rows.add(_stopRow(alight, board, alight,
+            hasTop: true, hasBottom: afterCount > 0));
+      } else {
+        for (var i = board; i <= alight; i++) {
+          rows.add(_stopRow(
+            i,
+            board,
+            alight,
+            hasTop: i != board || (beforeCount > 0 && _expandedBefore),
+            hasBottom: i != alight || (afterCount > 0),
+          ));
+        }
       }
     }
 
@@ -183,20 +200,22 @@ class _StopTimelineState extends State<StopTimeline> {
     final body = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (widget.header != null) ...[
-          widget.header!,
-          const Divider(height: 1),
-        ],
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-          child: Text(
-            'Halte',
-            style: Theme.of(context)
-                .textTheme
-                .titleSmall
-                ?.copyWith(fontWeight: FontWeight.bold),
+        if (!useInline) ...[
+          if (widget.header != null) ...[
+            widget.header!,
+            const Divider(height: 1),
+          ],
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+            child: Text(
+              'Halte',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleSmall
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
           ),
-        ),
+        ],
         ...rows,
       ],
     );
@@ -385,6 +404,144 @@ class _StopTimelineState extends State<StopTimeline> {
       ),
     );
   }
+
+  /// Leg duration "Xh Ymin" / "Ymin" from board departure to alight arrival.
+  String? _legDuration(List<Stopover> stops, int board, int alight) {
+    final depT = stops[board].departure ?? stops[board].plannedDeparture;
+    final arrT = stops[alight].arrival ?? stops[alight].plannedArrival;
+    if (depT == null || arrT == null) return null;
+    final d = arrT.difference(depT);
+    if (d.isNegative) return null;
+    final h = d.inHours;
+    final m = d.inMinutes % 60;
+    return h > 0 ? '${h}h ${m}min' : '${m}min';
+  }
+
+  /// The train card rendered inline on the route spine (DB-Navigator style),
+  /// sitting between the board and alight endpoints with a continuous line. Holds
+  /// the train header (line, direction, per-train prediction, occupancy, action)
+  /// and — when the leg has intermediate stops — the "N Zwischenhalte" expander
+  /// (reusing [_expandedMiddle]) plus the leg-wide amenities.
+  Widget _inlineTrainBlock(BuildContext context,
+      {required int middleCount,
+      required String? duration,
+      required bool expandable}) {
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
+    final lineColor = primary.withAlpha(60);
+    final amenities = widget.legAmenities;
+    final expanded = _expandedMiddle;
+    return InkWell(
+      onTap: expandable
+          ? () => setState(() => _expandedMiddle = !_expandedMiddle)
+          : null,
+      child: IntrinsicHeight(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // spine gutter: leg duration, centred against the train card
+              SizedBox(
+                width: 52,
+                child: duration == null
+                    ? const SizedBox.shrink()
+                    : Center(
+                        child: Text(
+                          duration,
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+              ),
+              const SizedBox(width: 12),
+              // continuous timeline line joining the board dot to the alight dot
+              SizedBox(
+                width: 20,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [Container(width: 2, color: lineColor)],
+                ),
+              ),
+              const SizedBox(width: 12),
+              // content: train header + (optional) Zwischenhalte expander + amenities
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (widget.header != null) widget.header!,
+                      if (expandable) ...[
+                        const SizedBox(height: 12),
+                        Row(
+                          children: [
+                            Icon(
+                                expanded
+                                    ? Icons.unfold_less
+                                    : Icons.more_horiz,
+                                size: 18,
+                                color: primary),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                '$middleCount ${middleCount == 1 ? 'Zwischenhalt' : 'Zwischenhalte'}'
+                                '${expanded ? ' ausblenden' : ' anzeigen'}',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: primary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ),
+                            Icon(
+                                expanded
+                                    ? Icons.expand_less
+                                    : Icons.expand_more,
+                                size: 18,
+                                color: primary),
+                          ],
+                        ),
+                      ],
+                      if (amenities.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 14,
+                          runSpacing: 6,
+                          children: [
+                            for (final a in amenities)
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(a.icon,
+                                      size: 15,
+                                      color:
+                                          theme.colorScheme.onSurfaceVariant),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    a.label,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                        color: theme
+                                            .colorScheme.onSurfaceVariant),
+                                  ),
+                                ],
+                              ),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _StopRow extends StatelessWidget {
@@ -524,7 +681,7 @@ class _StopRow extends StatelessWidget {
                         if (stopover.platform != null ||
                             stopover.plannedPlatform != null) ...[
                           const SizedBox(width: 8),
-                          _platformChip(context),
+                          _platformChip(context, big: emphasize),
                         ],
                       ],
                     ),
@@ -585,8 +742,10 @@ class _StopRow extends StatelessWidget {
   }
 
   /// Gleis chip, right-aligned on the station-name line. Blue outline normally;
-  /// red outline + struck-through old platform when the Gleis changed.
-  Widget _platformChip(BuildContext context) {
+  /// red outline + struck-through old platform when the Gleis changed. [big]
+  /// scales it up for leg endpoints (Einstieg/Ausstieg) — the platform is the
+  /// single most-looked-for fact, so it gets a prominent badge there.
+  Widget _platformChip(BuildContext context, {bool big = false}) {
     final theme = Theme.of(context);
     final display = stopover.platform ?? stopover.plannedPlatform;
     if (display == null || display.isEmpty) return const SizedBox.shrink();
@@ -595,39 +754,42 @@ class _StopRow extends StatelessWidget {
         stopover.platform != stopover.plannedPlatform;
     final color = changed ? Colors.red : Colors.blue;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      padding: big
+          ? const EdgeInsets.symmetric(horizontal: 10, vertical: 6)
+          : const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: color.withAlpha(muted ? 120 : 200)),
+        borderRadius: BorderRadius.circular(big ? 8 : 6),
+        border: Border.all(
+            color: color.withAlpha(muted ? 120 : 200), width: big ? 1.5 : 1),
         color: color.withAlpha(20),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           TrackIcon(
-              size: 13,
+              size: big ? 18 : 13,
               color: changed
                   ? Colors.red
                   : (muted
                       ? theme.colorScheme.onSurfaceVariant
                       : color)),
-          const SizedBox(width: 3),
+          SizedBox(width: big ? 5 : 3),
           if (changed && stopover.plannedPlatform != null) ...[
             Text(
               stopover.plannedPlatform!,
               style: TextStyle(
-                fontSize: 11,
+                fontSize: big ? 13 : 11,
                 color: theme.colorScheme.onSurfaceVariant,
                 decoration: TextDecoration.lineThrough,
               ),
             ),
-            const SizedBox(width: 4),
+            SizedBox(width: big ? 5 : 4),
           ],
           Text(
             display,
             style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
+              fontSize: big ? 18 : 12,
+              fontWeight: big ? FontWeight.w800 : FontWeight.w700,
               color: changed
                   ? Colors.red
                   : (muted

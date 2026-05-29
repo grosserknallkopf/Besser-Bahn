@@ -106,7 +106,8 @@ Color predictionScoreColor(BuildContext context, double score) {
   return Theme.of(context).colorScheme.error;
 }
 
-/// A single horizontal reliability pill: "<icon> <label> <pct>%", colour-coded.
+/// A single horizontal reliability pill: icon, label and percentage,
+/// colour-coded by score.
 class PredictionPill extends StatelessWidget {
   final IconData icon;
   final String label;

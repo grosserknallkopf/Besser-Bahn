@@ -66,6 +66,14 @@ class _ConnectionDetailScreenState
     );
   }
 
+  /// First non-walking leg after [i], or null — the train this leg connects to.
+  JourneyLeg? _nextTransitLeg(List<JourneyLeg> legs, int i) {
+    for (var j = i + 1; j < legs.length; j++) {
+      if (!legs[j].isWalking) return legs[j];
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     final legs = journey.legs;
@@ -127,6 +135,7 @@ class _ConnectionDetailScreenState
               _LegSection(
                 leg: legs[i],
                 index: i,
+                nextTransitLeg: _nextTransitLeg(legs, i),
                 // A fresh trip fetch carries live delays → recompute the
                 // transfer windows above so a shrunk gap shows immediately.
                 onTripUpdated: () {
@@ -641,11 +650,16 @@ class _LegSection extends ConsumerStatefulWidget {
   /// the replace action.
   final void Function(int index, JourneyLeg newLeg)? onReplaceLeg;
 
+  /// The next transit leg after this one (skipping walks), if any — used to
+  /// score this leg's Anschluss (probability of catching the following train).
+  final JourneyLeg? nextTransitLeg;
+
   const _LegSection({
     required this.leg,
     required this.index,
     this.onTripUpdated,
     this.onReplaceLeg,
+    this.nextTransitLeg,
   });
 
   @override
@@ -806,6 +820,9 @@ class _LegSectionState extends ConsumerState<_LegSection>
             : leg.destination.name,
         headerAction: (!leg.isWalking && leg.line != null)
             ? WeitereAbfahrtenButton(onTap: _openAlternatives)
+            : null,
+        predictionStrip: (!leg.isWalking && leg.line != null)
+            ? LegPredictionBadge(leg: leg, nextLeg: widget.nextTransitLeg)
             : null,
       );
     }
