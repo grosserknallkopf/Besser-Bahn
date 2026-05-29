@@ -145,6 +145,16 @@ class TransitLine {
     return fahrtNr;
   }
 
+  /// Line number with the official train number in parentheses when it adds
+  /// info — "7 (11281)". Product stays in the badge; this is what sits next to
+  /// it. Collapses to the bare number when the fahrtNr is the same or absent.
+  String get lineNumberWithFahrt {
+    final base = lineNumber;
+    final nr = fahrtNr.trim();
+    if (nr.isEmpty || base == nr || base.contains(nr)) return base;
+    return '$base ($nr)';
+  }
+
   /// Same line but with a different label (the real line, e.g. "RE7"), carried
   /// over from a departure/leg into a freshly fetched trip whose API omits it.
   TransitLine withName(String newName) => TransitLine(
