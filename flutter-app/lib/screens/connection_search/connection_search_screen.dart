@@ -175,15 +175,29 @@ class _ConnectionSearchScreenState
                                 contentPadding: EdgeInsets.symmetric(
                                     horizontal: 8, vertical: 8),
                               ),
-                              child: Align(
-                                alignment: Alignment.centerLeft,
-                                child: Text(
-                                  state.dateTime != null
-                                      ? DateFormat('dd.MM. HH:mm')
-                                          .format(state.dateTime!)
-                                      : 'Jetzt',
-                                  style: theme.textTheme.bodyMedium,
-                                ),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      state.dateTime != null
+                                          ? DateFormat('dd.MM. HH:mm')
+                                              .format(state.dateTime!)
+                                          : 'Jetzt',
+                                      style: theme.textTheme.bodyMedium,
+                                    ),
+                                  ),
+                                  // Once a time is picked, offer a quick way
+                                  // back to "Jetzt" (which also drops An→Ab).
+                                  if (state.dateTime != null)
+                                    InkWell(
+                                      onTap: notifier.resetToNow,
+                                      borderRadius: BorderRadius.circular(12),
+                                      child: const Padding(
+                                        padding: EdgeInsets.all(2),
+                                        child: Icon(Icons.close, size: 18),
+                                      ),
+                                    ),
+                                ],
                               ),
                             ),
                           ),
@@ -196,11 +210,17 @@ class _ConnectionSearchScreenState
                             tapTargetSize:
                                 MaterialTapTargetSize.shrinkWrap,
                           ),
-                          segments: const [
-                            ButtonSegment(value: false, label: Text('Ab')),
-                            ButtonSegment(value: true, label: Text('An')),
+                          segments: [
+                            const ButtonSegment(
+                                value: false, label: Text('Ab')),
+                            // "An" (arrival) needs a fixed time — disabled on
+                            // "Jetzt", where only a departure search applies.
+                            ButtonSegment(
+                                value: true,
+                                label: const Text('An'),
+                                enabled: state.dateTime != null),
                           ],
-                          selected: {state.isArrival},
+                          selected: {state.useArrival},
                           onSelectionChanged: (v) =>
                               notifier.setIsArrival(v.first),
                         ),

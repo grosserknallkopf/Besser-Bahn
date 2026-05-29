@@ -28,6 +28,11 @@ class JourneySearchState {
     this.sortMode = JourneySortMode.departure,
   });
 
+  /// Whether the search should be by arrival. Only meaningful with a chosen
+  /// time — "arrive now" is nonsense, so "Jetzt" (no time) always means
+  /// departure regardless of the toggle's last value.
+  bool get useArrival => dateTime != null && isArrival;
+
   JourneySearchState copyWith({
     Station? from,
     Station? to,
@@ -37,11 +42,12 @@ class JourneySearchState {
     bool? isLoading,
     String? error,
     JourneySortMode? sortMode,
+    bool clearDateTime = false,
   }) {
     return JourneySearchState(
       from: from ?? this.from,
       to: to ?? this.to,
-      dateTime: dateTime ?? this.dateTime,
+      dateTime: clearDateTime ? null : (dateTime ?? this.dateTime),
       isArrival: isArrival ?? this.isArrival,
       result: result ?? this.result,
       isLoading: isLoading ?? this.isLoading,
@@ -78,6 +84,11 @@ class JourneySearchNotifier extends Notifier<JourneySearchState> {
   void setTo(Station? station) => state = state.copyWith(to: station);
   void setDateTime(DateTime? dt) => state = state.copyWith(dateTime: dt);
   void setIsArrival(bool val) => state = state.copyWith(isArrival: val);
+
+  /// Back to "Jetzt": clear the chosen time and fall back to departure (an
+  /// arrival search only makes sense with a fixed time).
+  void resetToNow() =>
+      state = state.copyWith(clearDateTime: true, isArrival: false);
   void setSortMode(JourneySortMode mode) =>
       state = state.copyWith(sortMode: mode);
 
@@ -126,7 +137,7 @@ class JourneySearchNotifier extends Notifier<JourneySearchState> {
 
       AppLog.log('search ${from.name} (${from.id}) → ${to.name} (${to.id}) '
           'at ${state.dateTime ?? "now"} '
-          '${state.isArrival ? "[arrival]" : "[departure]"}', tag: 'journey');
+          '${state.useArrival ? "[arrival]" : "[departure]"}', tag: 'journey');
 
       // DB Vendo (DB Navigator backend) is the only working journey source:
       // it returns journeys WITH prices and is not Akamai-gated. The old
@@ -139,7 +150,7 @@ class JourneySearchNotifier extends Notifier<JourneySearchState> {
         fromLocationId: from.vendoLocationId,
         toLocationId: to.vendoLocationId,
         dateTime: state.dateTime ?? DateTime.now(),
-        isArrival: state.isArrival,
+        isArrival: state.useArrival,
         firstClass: settings.bahnCard.isFirstClass,
         ermaessigung: settings.bahnCard.vendoErmaessigung,
         deutschlandTicket: settings.hasDeutschlandTicket,
@@ -173,7 +184,7 @@ class JourneySearchNotifier extends Notifier<JourneySearchState> {
         fromLocationId: state.from!.vendoLocationId,
         toLocationId: state.to!.vendoLocationId,
         dateTime: state.dateTime ?? DateTime.now(),
-        isArrival: state.isArrival,
+        isArrival: state.useArrival,
         context: token,
         firstClass: settings.bahnCard.isFirstClass,
         ermaessigung: settings.bahnCard.vendoErmaessigung,
