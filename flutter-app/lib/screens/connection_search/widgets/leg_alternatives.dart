@@ -76,9 +76,25 @@ class _LegAlternativesState extends ConsumerState<LegAlternatives> {
   }
 
   /// Open the tapped alternative's full Zugdetails (same view as the train tab).
+  ///
+  /// The alternative already carries its `tripId`, so we open it directly —
+  /// never via a by-number search, which (when scoped to a station) always
+  /// pops the "pick a departure" list and would make the user re-enter info we
+  /// already have.
   void _open(Journey alt) {
     final l = alt.legs.firstOrNull;
     if (l == null) return;
+    final tripId = l.tripId;
+    if (tripId != null && tripId.isNotEmpty) {
+      ref.read(trainLookupProvider.notifier).lookupByTripId(
+            tripId,
+            lineLabel: l.line?.displayName,
+          );
+      context.push('/train-run');
+      return;
+    }
+    // No tripId (shouldn't happen for a real departure) → fall back to the
+    // by-number lookup so the train is still reachable.
     final number = (l.line?.fahrtNr.isNotEmpty ?? false)
         ? l.line!.fahrtNr
         : l.line?.displayName ?? '';
