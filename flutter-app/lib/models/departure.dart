@@ -87,6 +87,22 @@ class TransitLine {
     );
   }
 
+  Map<String, dynamic> toJson() => {
+        'name': name,
+        'fahrtNr': fahrtNr,
+        'productName': productName,
+        'product': product,
+        'operatorName': operatorName,
+      };
+
+  factory TransitLine.fromJson(Map<String, dynamic> json) => TransitLine(
+        name: json['name'] as String? ?? '',
+        fahrtNr: json['fahrtNr'] as String? ?? '',
+        productName: json['productName'] as String? ?? '',
+        product: json['product'] as String? ?? '',
+        operatorName: json['operatorName'] as String?,
+      );
+
   /// Returns short display name like "ICE 148" or "RE 1"
   String get displayName {
     if (name.isNotEmpty) return name;

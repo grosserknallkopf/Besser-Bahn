@@ -1,3 +1,4 @@
+import 'journey.dart';
 import 'station.dart';
 
 /// A station the user has searched for or starred. [pinned] means it shows in
@@ -93,5 +94,45 @@ class SavedTrain {
         query: json['query'] as String? ?? '',
         label: json['label'] as String? ?? '',
         fromStationId: json['fromStationId'] as String?,
+      );
+}
+
+/// A whole connection the user bookmarked from the search/detail view — the
+/// "Reisen" feature, like the official DB Navigator. We persist the full
+/// [Journey] (legs, times, prices) plus when it was saved, and re-fetch live
+/// data when opened. Trips whose arrival is in the past show under
+/// "Vergangene Reisen" and are auto-purged after a grace period.
+class SavedJourney {
+  final Journey journey;
+  final int savedAtMs;
+
+  const SavedJourney({required this.journey, required this.savedAtMs});
+
+  /// Stable identity: origin→destination at the planned departure minute.
+  /// Same train on the same day dedupes; tomorrow's run is its own entry.
+  String get key {
+    final dep = journey.plannedDeparture ?? journey.departure;
+    final stamp = dep?.toIso8601String().substring(0, 16) ?? '';
+    return '${journey.origin?.id ?? ''}_${journey.destination?.id ?? ''}_$stamp';
+  }
+
+  /// When the trip is considered over (its final arrival).
+  DateTime? get endTime => journey.arrival ?? journey.plannedArrival;
+
+  /// True once the connection's arrival lies in the past.
+  bool get isPast {
+    final end = endTime;
+    return end != null && end.isBefore(DateTime.now());
+  }
+
+  Map<String, dynamic> toJson() => {
+        'journey': journey.toJson(),
+        'savedAtMs': savedAtMs,
+      };
+
+  factory SavedJourney.fromJson(Map<String, dynamic> json) => SavedJourney(
+        journey:
+            Journey.fromJson(json['journey'] as Map<String, dynamic>? ?? {}),
+        savedAtMs: json['savedAtMs'] as int? ?? 0,
       );
 }

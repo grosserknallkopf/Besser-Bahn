@@ -17,6 +17,10 @@ class DepartureBoardState {
   final String? filterProduct; // null = all
   final BoardView view;
 
+  /// When the shown departures were last successfully fetched (silent refresh
+  /// included). Null until the first successful load.
+  final DateTime? lastUpdated;
+
   const DepartureBoardState({
     this.station,
     this.departures = const [],
@@ -25,6 +29,7 @@ class DepartureBoardState {
     this.mode = BoardMode.departures,
     this.filterProduct,
     this.view = BoardView.list,
+    this.lastUpdated,
   });
 
   DepartureBoardState copyWith({
@@ -36,6 +41,7 @@ class DepartureBoardState {
     String? filterProduct,
     bool clearFilter = false,
     BoardView? view,
+    DateTime? lastUpdated,
   }) {
     return DepartureBoardState(
       station: station ?? this.station,
@@ -45,6 +51,7 @@ class DepartureBoardState {
       mode: mode ?? this.mode,
       filterProduct: clearFilter ? null : (filterProduct ?? this.filterProduct),
       view: view ?? this.view,
+      lastUpdated: lastUpdated ?? this.lastUpdated,
     );
   }
 
@@ -86,19 +93,38 @@ class DepartureBoardNotifier extends Notifier<DepartureBoardState> {
     state = state.copyWith(isLoading: true, error: null);
 
     try {
-      final hafas = ref.read(hafasServiceProvider);
-      final List<Departure> results;
-
-      if (state.mode == BoardMode.departures) {
-        results = await hafas.getDepartures(station.id, duration: 120);
-      } else {
-        results = await hafas.getArrivals(station.id, duration: 120);
-      }
-
-      state = state.copyWith(departures: results, isLoading: false);
+      final results = await _fetch(station);
+      state = state.copyWith(
+        departures: results,
+        isLoading: false,
+        lastUpdated: DateTime.now(),
+      );
     } catch (e) {
       state = state.copyWith(error: 'Fehler: $e', isLoading: false);
     }
+  }
+
+  /// Background refresh: re-fetch the board WITHOUT a loading spinner and,
+  /// crucially, keep the currently shown departures if the fetch fails (offline
+  /// etc.). Used by the auto-refresh timer and pull-to-refresh so the screen
+  /// quietly stays up to date and never blanks out.
+  Future<void> refreshSilent() async {
+    final station = state.station;
+    if (station == null) return;
+    try {
+      final results = await _fetch(station);
+      // Success also clears any stale error from a previous failed load.
+      state = state.copyWith(departures: results, lastUpdated: DateTime.now());
+    } catch (_) {
+      // Offline / upstream hiccup → keep the old departures untouched.
+    }
+  }
+
+  Future<List<Departure>> _fetch(Station station) {
+    final hafas = ref.read(hafasServiceProvider);
+    return state.mode == BoardMode.departures
+        ? hafas.getDepartures(station.id, duration: 120)
+        : hafas.getArrivals(station.id, duration: 120);
   }
 }
 

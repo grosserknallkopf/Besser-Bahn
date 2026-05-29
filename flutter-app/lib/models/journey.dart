@@ -47,6 +47,23 @@ class Journey {
     );
   }
 
+  Map<String, dynamic> toJson() => {
+        'legs': legs.map((l) => l.toJson()).toList(),
+        'refreshToken': refreshToken,
+        'price': price?.toJson(),
+      };
+
+  factory Journey.fromJson(Map<String, dynamic> json) => Journey(
+        legs: (json['legs'] as List<dynamic>? ?? [])
+            .whereType<Map<String, dynamic>>()
+            .map(JourneyLeg.fromJson)
+            .toList(),
+        refreshToken: json['refreshToken'] as String?,
+        price: json['price'] is Map<String, dynamic>
+            ? JourneyPrice.fromJson(json['price'] as Map<String, dynamic>)
+            : null,
+      );
+
   Station? get origin => legs.firstOrNull?.origin;
   Station? get destination => legs.lastOrNull?.destination;
   DateTime? get departure => legs.firstOrNull?.departure;
@@ -172,6 +189,60 @@ class JourneyLeg {
           : null,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'tripId': tripId,
+        'origin': origin.toJson(),
+        'destination': destination.toJson(),
+        'departure': departure?.toIso8601String(),
+        'plannedDeparture': plannedDeparture?.toIso8601String(),
+        'departureDelay': departureDelay,
+        'departurePlatform': departurePlatform,
+        'plannedDeparturePlatform': plannedDeparturePlatform,
+        'arrival': arrival?.toIso8601String(),
+        'plannedArrival': plannedArrival?.toIso8601String(),
+        'arrivalDelay': arrivalDelay,
+        'arrivalPlatform': arrivalPlatform,
+        'plannedArrivalPlatform': plannedArrivalPlatform,
+        'line': line?.toJson(),
+        'direction': direction,
+        'walking': isWalking,
+        'distance': walkingDistance,
+        'cancelled': cancelled,
+        'stopovers': stopovers.map((s) => s.toJson()).toList(),
+        'occupancy': occupancy?.level.name,
+      };
+
+  factory JourneyLeg.fromJson(Map<String, dynamic> json) => JourneyLeg(
+        tripId: json['tripId'] as String?,
+        origin: Station.fromJson(json['origin'] as Map<String, dynamic>? ?? {}),
+        destination:
+            Station.fromJson(json['destination'] as Map<String, dynamic>? ?? {}),
+        departure: _parse(json['departure']),
+        plannedDeparture: _parse(json['plannedDeparture']),
+        departureDelay: json['departureDelay'] as int?,
+        departurePlatform: json['departurePlatform'] as String?,
+        plannedDeparturePlatform: json['plannedDeparturePlatform'] as String?,
+        arrival: _parse(json['arrival']),
+        plannedArrival: _parse(json['plannedArrival']),
+        arrivalDelay: json['arrivalDelay'] as int?,
+        arrivalPlatform: json['arrivalPlatform'] as String?,
+        plannedArrivalPlatform: json['plannedArrivalPlatform'] as String?,
+        line: json['line'] is Map<String, dynamic>
+            ? TransitLine.fromJson(json['line'] as Map<String, dynamic>)
+            : null,
+        direction: json['direction'] as String?,
+        isWalking: json['walking'] as bool? ?? false,
+        walkingDistance: json['distance'] as int?,
+        cancelled: json['cancelled'] as bool? ?? false,
+        stopovers: (json['stopovers'] as List<dynamic>? ?? [])
+            .whereType<Map<String, dynamic>>()
+            .map(LegStopover.fromJson)
+            .toList(),
+        occupancy: json['occupancy'] is String
+            ? OccupancyInfo(level: _levelByName(json['occupancy'] as String))
+            : null,
+      );
 }
 
 class LegStopover {
@@ -199,6 +270,22 @@ class LegStopover {
       departureDelay: json['departureDelay'] as int?,
     );
   }
+
+  Map<String, dynamic> toJson() => {
+        'stop': stop.toJson(),
+        'arrival': arrival?.toIso8601String(),
+        'departure': departure?.toIso8601String(),
+        'arrivalDelay': arrivalDelay,
+        'departureDelay': departureDelay,
+      };
+
+  factory LegStopover.fromJson(Map<String, dynamic> json) => LegStopover(
+        stop: Station.fromJson(json['stop'] as Map<String, dynamic>? ?? {}),
+        arrival: _parse(json['arrival']),
+        departure: _parse(json['departure']),
+        arrivalDelay: json['arrivalDelay'] as int?,
+        departureDelay: json['departureDelay'] as int?,
+      );
 }
 
 class JourneyPrice {
@@ -213,6 +300,8 @@ class JourneyPrice {
       currency: json['currency'] as String? ?? 'EUR',
     );
   }
+
+  Map<String, dynamic> toJson() => {'amount': amount, 'currency': currency};
 
   String get formatted => '${amount.toStringAsFixed(2)} €';
 }
@@ -245,6 +334,12 @@ enum OccupancyLevel {
     }
   }
 }
+
+/// Round-trips [OccupancyLevel] through its enum name.
+OccupancyLevel _levelByName(String name) => OccupancyLevel.values.firstWhere(
+      (l) => l.name == name,
+      orElse: () => OccupancyLevel.unknown,
+    );
 
 OccupancyLevel _parseLoadFactor(String factor) {
   switch (factor) {

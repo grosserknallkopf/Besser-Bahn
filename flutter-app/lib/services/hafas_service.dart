@@ -5,6 +5,7 @@ import '../core/constants.dart';
 import '../core/polyline_cache.dart';
 import '../models/station.dart';
 import '../models/departure.dart';
+import '../models/journey.dart' show OccupancyLevel;
 import '../models/trip.dart';
 import 'vendo_service.dart';
 
@@ -191,6 +192,27 @@ class HafasService {
     );
   }
 
+  /// DB `auslastungsmeldungen` (per stop) → 2nd-class [OccupancyLevel].
+  /// Shape: `[{klasse: KLASSE_2, stufe: 1}]`, stufe 1=gering … 4=sehr hoch.
+  OccupancyLevel _auslastung(List<dynamic>? infos) {
+    if (infos == null) return OccupancyLevel.unknown;
+    for (final i in infos.whereType<Map<String, dynamic>>()) {
+      if (i['klasse'] == 'KLASSE_2') {
+        switch (i['stufe'] as int?) {
+          case 1:
+            return OccupancyLevel.low;
+          case 2:
+            return OccupancyLevel.medium;
+          case 3:
+            return OccupancyLevel.high;
+          case 4:
+            return OccupancyLevel.veryHigh;
+        }
+      }
+    }
+    return OccupancyLevel.unknown;
+  }
+
   String _mapProduct(String gattung) {
     switch (gattung) {
       case 'ICE':
@@ -374,6 +396,8 @@ class HafasService {
         arrivalPlatform: h['gleis'] as String?,
         plannedArrivalPlatform: h['gleis'] as String?,
         cancelled: h['cancelled'] as bool? ?? false,
+        occupancy:
+            _auslastung(h['auslastungsmeldungen'] as List<dynamic>?),
       );
     }).toList();
 

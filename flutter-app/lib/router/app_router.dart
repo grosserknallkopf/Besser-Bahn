@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../screens/home/home_screen.dart';
+import '../screens/journeys/journeys_screen.dart';
 import '../screens/train_lookup/train_lookup_screen.dart';
 import '../screens/connection_search/connection_search_screen.dart';
 import '../screens/departure_board/departure_board_screen.dart';
@@ -40,6 +41,12 @@ final appRouter = GoRouter(
           ),
         ),
         GoRoute(
+          path: '/journeys',
+          pageBuilder: (context, state) => const NoTransitionPage(
+            child: JourneysScreen(),
+          ),
+        ),
+        GoRoute(
           path: '/departures',
           pageBuilder: (context, state) => const NoTransitionPage(
             child: DepartureBoardScreen(),
@@ -51,25 +58,24 @@ final appRouter = GoRouter(
             child: StationMapScreen(),
           ),
         ),
-        GoRoute(
-          path: '/split',
-          pageBuilder: (context, state) => const NoTransitionPage(
-            child: SplitTicketScreen(),
-          ),
-        ),
-        GoRoute(
-          path: '/settings',
-          pageBuilder: (context, state) => const NoTransitionPage(
-            child: SettingsScreen(),
-          ),
-        ),
-        GoRoute(
-          path: '/debug-log',
-          pageBuilder: (context, state) => const NoTransitionPage(
-            child: DebugLogScreen(),
-          ),
-        ),
       ],
+    ),
+    // Secondary destinations moved out of the bottom bar into the AppBar
+    // overflow menu — pushed on the root navigator so they get a back button.
+    GoRoute(
+      path: '/split',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (context, state) => const SplitTicketScreen(),
+    ),
+    GoRoute(
+      path: '/settings',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (context, state) => const SettingsScreen(),
+    ),
+    GoRoute(
+      path: '/debug-log',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (context, state) => const DebugLogScreen(),
     ),
     // Full-screen station map pushed from a journey/stop. Lives on the root
     // navigator (above the tab shell) so it gets a real back button, system

@@ -4,7 +4,9 @@ import 'package:go_router/go_router.dart';
 
 import '../../models/coach_sequence.dart';
 import '../../models/journey.dart';
+import '../../models/library_models.dart';
 import '../../models/trip.dart';
+import '../../providers/library_provider.dart';
 import '../../providers/service_providers.dart';
 import '../../providers/station_map_provider.dart';
 import '../../widgets/prediction_badge.dart';
@@ -34,6 +36,27 @@ class ConnectionDetailScreen extends ConsumerWidget {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
+        actions: [
+          Builder(builder: (context) {
+            final key =
+                SavedJourney(journey: journey, savedAtMs: 0).key;
+            final saved = ref.watch(libraryProvider).hasJourney(key);
+            return IconButton(
+              icon: Icon(saved ? Icons.bookmark : Icons.bookmark_border),
+              tooltip: saved ? 'Reise entfernen' : 'Reise speichern',
+              onPressed: () {
+                ref.read(libraryProvider.notifier).toggleJourney(journey);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    duration: const Duration(seconds: 2),
+                    content:
+                        Text(saved ? 'Reise entfernt' : 'Reise gespeichert'),
+                  ),
+                );
+              },
+            );
+          }),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.only(bottom: 32),

@@ -11,6 +11,7 @@ import '../../providers/station_map_provider.dart';
 import '../../services/location_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/bay_departures_sheet.dart';
+import '../../widgets/app_menu_button.dart';
 import '../../widgets/traewelling_avatar_button.dart';
 import '../../widgets/station_search_field.dart';
 
@@ -136,6 +137,7 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
       appBar: AppBar(
         title: Text(state.station?.name ?? 'Bahnhofskarte'),
         actions: [
+          const AppMenuButton(),
           const TraewellingAvatarButton(),
           if (map != null)
             IconButton(

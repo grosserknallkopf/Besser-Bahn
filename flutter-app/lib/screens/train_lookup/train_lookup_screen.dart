@@ -9,6 +9,8 @@ import '../../providers/station_map_provider.dart';
 import '../../providers/train_lookup_provider.dart';
 import '../../services/hafas_service.dart';
 import '../../core/extensions.dart';
+import '../../core/auto_refresh.dart';
+import '../../widgets/app_menu_button.dart';
 import '../../widgets/station_search_field.dart';
 import '../../widgets/traewelling_avatar_button.dart';
 import 'widgets/train_detail_view.dart';
@@ -72,6 +74,7 @@ class _TrainLookupScreenState extends ConsumerState<TrainLookupScreen> {
       appBar: AppBar(
         title: const Text('Zugnummer'),
         actions: [
+          const AppMenuButton(),
           const TraewellingAvatarButton(),
           if (state.trip != null)
             Builder(builder: (context) {

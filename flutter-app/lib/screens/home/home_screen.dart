@@ -9,11 +9,10 @@ class HomeScreen extends StatelessWidget {
   int _currentIndex(BuildContext context) {
     final location = GoRouterState.of(context).uri.path;
     if (location.startsWith('/search')) return 0;
-    if (location.startsWith('/train')) return 1;
-    if (location.startsWith('/departures')) return 2;
-    if (location.startsWith('/map')) return 3;
-    if (location.startsWith('/split')) return 4;
-    if (location.startsWith('/settings')) return 5;
+    if (location.startsWith('/journeys')) return 1;
+    if (location.startsWith('/train')) return 2;
+    if (location.startsWith('/departures')) return 3;
+    if (location.startsWith('/map')) return 4;
     return 0;
   }
 
@@ -31,15 +30,13 @@ class HomeScreen extends StatelessWidget {
             case 0:
               context.go('/search');
             case 1:
-              context.go('/train');
+              context.go('/journeys');
             case 2:
-              context.go('/departures');
+              context.go('/train');
             case 3:
-              context.go('/map');
+              context.go('/departures');
             case 4:
-              context.go('/split');
-            case 5:
-              context.go('/settings');
+              context.go('/map');
           }
         },
         destinations: const [
@@ -47,6 +44,11 @@ class HomeScreen extends StatelessWidget {
             icon: Icon(Icons.search_outlined),
             selectedIcon: Icon(Icons.search),
             label: 'Suche',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.bookmark_border),
+            selectedIcon: Icon(Icons.bookmark),
+            label: 'Reisen',
           ),
           NavigationDestination(
             icon: Icon(Icons.train_outlined),
@@ -62,16 +64,6 @@ class HomeScreen extends StatelessWidget {
             icon: Icon(Icons.map_outlined),
             selectedIcon: Icon(Icons.map),
             label: 'Karte',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.call_split_outlined),
-            selectedIcon: Icon(Icons.call_split),
-            label: 'Split',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
-            selectedIcon: Icon(Icons.settings),
-            label: 'Einstellungen',
           ),
         ],
       ),

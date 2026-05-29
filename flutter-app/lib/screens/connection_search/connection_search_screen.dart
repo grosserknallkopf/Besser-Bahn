@@ -6,6 +6,7 @@ import '../../models/library_models.dart';
 import '../../providers/journey_search_provider.dart';
 import '../../providers/library_provider.dart';
 import '../../widgets/station_search_field.dart';
+import '../../widgets/app_menu_button.dart';
 import '../../widgets/traewelling_avatar_button.dart';
 import 'widgets/journey_card.dart';
 
@@ -60,6 +61,7 @@ class _ConnectionSearchScreenState
       appBar: AppBar(
         title: const Text('Verbindungen'),
         actions: [
+          const AppMenuButton(),
           const TraewellingAvatarButton(),
           if (state.from != null && state.to != null)
             Builder(builder: (context) {

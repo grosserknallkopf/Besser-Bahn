@@ -8,15 +8,28 @@ import '../../providers/train_lookup_provider.dart';
 import '../../widgets/station_search_field.dart';
 import '../../widgets/delay_badge.dart';
 import '../../widgets/platform_badge.dart';
+import '../../widgets/app_menu_button.dart';
 import '../../widgets/traewelling_avatar_button.dart';
 import '../../core/extensions.dart';
+import '../../core/auto_refresh.dart';
 import 'departure_map_view.dart';
 
-class DepartureBoardScreen extends ConsumerWidget {
+class DepartureBoardScreen extends ConsumerStatefulWidget {
   const DepartureBoardScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<DepartureBoardScreen> createState() =>
+      _DepartureBoardScreenState();
+}
+
+class _DepartureBoardScreenState extends ConsumerState<DepartureBoardScreen>
+    with AutoRefreshMixin {
+  @override
+  Future<void> onAutoRefresh() =>
+      ref.read(departureBoardProvider.notifier).refreshSilent();
+
+  @override
+  Widget build(BuildContext context) {
     final state = ref.watch(departureBoardProvider);
     final notifier = ref.read(departureBoardProvider.notifier);
     final theme = Theme.of(context);
@@ -28,6 +41,7 @@ class DepartureBoardScreen extends ConsumerWidget {
       appBar: AppBar(
         title: Text(state.station?.name ?? 'Abfahrtstafel'),
         actions: [
+          const AppMenuButton(),
           const TraewellingAvatarButton(),
           if (state.station != null)
             IconButton(
@@ -109,7 +123,26 @@ class DepartureBoardScreen extends ConsumerWidget {
               ),
             ),
 
-          const SizedBox(height: 8),
+          // Quiet "last updated" line — auto-refreshes in the background.
+          if (state.station != null && state.lastUpdated != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 6, 16, 2),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  Icon(Icons.sync,
+                      size: 13, color: theme.colorScheme.onSurfaceVariant),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Aktualisiert ${state.lastUpdated!.hhmm}',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            )
+          else
+            const SizedBox(height: 8),
 
           // Board — list or map.
           Expanded(
@@ -150,7 +183,8 @@ class DepartureBoardScreen extends ConsumerWidget {
     }
 
     return RefreshIndicator(
-      onRefresh: () => ref.read(departureBoardProvider.notifier).load(),
+      onRefresh: () =>
+          ref.read(departureBoardProvider.notifier).refreshSilent(),
       child: ListView.separated(
         padding: const EdgeInsets.only(bottom: 32),
         itemCount: departures.length,

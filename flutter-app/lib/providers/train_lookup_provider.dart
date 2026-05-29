@@ -198,6 +198,23 @@ class TrainLookupNotifier extends Notifier<TrainLookupState> {
     await _loadTrip(trip.id);
   }
 
+  /// Background refresh for an open train run: re-fetch the trip WITHOUT a
+  /// spinner and keep the current trip on failure (offline etc.), so live
+  /// delays/platforms quietly update while you're riding.
+  Future<void> refreshSilent() async {
+    final trip = state.trip;
+    if (trip == null) return;
+    try {
+      final hafas = ref.read(hafasServiceProvider);
+      final fresh = await hafas.getTrip(trip.id);
+      state = state.copyWith(trip: fresh);
+      _enrichCoordinates(fresh);
+      _loadCoachSequence(fresh);
+    } catch (_) {
+      // Keep the currently shown trip.
+    }
+  }
+
   void clear() {
     state = const TrainLookupState();
   }

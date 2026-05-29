@@ -1,4 +1,5 @@
 import 'departure.dart';
+import 'journey.dart' show OccupancyLevel;
 import 'station.dart';
 
 class Trip {
@@ -81,6 +82,17 @@ class Trip {
     );
   }
 
+  /// Representative 2nd-class occupancy for the whole run: the worst level
+  /// reported across all stops (DB reports it per segment). [OccupancyLevel
+  /// .unknown] when no stop carries data — the banner then hides itself.
+  OccupancyLevel get occupancy {
+    var worst = OccupancyLevel.unknown;
+    for (final s in stopovers) {
+      if (s.occupancy.index > worst.index) worst = s.occupancy;
+    }
+    return worst;
+  }
+
   /// Find the current/next stop based on time
   Stopover? get currentStop {
     final now = DateTime.now();
@@ -140,6 +152,9 @@ class Stopover {
   final String? plannedDeparturePlatform;
   final bool cancelled;
 
+  /// 2nd-class occupancy expected at this stop (DB `auslastungsmeldungen`).
+  final OccupancyLevel occupancy;
+
   const Stopover({
     required this.stop,
     this.arrival,
@@ -153,6 +168,7 @@ class Stopover {
     this.departurePlatform,
     this.plannedDeparturePlatform,
     this.cancelled = false,
+    this.occupancy = OccupancyLevel.unknown,
   });
 
   bool get hasArrivalPlatformChange =>
@@ -198,7 +214,23 @@ class Stopover {
       departurePlatform: json['departurePlatform'] as String?,
       plannedDeparturePlatform: json['plannedDeparturePlatform'] as String?,
       cancelled: json['cancelled'] as bool? ?? false,
+      occupancy: _loadFactorToLevel(json['loadFactor'] as String?),
     );
+  }
+}
+
+/// HAFAS `loadFactor` strings → our [OccupancyLevel].
+OccupancyLevel _loadFactorToLevel(String? f) {
+  switch (f) {
+    case 'low-to-medium':
+      return OccupancyLevel.low;
+    case 'high':
+      return OccupancyLevel.high;
+    case 'very-high':
+    case 'exceptionally-high':
+      return OccupancyLevel.veryHigh;
+    default:
+      return OccupancyLevel.unknown;
   }
 }
 
