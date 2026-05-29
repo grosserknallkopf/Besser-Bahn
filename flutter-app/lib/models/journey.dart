@@ -333,6 +333,22 @@ enum OccupancyLevel {
         return 'Sehr hoch';
     }
   }
+
+  /// Full sentence as DB phrases it, e.g. "Geringe Auslastung erwartet".
+  String get expectedLabel {
+    switch (this) {
+      case OccupancyLevel.unknown:
+        return '';
+      case OccupancyLevel.low:
+        return 'Geringe Auslastung erwartet';
+      case OccupancyLevel.medium:
+        return 'Mittlere Auslastung erwartet';
+      case OccupancyLevel.high:
+        return 'Hohe Auslastung erwartet';
+      case OccupancyLevel.veryHigh:
+        return 'Sehr hohe Auslastung erwartet';
+    }
+  }
 }
 
 /// Round-trips [OccupancyLevel] through its enum name.

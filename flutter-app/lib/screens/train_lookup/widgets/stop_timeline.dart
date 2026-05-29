@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
+import '../../../models/journey.dart' show OccupancyLevel;
 import '../../../models/trip.dart';
 import '../../../core/extensions.dart';
-import '../../../widgets/delay_badge.dart';
+import '../../../widgets/occupancy_indicator.dart';
 import '../../../widgets/platform_badge.dart';
 
 /// Stop list for a train. When [boardingId]/[alightingId] are given (i.e. the
@@ -220,23 +221,28 @@ class _StopRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isPast = stopover.isPast;
+    final cancelled = stopover.cancelled;
     var textColor = isPast
         ? theme.colorScheme.onSurfaceVariant.withAlpha(150)
         : theme.colorScheme.onSurface;
     if (muted) textColor = textColor.withAlpha(130);
 
-    // Times
-    final arrTime = stopover.plannedArrival?.hhmm;
-    final depTime = stopover.plannedDeparture?.hhmm;
-    final displayTime = depTime ?? arrTime;
+    // Spine time = the realtime departure, else arrival.
+    final spinePlanned = stopover.plannedDeparture ?? stopover.plannedArrival;
+    final spineReal = stopover.departure ?? stopover.arrival;
+    final spineDelay = stopover.departureDelay ?? stopover.arrivalDelay;
 
-    final dotColor = stopover.cancelled
+    // The expanded "an HH:MM / ab HH:MM" detail — only for intermediate stops
+    // that actually dwell (both an and ab, and they differ).
+    final showAnAb = stopover.plannedArrival != null &&
+        stopover.plannedDeparture != null &&
+        stopover.plannedArrival != stopover.plannedDeparture;
+
+    final dotColor = cancelled
         ? Colors.red
-        : muted
+        : (muted || isPast)
             ? theme.colorScheme.outlineVariant
-            : isPast
-                ? theme.colorScheme.outlineVariant
-                : theme.colorScheme.primary;
+            : theme.colorScheme.primary;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -244,26 +250,11 @@ class _StopRow extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Time column
+            // Time spine column
             SizedBox(
-              width: 48,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  if (displayTime != null)
-                    Text(
-                      displayTime,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: stopover.cancelled ? Colors.red : textColor,
-                        decoration: stopover.cancelled
-                            ? TextDecoration.lineThrough
-                            : null,
-                      ),
-                    ),
-                ],
-              ),
+              width: 52,
+              child: _spineTime(
+                  spinePlanned, spineReal, spineDelay, cancelled, textColor),
             ),
 
             const SizedBox(width: 12),
@@ -325,9 +316,8 @@ class _StopRow extends StatelessWidget {
                               fontSize: 14,
                               fontWeight:
                                   emphasize ? FontWeight.bold : FontWeight.w500,
-                              color:
-                                  stopover.cancelled ? Colors.red : textColor,
-                              decoration: stopover.cancelled
+                              color: cancelled ? Colors.red : textColor,
+                              decoration: cancelled
                                   ? TextDecoration.lineThrough
                                   : null,
                             ),
@@ -343,39 +333,57 @@ class _StopRow extends StatelessWidget {
                         ],
                       ],
                     ),
-                    const SizedBox(height: 2),
-                    Row(
-                      children: [
-                        DelayBadge(
-                          delaySeconds:
-                              stopover.departureDelay ?? stopover.arrivalDelay,
-                          cancelled: stopover.cancelled,
+
+                    // an HH:MM / ab HH:MM with realtime + red delay.
+                    if (showAnAb)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 3),
+                        child: Wrap(
+                          spacing: 14,
+                          runSpacing: 2,
+                          children: [
+                            _anAb(context, 'an', stopover.plannedArrival,
+                                stopover.arrival, stopover.arrivalDelay,
+                                cancelled),
+                            _anAb(context, 'ab', stopover.plannedDeparture,
+                                stopover.departure, stopover.departureDelay,
+                                cancelled),
+                          ],
                         ),
-                        if (stopover.platform != null) ...[
-                          const SizedBox(width: 8),
+                      ),
+
+                    const SizedBox(height: 4),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        if (cancelled)
+                          Text('Ausfall',
+                              style: TextStyle(
+                                  color: theme.colorScheme.error,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold)),
+                        if (stopover.platform != null)
                           PlatformBadge(
                             platform: stopover.platform,
                             plannedPlatform: stopover.plannedPlatform,
                           ),
-                        ],
+                        if (stopover.occupancy != OccupancyLevel.unknown)
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              OccupancyIndicator(level: stopover.occupancy),
+                              const SizedBox(width: 4),
+                              Text(
+                                stopover.occupancy.expectedLabel,
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant),
+                              ),
+                            ],
+                          ),
                       ],
                     ),
-
-                    // Show both arr and dep times for intermediate stops
-                    if (!emphasize &&
-                        arrTime != null &&
-                        depTime != null &&
-                        arrTime != depTime)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 2),
-                        child: Text(
-                          'an $arrTime  ab $depTime',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ),
                   ],
                 ),
               ),
@@ -383,6 +391,74 @@ class _StopRow extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+
+  /// Left "spine" time: planned struck through + realtime in red on delay.
+  Widget _spineTime(DateTime? planned, DateTime? real, int? delaySec,
+      bool cancelled, Color baseColor) {
+    if (planned == null) return const SizedBox.shrink();
+    final delayed = !cancelled && (delaySec ?? 0) >= 60;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Text(
+          planned.hhmm,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: cancelled
+                ? Colors.red
+                : (delayed ? baseColor.withAlpha(140) : baseColor),
+            decoration: (cancelled || delayed)
+                ? TextDecoration.lineThrough
+                : null,
+          ),
+        ),
+        if (delayed && real != null)
+          Text(
+            real.hhmm,
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.bold,
+              color: delaySec.delayColor,
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// "an"/"ab" chunk: label + planned (struck on delay) + realtime + "+N" red.
+  Widget _anAb(BuildContext context, String label, DateTime? planned,
+      DateTime? real, int? delaySec, bool cancelled) {
+    if (planned == null) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final delayed = !cancelled && (delaySec ?? 0) >= 60;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text('$label ',
+            style: TextStyle(fontSize: 11, color: muted)),
+        Text(
+          planned.hhmm,
+          style: TextStyle(
+            fontSize: 11,
+            color: muted,
+            decoration: delayed ? TextDecoration.lineThrough : null,
+          ),
+        ),
+        if (delayed && real != null) ...[
+          const SizedBox(width: 4),
+          Text(
+            '${real.hhmm} (+${delaySec! ~/ 60})',
+            style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                color: delaySec.delayColor),
+          ),
+        ],
+      ],
     );
   }
 }

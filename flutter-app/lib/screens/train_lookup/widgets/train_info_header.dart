@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import '../../../models/journey.dart' show OccupancyLevel;
 import '../../../models/trip.dart';
 import '../../../core/extensions.dart';
+import '../../../widgets/occupancy_indicator.dart';
 
 class TrainInfoHeader extends StatelessWidget {
   final Trip trip;
@@ -108,6 +110,23 @@ class TrainInfoHeader extends StatelessWidget {
                       'Nächst: ${trip.currentStop!.stop.name}'),
               ],
             ),
+
+            // Expected 2nd-class occupancy for the run.
+            if (trip.occupancy != OccupancyLevel.unknown) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  OccupancyIndicator(level: trip.occupancy),
+                  const SizedBox(width: 6),
+                  Text(
+                    trip.occupancy.expectedLabel,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
+            ],
           ],
         ),
       ),
