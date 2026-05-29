@@ -111,6 +111,35 @@ class TransitLine {
     }
     return fahrtNr;
   }
+
+  /// The line label with the product letters spaced from the line digits,
+  /// e.g. "RE7" → "RE 7", "S1" → "S 1", "ICE" stays "ICE".
+  String get lineLabel {
+    final n = name.trim();
+    if (n.isEmpty) return productName;
+    return n.replaceFirstMapped(
+        RegExp(r'^([A-Za-zÄÖÜäöü]+)\s*(\d)'), (m) => '${m[1]} ${m[2]}');
+  }
+
+  /// Header title: the line plus the official train number in parentheses when
+  /// it adds information — e.g. "RE 7 (11281)". Long-distance lines whose label
+  /// already *is* the running number collapse to just the label ("ICE 571").
+  String get titleWithNumber {
+    final label = lineLabel;
+    final nr = fahrtNr.trim();
+    if (nr.isEmpty || label.contains(nr)) return label;
+    return '$label ($nr)';
+  }
+
+  /// Same line but with a different label (the real line, e.g. "RE7"), carried
+  /// over from a departure/leg into a freshly fetched trip whose API omits it.
+  TransitLine withName(String newName) => TransitLine(
+        name: newName,
+        fahrtNr: fahrtNr,
+        productName: productName,
+        product: product,
+        operatorName: operatorName,
+      );
 }
 
 DateTime? _parseDateTime(dynamic value) {

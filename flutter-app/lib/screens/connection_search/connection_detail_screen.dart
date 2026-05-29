@@ -63,7 +63,7 @@ class ConnectionDetailScreen extends ConsumerWidget {
         children: [
           _summary(context),
           for (var i = 0; i < legs.length; i++) ...[
-            if (i > 0) _transfer(context, legs[i - 1], legs[i]),
+            if (i > 0) _transfer(context, ref, legs[i - 1], legs[i]),
             if (legs[i].isWalking)
               _walkLeg(context, legs[i])
             else
@@ -109,46 +109,110 @@ class ConnectionDetailScreen extends ConsumerWidget {
     final mins = (leg.arrival != null && leg.departure != null)
         ? leg.arrival!.difference(leg.departure!).inMinutes
         : null;
+    final dist = leg.walkingDistance;
+    final detail = [
+      if (mins != null) 'ca. $mins min',
+      if (dist != null) '$dist m',
+    ].join(' · ');
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 16),
       child: Row(
         children: [
           const Icon(Icons.directions_walk, size: 18),
           const SizedBox(width: 8),
-          Text(mins != null ? 'Fußweg · $mins min' : 'Fußweg',
+          Text(detail.isEmpty ? 'Fußweg' : 'Fußweg · $detail',
               style: Theme.of(context).textTheme.bodySmall),
         ],
       ),
     );
   }
 
-  Widget _transfer(BuildContext context, JourneyLeg prev, JourneyLeg next) {
+  Widget _transfer(
+      BuildContext context, WidgetRef ref, JourneyLeg prev, JourneyLeg next) {
     if (prev.isWalking || next.isWalking) return const SizedBox(height: 8);
+    final theme = Theme.of(context);
+    // Time you actually have to change trains (arrival → next departure).
     final gap = (next.departure != null && prev.arrival != null)
         ? next.departure!.difference(prev.arrival!).inMinutes
         : null;
+
+    final arrGleis = prev.arrivalPlatform;
+    final depGleis = next.departurePlatform;
+    final station = prev.destination;
+    final canMap = station.name.isNotEmpty;
+
+    // A short, unambiguous label: it's the *available* transfer time, not a
+    // walk duration.
+    final timeText = gap != null
+        ? '$gap min zum Umsteigen'
+        : 'Umstieg';
+    final tight = gap != null && gap <= 5;
+
+    final gleisText = (arrGleis != null || depGleis != null)
+        ? 'Gleis ${arrGleis ?? '?'} → Gleis ${depGleis ?? '?'}'
+        : null;
+
+    void openMap() {
+      final note = (arrGleis != null && depGleis != null)
+          ? 'Ankunft Gleis $arrGleis · Weiter ab Gleis $depGleis'
+          : depGleis != null
+              ? 'Weiter ab Gleis $depGleis'
+              : 'Umstieg in ${station.name}';
+      ref.read(stationMapProvider.notifier).loadForStation(
+            station,
+            highlightGleis: depGleis ?? arrGleis,
+            transferNote: note,
+          );
+      context.push('/station-map');
+    }
+
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+        color: theme.colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Row(
-        children: [
-          Icon(Icons.swap_calls,
-              size: 18, color: Theme.of(context).colorScheme.onSurfaceVariant),
-          const SizedBox(width: 8),
-          Text(
-            gap != null
-                ? 'Umstieg in ${prev.destination.name} · $gap min'
-                : 'Umstieg in ${prev.destination.name}',
-            style: Theme.of(context)
-                .textTheme
-                .bodyMedium
-                ?.copyWith(fontWeight: FontWeight.w600),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: canMap ? openMap : null,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+          child: Row(
+            children: [
+              Icon(Icons.swap_calls,
+                  size: 18, color: theme.colorScheme.onSurfaceVariant),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Umstieg in ${station.name} · $timeText',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: tight ? theme.colorScheme.error : null,
+                      ),
+                    ),
+                    if (gleisText != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          gleisText,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              if (canMap) ...[
+                const SizedBox(width: 8),
+                Icon(Icons.map_outlined,
+                    size: 18, color: theme.colorScheme.primary),
+              ],
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

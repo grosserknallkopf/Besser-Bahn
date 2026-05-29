@@ -202,7 +202,9 @@ class _BayDeparturesSheetState extends ConsumerState<BayDeparturesSheet> {
   }
 
   void _openTrain(Departure d) {
-    ref.read(trainLookupProvider.notifier).lookupByTripId(d.tripId);
+    ref
+        .read(trainLookupProvider.notifier)
+        .lookupByTripId(d.tripId, lineLabel: d.line.name);
     Navigator.of(context).pop();
     context.go('/train');
   }

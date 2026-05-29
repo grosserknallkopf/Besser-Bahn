@@ -158,6 +158,35 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
               onSelected: (s) => notifier.loadForStation(s),
             ),
           ),
+          if (state.transferNote != null)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.tertiaryContainer,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.swap_calls,
+                      size: 18,
+                      color:
+                          Theme.of(context).colorScheme.onTertiaryContainer),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      state.transferNote!,
+                      style: TextStyle(
+                        color:
+                            Theme.of(context).colorScheme.onTertiaryContainer,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           if (state.highlightGleis != null && map != null)
             _BoardingBanner(
               gleis: state.highlightGleis!,

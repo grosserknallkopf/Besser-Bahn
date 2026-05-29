@@ -98,6 +98,10 @@ class StationMapState {
   /// track label (e.g. "7 C-G" → (C,G)). Null when the label has no section.
   final ({String start, String end})? highlightSection;
 
+  /// When the map is opened for a transfer: a short note shown as a banner,
+  /// e.g. "Ankunft Gleis 7 · Weiter ab Gleis 12". Null otherwise.
+  final String? transferNote;
+
   final bool isLoading;
   final String? error;
 
@@ -108,6 +112,7 @@ class StationMapState {
     this.hiddenCategories = const {},
     this.highlightGleis,
     this.highlightSection,
+    this.transferNote,
     this.isLoading = false,
     this.error,
   });
@@ -119,8 +124,10 @@ class StationMapState {
     Set<String>? hiddenCategories,
     String? highlightGleis,
     ({String start, String end})? highlightSection,
+    String? transferNote,
     bool clearHighlight = false,
     bool clearSection = false,
+    bool clearTransferNote = false,
     bool? isLoading,
     String? error,
     bool clearError = false,
@@ -135,6 +142,8 @@ class StationMapState {
       highlightSection: (clearHighlight || clearSection)
           ? null
           : (highlightSection ?? this.highlightSection),
+      transferNote:
+          clearTransferNote ? null : (transferNote ?? this.transferNote),
       isLoading: isLoading ?? this.isLoading,
       error: clearError ? null : (error ?? this.error),
     );
@@ -364,7 +373,8 @@ class StationMapNotifier extends Notifier<StationMapState> {
 
   /// Load the map for a station. Pass [highlightGleis] when coming from a
   /// journey so the boarding track is highlighted and its floor pre-selected.
-  Future<void> loadForStation(Station station, {String? highlightGleis}) async {
+  Future<void> loadForStation(Station station,
+      {String? highlightGleis, String? transferNote}) async {
     final raw = highlightGleis?.trim() ?? '';
     final hl = raw.isNotEmpty ? normalizeGleis(raw) : null;
     final section = raw.isNotEmpty ? parseGleisSection(raw) : null;
@@ -372,10 +382,12 @@ class StationMapNotifier extends Notifier<StationMapState> {
       station: station,
       highlightGleis: hl,
       highlightSection: section,
+      transferNote: transferNote,
       clearHighlight: hl == null,
       // Without an explicit section, drop any stale one from a previous train
       // (else every train would keep showing the first train's "G–I").
       clearSection: section == null,
+      clearTransferNote: transferNote == null,
     );
     await _load(() => _service.fetchByStationName(station.name));
   }

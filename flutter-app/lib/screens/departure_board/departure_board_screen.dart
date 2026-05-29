@@ -193,9 +193,10 @@ class _DepartureBoardScreenState extends ConsumerState<DepartureBoardScreen>
           return _DepartureTile(
             departure: departures[index],
             onTap: () {
-              ref
-                  .read(trainLookupProvider.notifier)
-                  .lookupByTripId(departures[index].tripId);
+              ref.read(trainLookupProvider.notifier).lookupByTripId(
+                    departures[index].tripId,
+                    lineLabel: departures[index].line.name,
+                  );
               context.go('/train');
             },
           );

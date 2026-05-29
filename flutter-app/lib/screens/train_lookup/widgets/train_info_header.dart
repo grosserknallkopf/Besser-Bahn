@@ -29,7 +29,7 @@ class TrainInfoHeader extends StatelessWidget {
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    trip.line.displayName,
+                    trip.line.titleWithNumber,
                     style: theme.textTheme.titleLarge
                         ?.copyWith(fontWeight: FontWeight.bold),
                   ),

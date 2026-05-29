@@ -21,10 +21,10 @@ class Trip {
     this.polyline,
   });
 
-  Trip copyWith({List<Map<String, double>>? polyline}) {
+  Trip copyWith({List<Map<String, double>>? polyline, TransitLine? line}) {
     return Trip(
       id: id,
-      line: line,
+      line: line ?? this.line,
       direction: direction,
       origin: origin,
       destination: destination,

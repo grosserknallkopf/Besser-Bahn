@@ -80,18 +80,27 @@ class TrainLookupNotifier extends Notifier<TrainLookupState> {
 
   Future<void> selectSearchResult(TrainSearchResult result) async {
     state = const TrainLookupState(isLoading: true);
-    await _loadTrip(result.tripId);
+    await _loadTrip(result.tripId, lineLabel: result.lineName);
   }
 
-  Future<void> lookupByTripId(String tripId) async {
+  /// Open a trip by id. [lineLabel] is the real line ("RE7") known from the
+  /// departure/leg that linked here — the `fahrt` API omits it, so we carry it
+  /// in to render "RE 7 (11281)" instead of just the running number.
+  Future<void> lookupByTripId(String tripId, {String? lineLabel}) async {
     state = const TrainLookupState(isLoading: true);
-    await _loadTrip(tripId);
+    await _loadTrip(tripId, lineLabel: lineLabel);
   }
 
-  Future<void> _loadTrip(String tripId) async {
+  Future<void> _loadTrip(String tripId, {String? lineLabel}) async {
     try {
       final hafas = ref.read(hafasServiceProvider);
       var trip = await hafas.getTrip(tripId);
+
+      // Carry the real line label in if the trip API didn't supply it.
+      final label = lineLabel?.trim() ?? '';
+      if (label.isNotEmpty) {
+        trip = trip.copyWith(line: trip.line.withName(label));
+      }
 
       // Show trip immediately, then enrich with coordinates
       state = TrainLookupState(trip: trip);
@@ -195,7 +204,7 @@ class TrainLookupNotifier extends Notifier<TrainLookupState> {
     final trip = state.trip;
     if (trip == null) return;
     state = state.copyWith(isLoading: true);
-    await _loadTrip(trip.id);
+    await _loadTrip(trip.id, lineLabel: trip.line.name);
   }
 
   /// Background refresh for an open train run: re-fetch the trip WITHOUT a
@@ -206,7 +215,10 @@ class TrainLookupNotifier extends Notifier<TrainLookupState> {
     if (trip == null) return;
     try {
       final hafas = ref.read(hafasServiceProvider);
-      final fresh = await hafas.getTrip(trip.id);
+      var fresh = await hafas.getTrip(trip.id);
+      // Preserve the line label carried in originally (fahrt API omits it).
+      final label = trip.line.name.trim();
+      if (label.isNotEmpty) fresh = fresh.copyWith(line: fresh.line.withName(label));
       state = state.copyWith(trip: fresh);
       _enrichCoordinates(fresh);
       _loadCoachSequence(fresh);
