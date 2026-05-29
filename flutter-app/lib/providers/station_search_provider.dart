@@ -3,8 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/station.dart';
 import 'service_providers.dart';
 
-/// Debounced station search provider
-class StationSearchNotifier extends AutoDisposeAsyncNotifier<List<Station>> {
+/// Debounced station search provider.
+///
+/// Riverpod 3 dropped the separate `AutoDisposeAsyncNotifier` base class — a
+/// plain [AsyncNotifier] is used for both, with auto-dispose selected on the
+/// provider (`AsyncNotifierProvider.autoDispose`).
+class StationSearchNotifier extends AsyncNotifier<List<Station>> {
   Timer? _debounce;
 
   @override

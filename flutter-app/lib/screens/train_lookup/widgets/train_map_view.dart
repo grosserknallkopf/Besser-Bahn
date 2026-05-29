@@ -8,6 +8,7 @@ import 'package:latlong2/latlong.dart';
 import '../../../models/trip.dart';
 import '../../../providers/service_providers.dart';
 import '../../../theme/app_colors.dart';
+import '../../../widgets/lazy_mount.dart';
 
 /// Inline route map with the live (time-interpolated) train position.
 /// Tap to open a larger, fully interactive fullscreen map.
@@ -28,15 +29,24 @@ class _TrainMapViewState extends ConsumerState<TrainMapView> {
   /// [HafasService.fetchRoutePolyline] returns.
   late Trip _trip;
 
+  bool _polylineStarted = false;
+
   @override
   void initState() {
     super.initState();
     _trip = widget.trip;
-    _loadPolyline();
     // Advance the live position marker every 15s without re-fetching.
     _ticker = Timer.periodic(const Duration(seconds: 15), (_) {
       if (mounted) setState(() {});
     });
+  }
+
+  /// Kick off the (network) route-geometry fetch only once the map is actually
+  /// shown — off-screen legs must not hit the network.
+  void _ensurePolyline() {
+    if (_polylineStarted) return;
+    _polylineStarted = true;
+    _loadPolyline();
   }
 
   Future<void> _loadPolyline() async {
@@ -64,38 +74,61 @@ class _TrainMapViewState extends ConsumerState<TrainMapView> {
     return Card(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       clipBehavior: Clip.antiAlias,
-      child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => _TrainMapFullScreen(trip: _trip),
-          ),
-        ),
-        child: SizedBox(
-          height: 240,
-          child: Stack(
-            children: [
-              // The non-interactive map would otherwise swallow pointer events;
-              // ignore them so a tap anywhere opens fullscreen, not just the
-              // corner icon.
-              IgnorePointer(child: TrainMap(trip: _trip, interactive: false)),
-              // Fullscreen affordance.
-              const Positioned(
-                right: 8,
-                top: 8,
-                child: Material(
-                  color: Colors.black54,
-                  shape: CircleBorder(),
-                  child: Padding(
-                    padding: EdgeInsets.all(6),
-                    child: Icon(Icons.fullscreen,
-                        color: Colors.white, size: 20),
-                  ),
+      child: SizedBox(
+        height: 240,
+        // Only mount the actual map (and fetch its tiles + geometry) once it
+        // scrolls into view — off-screen legs stay a cheap placeholder.
+        child: LazyMount(
+          placeholder: _placeholder(context),
+          builder: (context) {
+            _ensurePolyline();
+            return GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => _TrainMapFullScreen(trip: _trip),
                 ),
               ),
-            ],
-          ),
+              child: Stack(
+                children: [
+                  // The non-interactive map would otherwise swallow pointer
+                  // events; ignore them so a tap anywhere opens fullscreen.
+                  IgnorePointer(
+                      child: TrainMap(trip: _trip, interactive: false)),
+                  const Positioned(
+                    right: 8,
+                    top: 8,
+                    child: Material(
+                      color: Colors.black54,
+                      shape: CircleBorder(),
+                      child: Padding(
+                        padding: EdgeInsets.all(6),
+                        child: Icon(Icons.fullscreen,
+                            color: Colors.white, size: 20),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
         ),
+      ),
+    );
+  }
+
+  Widget _placeholder(BuildContext context) {
+    return Container(
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      alignment: Alignment.center,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.map_outlined,
+              size: 32, color: Theme.of(context).colorScheme.outline),
+          const SizedBox(height: 6),
+          Text('Karte', style: Theme.of(context).textTheme.bodySmall),
+        ],
       ),
     );
   }
