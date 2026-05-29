@@ -4,8 +4,10 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/constants.dart';
 import '../../models/split_ticket.dart';
+import '../../models/traewelling_models.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/traewelling_provider.dart';
+import '../../widgets/traewelling_logo.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -63,27 +65,59 @@ class SettingsScreen extends ConsumerWidget {
           Builder(builder: (context) {
             final auth = ref.watch(traewellingAuthProvider);
             final user = auth.user;
+            final loggedIn = user != null;
+            final hasPic = user?.profilePicture?.isNotEmpty ?? false;
             return Card(
               margin: const EdgeInsets.symmetric(horizontal: 16),
-              child: ListTile(
-                leading: CircleAvatar(
-                  radius: 16,
-                  backgroundColor: theme.colorScheme.primaryContainer,
-                  backgroundImage: (user?.profilePicture?.isNotEmpty ?? false)
-                      ? NetworkImage(user!.profilePicture!)
-                      : null,
-                  child: (user?.profilePicture?.isNotEmpty ?? false)
-                      ? null
-                      : Icon(Icons.person_outline,
-                          size: 18,
-                          color: theme.colorScheme.onPrimaryContainer),
-                ),
-                title: Text(user != null ? user.displayName : 'Träwelling'),
-                subtitle: Text(user != null
-                    ? '@${user.username} · angemeldet'
-                    : 'Nicht angemeldet · zum Einloggen tippen'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => context.push('/trawelling'),
+              child: Column(
+                children: [
+                  ListTile(
+                    leading: hasPic
+                        ? CircleAvatar(
+                            radius: 16,
+                            backgroundImage: NetworkImage(user!.profilePicture!),
+                          )
+                        // Official Träwelling logo when not signed in.
+                        : const TraewellingLogo(size: 32),
+                    title: Text(loggedIn ? user.displayName : 'Träwelling'),
+                    subtitle: Text(loggedIn
+                        ? '@${user.username} · angemeldet'
+                        : 'Nicht angemeldet · zum Einloggen tippen'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => context.push('/trawelling'),
+                  ),
+                  // Check-in preferences only make sense once connected.
+                  if (loggedIn) ...[
+                    const Divider(height: 1),
+                    SwitchListTile(
+                      secondary: const Icon(Icons.bolt),
+                      title: const Text('Automatisch einchecken'),
+                      subtitle: const Text(
+                          'Ein Tipp auf das Träwelling-Symbol im Zug checkt '
+                          'sofort ein – ohne Nachfrage.'),
+                      value: settings.trwlAutoCheckin,
+                      onChanged: notifier.setTrwlAutoCheckin,
+                    ),
+                    const Divider(height: 1),
+                    ListTile(
+                      leading: const Icon(Icons.visibility_outlined),
+                      title: const Text('Sichtbarkeit'),
+                      subtitle: const Text('Standard für App-Check-ins'),
+                      trailing: DropdownButton<int>(
+                        value: settings.trwlVisibility,
+                        underline: const SizedBox(),
+                        onChanged: (v) => notifier.setTrwlVisibility(v!),
+                        items: TrwlVisibility.values
+                            .map((v) => DropdownMenuItem(
+                                  value: v.value,
+                                  child: Text(v.label,
+                                      style: const TextStyle(fontSize: 14)),
+                                ))
+                            .toList(),
+                      ),
+                    ),
+                  ],
+                ],
               ),
             );
           }),

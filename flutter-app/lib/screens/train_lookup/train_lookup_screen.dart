@@ -13,6 +13,8 @@ import '../../core/auto_refresh.dart';
 import '../../widgets/app_menu_button.dart';
 import '../../widgets/embedded_action_bar.dart';
 import '../../widgets/station_search_field.dart';
+import '../../widgets/traewelling_logo.dart';
+import '../../widgets/trwl_checkin_sheet.dart';
 import 'widgets/train_detail_view.dart';
 
 class TrainLookupScreen extends ConsumerStatefulWidget {
@@ -103,6 +105,12 @@ class _TrainLookupScreenState extends ConsumerState<TrainLookupScreen>
             },
           );
         }),
+      if (state.trip != null)
+        IconButton(
+          icon: const TraewellingLogo(size: 22),
+          tooltip: 'In Träwelling einchecken',
+          onPressed: () => startTrwlCheckin(context, ref, state.trip!),
+        ),
       if (state.trip != null)
         IconButton(
           icon: const Icon(Icons.refresh),

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../models/traewelling_models.dart';
 import '../../providers/traewelling_provider.dart';
 import '../../theme/app_colors.dart';
+import '../../widgets/traewelling_logo.dart';
 import '../../widgets/trwl_status_card.dart';
 
 /// The Träwelling hub: a connect prompt when logged out, or the user's own
@@ -40,7 +41,7 @@ class _ConnectPrompt extends ConsumerWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.share_location, size: 72, color: AppColors.dbRed),
+            const TraewellingLogo(size: 84),
             const SizedBox(height: 16),
             Text('Mit Träwelling verbinden',
                 style: theme.textTheme.headlineSmall
@@ -156,10 +157,15 @@ class _Profile extends ConsumerWidget {
           // Actions
           _action(context, Icons.dynamic_feed, 'Feed',
               'Fahrten von Leuten, denen du folgst', () => context.push('/trawelling/feed')),
-          _action(context, Icons.add_location_alt, 'Einchecken',
-              'In einen Zug einchecken', () => context.push('/trawelling/checkin')),
           _action(context, Icons.people, 'Freunde',
               'Follower, Following & Anfragen', () => context.push('/trawelling/friends')),
+          ListTile(
+            leading: Icon(Icons.info_outline, color: theme.colorScheme.outline),
+            title: const Text('Einchecken'),
+            subtitle: const Text(
+                'Tippe in der Zugansicht auf das Träwelling-Symbol – '
+                'die Fahrt wird automatisch übernommen.'),
+          ),
           const Divider(height: 24),
           ListTile(
             leading: const Icon(Icons.logout),

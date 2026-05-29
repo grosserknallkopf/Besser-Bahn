@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
@@ -38,6 +39,11 @@ class TraewellingService {
   static const _kAccess = 'trwl_access_token';
   static const _kRefresh = 'trwl_refresh_token';
   static const _kExpiry = 'trwl_expires_at'; // ISO-8601
+
+  /// Hard cap per request. Without this a stalled socket spins the loading
+  /// spinner forever (the feed / "letzte Fahrten" bug) — with it a hung call
+  /// surfaces as a clean error + retry instead of an endless wait.
+  static const _kTimeout = Duration(seconds: 12);
 
   String? _accessToken;
   DateTime? _expiresAt;
@@ -166,7 +172,7 @@ class TraewellingService {
         'code_verifier': verifier,
         'code': code,
       },
-    );
+    ).timeout(_kTimeout);
     if (res.statusCode != 200) {
       throw TraewellingException(
           'Token-Tausch fehlgeschlagen: ${res.body}', res.statusCode);
@@ -178,16 +184,21 @@ class TraewellingService {
   Future<bool> _refresh() async {
     final refresh = await _read(_kRefresh);
     if (refresh == null) return false;
-    final res = await _client.post(
-      Uri.parse(TraewellingConstants.tokenUrl),
-      headers: {'Accept': 'application/json'},
-      body: {
-        'grant_type': 'refresh_token',
-        'refresh_token': refresh,
-        'client_id': TraewellingConstants.clientId,
-        'scope': TraewellingConstants.scopes,
-      },
-    );
+    final http.Response res;
+    try {
+      res = await _client.post(
+        Uri.parse(TraewellingConstants.tokenUrl),
+        headers: {'Accept': 'application/json'},
+        body: {
+          'grant_type': 'refresh_token',
+          'refresh_token': refresh,
+          'client_id': TraewellingConstants.clientId,
+          'scope': TraewellingConstants.scopes,
+        },
+      ).timeout(_kTimeout);
+    } on TimeoutException {
+      return false;
+    }
     if (res.statusCode != 200) return false;
     await _storeTokens(json.decode(res.body) as Map<String, dynamic>);
     return true;
@@ -226,17 +237,28 @@ class TraewellingService {
     final encoded = body != null ? json.encode(body) : null;
 
     http.Response res;
-    switch (method) {
-      case 'GET':
-        res = await _client.get(uri, headers: headers);
-      case 'POST':
-        res = await _client.post(uri, headers: headers, body: encoded);
-      case 'PUT':
-        res = await _client.put(uri, headers: headers, body: encoded);
-      case 'DELETE':
-        res = await _client.delete(uri, headers: headers, body: encoded);
-      default:
-        throw TraewellingException('Unbekannte Methode $method');
+    try {
+      switch (method) {
+        case 'GET':
+          res = await _client.get(uri, headers: headers).timeout(_kTimeout);
+        case 'POST':
+          res = await _client
+              .post(uri, headers: headers, body: encoded)
+              .timeout(_kTimeout);
+        case 'PUT':
+          res = await _client
+              .put(uri, headers: headers, body: encoded)
+              .timeout(_kTimeout);
+        case 'DELETE':
+          res = await _client
+              .delete(uri, headers: headers, body: encoded)
+              .timeout(_kTimeout);
+        default:
+          throw TraewellingException('Unbekannte Methode $method');
+      }
+    } on TimeoutException {
+      throw const TraewellingException(
+          'Zeitüberschreitung – Träwelling antwortet nicht. Erneut versuchen.');
     }
 
     if (res.statusCode == 401 && retryOn401) {
@@ -403,6 +425,114 @@ class TraewellingService {
         : <String, dynamic>{};
     return TrwlStatus.fromJson(statusJson);
   }
+
+  /// One-shot check-in driven straight from a train the user is already looking
+  /// at (a vendo [Trip]) — no manual station search. Resolves the Träwelling
+  /// trip by searching departures at [boardingName] around [boardingDeparture]
+  /// and matching [lineName], then checks in from boarding → [alightingName].
+  ///
+  /// Throws a [TraewellingException] with a human message at any step that can't
+  /// be matched, so callers can fall back to the manual flow.
+  Future<TrwlStatus> checkinFromTrip({
+    required String lineName,
+    required String boardingName,
+    required DateTime boardingDeparture,
+    required String alightingName,
+    String body = '',
+    int visibility = 0,
+    bool force = false,
+  }) async {
+    final stations = await searchStations(boardingName);
+    if (stations.isEmpty) {
+      throw TraewellingException(
+          'Bahnhof „$boardingName" bei Träwelling nicht gefunden.');
+    }
+    // Prefer an exact-ish name match, else the first hit.
+    final station = stations.firstWhere(
+      (s) => _nameEq(s.name, boardingName),
+      orElse: () => stations.first,
+    );
+
+    final deps = await departures(
+        station.id, when: boardingDeparture.subtract(const Duration(minutes: 6)));
+    final dep = _matchDeparture(deps, lineName, boardingDeparture);
+    if (dep == null) {
+      throw TraewellingException(
+          'Abfahrt „$lineName" um diese Zeit nicht gefunden.');
+    }
+
+    final t = await trip(hafasTripId: dep.tripId, lineName: dep.lineName);
+    final boardIdx = t.stopovers.indexWhere(
+        (s) => s.stationId == station.id || _nameEq(s.name, boardingName));
+    final after =
+        boardIdx >= 0 ? t.stopovers.sublist(boardIdx + 1) : t.stopovers;
+    final dest = after.firstWhere(
+      (s) => _nameEq(s.name, alightingName),
+      orElse: () => after.isNotEmpty
+          ? after.last
+          : (throw TraewellingException(
+              'Ziel „$alightingName" nicht im Laufweg.')),
+    );
+
+    final depTime = (boardIdx >= 0
+            ? t.stopovers[boardIdx].departurePlanned
+            : null) ??
+        dep.plannedWhen ??
+        dep.when ??
+        boardingDeparture;
+    final arrTime = dest.arrivalPlanned ?? dest.arrivalReal ?? dest.departurePlanned;
+    if (arrTime == null) {
+      throw const TraewellingException('Ankunftszeit am Ziel fehlt.');
+    }
+
+    return checkin(
+      tripId: dep.tripId,
+      lineName: dep.lineName,
+      start: station.id,
+      destination: dest.stationId,
+      departure: depTime,
+      arrival: arrTime,
+      body: body,
+      visibility: visibility,
+      force: force,
+    );
+  }
+
+  /// Pick the departure whose line matches [lineName] and whose time is closest
+  /// to [target] (within ~40 min). Returns null when nothing reasonable matches.
+  TrwlDeparture? _matchDeparture(
+      List<TrwlDeparture> deps, String lineName, DateTime target) {
+    final want = _normLine(lineName);
+    TrwlDeparture? best;
+    Duration bestDiff = const Duration(minutes: 40);
+    for (final d in deps) {
+      final got = _normLine(d.lineName);
+      if (got != want && !got.endsWith(want) && !want.endsWith(got)) continue;
+      final when = d.plannedWhen ?? d.when;
+      if (when == null) continue;
+      final diff = (when.difference(target)).abs();
+      if (diff <= bestDiff) {
+        bestDiff = diff;
+        best = d;
+      }
+    }
+    return best;
+  }
+
+  /// Line-name comparison key: drop spaces/case so "ICE 148" == "ICE148".
+  String _normLine(String s) =>
+      s.toLowerCase().replaceAll(RegExp(r'\s+'), '').trim();
+
+  /// Loose station-name equality: case-insensitive, ignoring "Hbf", bracketed
+  /// suffixes and punctuation so vendo and Träwelling names line up.
+  bool _nameEq(String a, String b) => _normStation(a) == _normStation(b);
+
+  String _normStation(String s) => s
+      .toLowerCase()
+      .replaceAll(RegExp(r'\(.*?\)'), '')
+      .replaceAll(RegExp(r'\bhbf\b|\bhauptbahnhof\b'), '')
+      .replaceAll(RegExp(r'[^a-zäöüß0-9]'), '')
+      .trim();
 
   // --- Parsing helpers ------------------------------------------------------
 
