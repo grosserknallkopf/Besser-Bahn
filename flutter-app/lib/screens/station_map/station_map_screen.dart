@@ -42,7 +42,12 @@ Color _poiColor(String type) {
 /// OpenStreetMap layer with a floor switcher — an open alternative to the
 /// official DB app's station map.
 class StationMapScreen extends ConsumerStatefulWidget {
-  const StationMapScreen({super.key});
+  /// Opened for one specific station from a journey/stop (pushed full-screen):
+  /// hide the station search field and the app overflow menu — the screen is
+  /// just this station's map, not a place to browse other stations or settings.
+  final bool dedicated;
+
+  const StationMapScreen({super.key, this.dedicated = false});
 
   @override
   ConsumerState<StationMapScreen> createState() => _StationMapScreenState();
@@ -157,26 +162,34 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
       appBar: AppBar(
         title: Text(state.station?.name ?? 'Bahnhofskarte'),
         actions: [
-          const AppMenuButton(),
+          // Browse mode (Karte tab) keeps the app overflow menu; the dedicated
+          // per-journey map drops it — no settings/split-ticket/debug here.
+          if (!widget.dedicated) const AppMenuButton(),
           if (map != null)
             IconButton(
-              tooltip: 'Zentrieren',
-              icon: const Icon(Icons.my_location),
+              tooltip: 'Auf Karte zentrieren',
+              // A framing/centre glyph — distinct from the "Mein Standort" GPS
+              // crosshair so the two buttons no longer look identical.
+              icon: const Icon(Icons.center_focus_strong),
               onPressed: () => _recenter(map),
             ),
         ],
       ),
       body: Column(
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-            child: StationSearchField(
-              hint: 'Bahnhof suchen...',
-              prefixIcon: Icons.location_city,
-              initialStation: state.station,
-              onSelected: (s) => notifier.loadForStation(s),
+          // Station search only in browse mode. The dedicated map already knows
+          // its station (shown in the AppBar title) — a search box there is
+          // misleading, it isn't for picking a different station.
+          if (!widget.dedicated)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              child: StationSearchField(
+                hint: 'Bahnhof suchen...',
+                prefixIcon: Icons.location_city,
+                initialStation: state.station,
+                onSelected: (s) => notifier.loadForStation(s),
+              ),
             ),
-          ),
           // Transfer: one legend with colour-matched Ausstieg/Einstieg chips
           // (red/green = exactly the map colours). Otherwise the single
           // boarding banner.
@@ -462,7 +475,7 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
-                : const Icon(Icons.near_me),
+                : const Icon(Icons.my_location),
           ),
         ),
         // How far you still have to walk to the target.
@@ -1239,13 +1252,17 @@ class _BoardingBanner extends StatelessWidget {
             : ', Abschnitt ${sec.start}–${sec.end}';
 
     // Wording, icon and colour follow what the Gleis is FOR — so the arrival
-    // station reads "Ausstieg", not "Einstieg".
-    final (String lead, IconData icon, Color color) = switch (role) {
-      GleisRole.alight => ('Dein Ausstieg: ', Icons.logout, AppColors.onTime),
-      GleisRole.transfer => ('Umstieg: ', Icons.swap_calls, AppColors.dbRed),
-      GleisRole.board => ('Dein Einstieg: ', Icons.login, AppColors.dbRed),
-      GleisRole.none => ('', Icons.place, AppColors.dbRed),
+    // station reads "Ausstieg", not "Einstieg". The colour MUST match the
+    // map marker (via roleColor): Einstieg green, Ausstieg red, Umstieg amber.
+    // Previously the banner had these swapped (board red / alight green) so the
+    // banner contradicted the highlighted track below it.
+    final (String lead, IconData icon) = switch (role) {
+      GleisRole.alight => ('Dein Ausstieg: ', Icons.logout),
+      GleisRole.transfer => ('Umstieg: ', Icons.swap_calls),
+      GleisRole.board => ('Dein Einstieg: ', Icons.login),
+      GleisRole.none => ('', Icons.place),
     };
+    final color = roleColor(role) ?? AppColors.dbRed;
 
     return Container(
       width: double.infinity,

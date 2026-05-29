@@ -598,15 +598,25 @@ class _ConnectionDetailScreenState
       warn: warn,
       onTap: leg.origin.name.isEmpty
           ? null
-          : () => _openTransferMap(context, ref, leg.origin,
-              prev?.arrivalPlatform, next?.departurePlatform),
+          : () => _openTransferMap(
+                context,
+                ref,
+                leg.origin,
+                prev?.arrivalPlatform,
+                next?.departurePlatform,
+                primaryTypes: {
+                  ...primaryPoiTypesForProduct(prev?.line?.product),
+                  ...primaryPoiTypesForProduct(next?.line?.product),
+                },
+              ),
     );
   }
 
   /// Open the platform-to-platform map straight away (no intermediate screen):
   /// Einstieg Gleis green, Ausstieg Gleis red, both with their section bands.
   void _openTransferMap(BuildContext context, WidgetRef ref, Station station,
-      String? arrGleis, String? depGleis) {
+      String? arrGleis, String? depGleis,
+      {Set<String>? primaryTypes}) {
     final note = (arrGleis != null && depGleis != null)
         ? 'Ausstieg Gleis $arrGleis · Einstieg Gleis $depGleis'
         : depGleis != null
@@ -621,6 +631,7 @@ class _ConnectionDetailScreenState
           secondaryGleis: arrGleis, // Ausstieg — secondary, red
           secondaryRole: GleisRole.alight,
           transferNote: note,
+          primaryTypes: primaryTypes,
         );
     context.push('/station-map');
   }
@@ -658,7 +669,17 @@ class _ConnectionDetailScreenState
       warn: warn,
       onTap: station.name.isEmpty
           ? null
-          : () => _openTransferMap(context, ref, station, arrGleis, depGleis),
+          : () => _openTransferMap(
+                context,
+                ref,
+                station,
+                arrGleis,
+                depGleis,
+                primaryTypes: {
+                  ...primaryPoiTypesForProduct(prev.line?.product),
+                  ...primaryPoiTypesForProduct(next.line?.product),
+                },
+              ),
     );
   }
 
@@ -981,6 +1002,7 @@ class _LegSectionState extends ConsumerState<_LegSection>
               : stop.isOrigin
                   ? GleisRole.board
                   : GleisRole.none,
+          primaryTypes: primaryPoiTypesForProduct(widget.leg.line?.product),
         );
     context.push('/station-map');
   }

@@ -11,6 +11,27 @@ import 'service_providers.dart';
 /// wording: where you get on (Einstieg), off (Ausstieg) or change (Umstieg).
 enum GleisRole { board, alight, transfer, none }
 
+/// The default-shown POI category: just the Gleise. Everything else
+/// (lifts, stairs, lockers, exits, bus/tram stops …) starts hidden and is
+/// re-enabled per-category from the legend, so the map opens uncluttered.
+const kDefaultPrimaryTypes = {'PLATFORM'};
+
+/// Which POI category is the *relevant* one to show by default for a leg of
+/// this transport [product] — Gleise for a train/S-Bahn, bus stops for a bus,
+/// U-Bahn entrances for a subway. Everything not in this set starts hidden.
+Set<String> primaryPoiTypesForProduct(String? product) {
+  switch (product) {
+    case 'bus':
+      return const {'BUS', 'RAIL_REPLACEMENT_TRANSPORT'};
+    case 'subway':
+      return const {'SUBWAY'};
+    default:
+      // All rail products (nationalExpress/national/regional/suburban …) ride
+      // on Gleise; unknown products fall back to Gleise too.
+      return kDefaultPrimaryTypes;
+  }
+}
+
 /// Normalise a track label to its base id ("6A-C" → "6", "2 A-C" → "2").
 String normalizeGleis(String g) {
   g = g.trim();
@@ -424,6 +445,11 @@ class StationMapState {
 class StationMapNotifier extends Notifier<StationMapState> {
   StationMapService get _service => ref.read(stationMapServiceProvider);
 
+  /// The journey-relevant categories to show by default for the current load
+  /// (e.g. Gleise for a train, bus stops for a bus). Used in [_load] to compute
+  /// the default-hidden set once the map's categories are known.
+  Set<String> _primaryTypes = kDefaultPrimaryTypes;
+
   @override
   StationMapState build() => const StationMapState();
 
@@ -436,7 +462,9 @@ class StationMapNotifier extends Notifier<StationMapState> {
       String? transferNote,
       GleisRole role = GleisRole.board,
       String? secondaryGleis,
-      GleisRole secondaryRole = GleisRole.none}) async {
+      GleisRole secondaryRole = GleisRole.none,
+      Set<String>? primaryTypes}) async {
+    _primaryTypes = primaryTypes ?? kDefaultPrimaryTypes;
     final raw = highlightGleis?.trim() ?? '';
     final hl = raw.isNotEmpty ? normalizeGleis(raw) : null;
     final section = raw.isNotEmpty ? parseGleisSection(raw) : null;
@@ -463,6 +491,7 @@ class StationMapNotifier extends Notifier<StationMapState> {
   }
 
   Future<void> loadBySlug(String slug) async {
+    _primaryTypes = kDefaultPrimaryTypes;
     state = state.copyWith(clearHighlight: true);
     await _load(() => _service.fetchBySlug(slug));
   }
@@ -480,7 +509,10 @@ class StationMapNotifier extends Notifier<StationMapState> {
       state = state.copyWith(
         map: map,
         selectedLevel: level,
-        hiddenCategories: const {},
+        // Open uncluttered: hide every category except the journey-relevant
+        // one(s). The rider re-enables lifts/exits/lockers/etc. via the legend.
+        hiddenCategories:
+            map.pois.map((p) => p.type).toSet().difference(_primaryTypes),
         isLoading: false,
       );
     } on StationMapException catch (e) {

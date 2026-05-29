@@ -83,7 +83,9 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/station-map',
       parentNavigatorKey: _rootNavigatorKey,
-      builder: (context, state) => const StationMapScreen(),
+      // Dedicated mode: opened for a specific station from a journey/stop, so
+      // no station search field and no app overflow menu — just this map.
+      builder: (context, state) => const StationMapScreen(dedicated: true),
     ),
     // Full multi-leg connection detail (pushed from a search result).
     GoRoute(

@@ -334,6 +334,8 @@ class _TrainLookupScreenState extends ConsumerState<TrainLookupScreen>
                         : stop.isOrigin
                             ? GleisRole.board
                             : GleisRole.none,
+                    primaryTypes:
+                        primaryPoiTypesForProduct(trip.line.product),
                   );
               // push (not go) → full-screen with a back button + swipe-back.
               context.push('/station-map');
