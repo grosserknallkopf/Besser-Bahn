@@ -55,21 +55,21 @@ class SeatPlanBody extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Tappable collapse header.
+        // Tappable collapse header (compact).
         InkWell(
           onTap: onToggle,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             child: Row(
               children: [
-                const Icon(Icons.event_seat, size: 20, color: AppColors.onTime),
-                const SizedBox(width: 10),
+                const Icon(Icons.event_seat, size: 17, color: AppColors.onTime),
+                const SizedBox(width: 8),
                 Expanded(
                   child: Text('Freie Sitzplätze',
-                      style: theme.textTheme.titleSmall
+                      style: theme.textTheme.bodyMedium
                           ?.copyWith(fontWeight: FontWeight.bold)),
                 ),
-                Icon(expanded ? Icons.expand_less : Icons.expand_more),
+                Icon(expanded ? Icons.expand_less : Icons.expand_more, size: 20),
               ],
             ),
           ),
@@ -190,11 +190,11 @@ class SeatPlanBody extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-                width: 14,
-                height: 14,
+                width: 11,
+                height: 11,
                 decoration: BoxDecoration(
                     color: c, borderRadius: BorderRadius.circular(3))),
-            const SizedBox(width: 6),
+            const SizedBox(width: 5),
             Text(label, style: theme.textTheme.labelSmall),
           ],
         );
@@ -369,7 +369,7 @@ class CoachSeatPlan extends StatelessWidget {
 
   const CoachSeatPlan({super.key, required this.coach, required this.layout});
 
-  static const _unit = 8.0; // px per grid unit
+  static const _unit = 7.0; // px per grid unit
   static const _margin = 2.0; // grid-unit padding around the content
 
   @override

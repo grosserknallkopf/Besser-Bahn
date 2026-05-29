@@ -43,14 +43,14 @@ class CoachSequenceView extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
             Row(
               children: [
                 Text('Wagenreihung',
-                    style: theme.textTheme.titleMedium
+                    style: theme.textTheme.titleSmall
                         ?.copyWith(fontWeight: FontWeight.bold)),
                 const Spacer(),
                 Text('Gleis ${sequence.departurePlatform}',
@@ -67,12 +67,12 @@ class CoachSequenceView extends StatelessWidget {
               ],
             ),
 
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
 
             // Sector labels
             if (sequence.platform.sectors.isNotEmpty && platformLength > 0)
               SizedBox(
-                height: 24,
+                height: 16,
                 child: Row(
                   children: [
                     for (final sector in sequence.platform.sectors)
@@ -90,7 +90,7 @@ class CoachSequenceView extends StatelessWidget {
                           child: Text(
                             sector.name,
                             style: TextStyle(
-                              fontSize: 12,
+                              fontSize: 10,
                               fontWeight: FontWeight.bold,
                               color: theme.colorScheme.onSurfaceVariant,
                             ),
@@ -130,11 +130,11 @@ class CoachSequenceView extends StatelessWidget {
               ),
             ),
 
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
 
             // Legend
             Wrap(
-              spacing: 12,
+              spacing: 10,
               runSpacing: 4,
               children: [
                 _legendItem(AppColors.firstClass, '1. Klasse'),
@@ -183,15 +183,15 @@ class CoachSequenceView extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          width: 12,
-          height: 12,
+          width: 10,
+          height: 10,
           decoration: BoxDecoration(
             color: color,
             borderRadius: BorderRadius.circular(2),
           ),
         ),
         const SizedBox(width: 4),
-        Text(label, style: const TextStyle(fontSize: 11)),
+        Text(label, style: const TextStyle(fontSize: 10)),
       ],
     );
   }
@@ -210,27 +210,27 @@ class _FreeSeatBadge extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         SizedBox(
-          width: 14,
-          height: 14,
+          width: 11,
+          height: 11,
           child: Stack(
             alignment: Alignment.center,
             children: [
               Icon(Icons.event_seat,
-                  size: 13,
+                  size: 11,
                   color: full ? AppColors.closedCoach : AppColors.onTime),
               if (full)
                 Transform.rotate(
                   angle: -0.7,
-                  child: Container(width: 16, height: 1.8, color: AppColors.delay),
+                  child: Container(width: 13, height: 1.6, color: AppColors.delay),
                 ),
             ],
           ),
         ),
-        const SizedBox(width: 3),
+        const SizedBox(width: 2),
         Text(
           full ? 'voll' : '$free',
           style: TextStyle(
-            fontSize: 10,
+            fontSize: 9,
             fontWeight: FontWeight.w700,
             color: full ? AppColors.closedCoach : AppColors.onTime,
           ),
@@ -288,32 +288,32 @@ class _Car extends StatelessWidget {
     final borderColor = isSelected ? AppColors.onTime : accent;
 
     final car = Container(
-      width: isLoco ? 40 : 54,
-      height: 46,
+      width: isLoco ? 32 : 44,
+      height: 38,
       decoration: BoxDecoration(
         color: isSelected
             ? AppColors.onTime.withValues(alpha: 0.16)
             : isLoco
                 ? AppColors.locomotive
                 : theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(5),
-        border: Border.all(color: borderColor, width: isSelected ? 3 : 2),
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: borderColor, width: isSelected ? 2.5 : 1.5),
       ),
       clipBehavior: Clip.antiAlias,
       child: isLoco
           ? const Center(
-              child: Icon(Icons.train, color: Colors.white, size: 20))
+              child: Icon(Icons.train, color: Colors.white, size: 16))
           : Column(
               children: [
                 // class stripe
-                Container(height: 5, color: accent),
+                Container(height: 4, color: accent),
                 // window band
                 Expanded(
                   child: Center(
                     child: Text(
                       coach.wagonNumber > 0 ? '${coach.wagonNumber}' : '–',
                       style: TextStyle(
-                        fontSize: 14,
+                        fontSize: 12,
                         fontWeight: FontWeight.bold,
                         color: open ? null : Colors.grey,
                       ),
@@ -322,22 +322,22 @@ class _Car extends StatelessWidget {
                 ),
                 // free-seat badge when selecting; amenity icons otherwise.
                 SizedBox(
-                  height: 15,
+                  height: 13,
                   child: freeCount != null
                       ? _FreeSeatBadge(free: freeCount!)
                       : Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
                             if (coach.hasBikeSpace)
-                              const Icon(Icons.pedal_bike, size: 11),
+                              const Icon(Icons.pedal_bike, size: 9),
                             if (coach.hasQuietZone)
-                              const Icon(Icons.volume_off, size: 11),
+                              const Icon(Icons.volume_off, size: 9),
                             if (coach.hasFamilyZone)
-                              const Icon(Icons.family_restroom, size: 11),
+                              const Icon(Icons.family_restroom, size: 9),
                             if (coach.hasWheelchairSpace)
-                              const Icon(Icons.accessible, size: 11),
+                              const Icon(Icons.accessible, size: 9),
                             if (coach.isRestaurant)
-                              const Icon(Icons.restaurant, size: 11),
+                              const Icon(Icons.restaurant, size: 9),
                           ],
                         ),
                 ),
@@ -388,7 +388,7 @@ class _NoseCap extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return CustomPaint(
-      size: const Size(34, 46),
+      size: const Size(28, 38),
       painter: _NosePainter(front: front),
     );
   }
