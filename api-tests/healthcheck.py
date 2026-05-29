@@ -208,6 +208,45 @@ def check_vendo_journey() -> str:
     return f"{len(conns)} journeys, first has {len(legs)} legs{price_txt}"
 
 
+def check_vendo_train_polyline() -> str:
+    """
+    GET /mob/zuglauf/{id} — the exact track geometry DB Navigator draws on its
+    map (polylineGroup.polylineDesc[].coordinates). Powers the app's route map
+    (services/vendo_service.fetchTripPolyline). Id is the bahn.de departures
+    journeyId / a vendo leg's zuglaufId (same HAFAS-style string).
+    """
+    now = datetime.now()
+    dep = requests.get(
+        "https://www.bahn.de/web/api/reiseloesung/abfahrten",
+        params={"datum": now.strftime("%Y-%m-%d"),
+                "zeit": now.strftime("%H:%M:00"),
+                "ortExtId": BERLIN_HBF, "mitVias": "false"},
+        headers=_browser_headers(), timeout=TIMEOUT,
+    )
+    dep.raise_for_status()
+    entries = dep.json().get("entries", [])
+    if not entries:
+        raise CheckError("no departures to derive a zuglaufId")
+    jid = entries[0]["journeyId"]
+
+    media = "application/x.db.vendo.mob.zuglauf.v2+json"
+    import urllib.parse
+    r = requests.get(
+        f"https://app.services-bahn.de/mob/zuglauf/{urllib.parse.quote(jid, safe='')}",
+        headers=_vendo_headers(media), timeout=TIMEOUT,
+    )
+    r.raise_for_status()
+    data = r.json()
+    descs = (data.get("polylineGroup") or {}).get("polylineDesc") or []
+    pts = [c for d in descs for c in (d.get("coordinates") or [])]
+    if not pts:
+        raise CheckError("no polylineGroup.polylineDesc coordinates")
+    first = pts[0]
+    if "latitude" not in first or "longitude" not in first:
+        raise CheckError("coordinate missing latitude/longitude")
+    return f"{len(pts)} track points (first {first['latitude']},{first['longitude']})"
+
+
 def check_bahnhof_map() -> str:
     r = requests.get("https://www.bahnhof.de/hamburg-hbf/karte",
                      headers=_browser_headers(), timeout=TIMEOUT)
@@ -359,6 +398,7 @@ CHECKS = [
     ("bahn.de train run (fahrt)", check_bahn_train_run, False),
     ("vendo location search", check_vendo_location, False),
     ("vendo journey + prices (v9)", check_vendo_journey, False),
+    ("vendo train polyline (zuglauf)", check_vendo_train_polyline, False),
     ("bahnhof.de station map (karte)", check_bahnhof_map, False),
     ("map bay ↔ departures link", check_bay_departure_link, True),
     ("map Gleis ↔ departures (normalised)", check_gleis_departure_link, False),

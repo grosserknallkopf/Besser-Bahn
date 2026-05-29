@@ -19,6 +19,27 @@ git add -A && git commit -m "<conventional message>" && git push
   `upload_certificate.pem`, `pepk.jar`), `key.properties`. These are gitignored —
   keep them that way.
 
+## Network / endpoints — health-check discipline
+
+`api-tests/healthcheck.py` probes every upstream endpoint the app depends on and
+asserts the response still has the shape we parse.
+
+- **At the start of every session that touches network/data code, run it first**
+  (`cd api-tests && python3 healthcheck.py`). If a hard check fails, an upstream
+  endpoint changed — investigate and switch/fix the endpoint *before* doing other
+  work, don't build on a broken API.
+- **Whenever you add or change networking** (a new endpoint, media type, request
+  shape, or response parsing), **add or extend a check in `healthcheck.py`** to
+  cover it, and run the script to confirm it passes.
+- Soft checks (`soft=True`) warn instead of fail — use for known-flaky sources
+  (e.g. the public HAFAS mirror).
+
+## Repo hygiene
+
+Only Flutter app code, the prediction service, api-tests, and docs belong in the
+repo. Do **not** commit dev artifacts: screenshots (`screenshot-*.png`), tool
+caches (`.playwright-mcp/`), signing keys. They're gitignored — keep them out.
+
 ## Architecture notes
 
 - Data layer prefers the **DB Vendo backend** (`app.services-bahn.de/mob`, the
