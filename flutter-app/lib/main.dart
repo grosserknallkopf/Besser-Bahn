@@ -1,6 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:besser_bahn/app_config.dart'; // Import app configuration
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import 'app.dart';
 
 void main() {
-  runApp(const SplitTicketApp());
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(
+    const ProviderScope(
+      child: BessereBahnApp(),
+    ),
+  );
 }

@@ -43,3 +43,10 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Android signing / Play upload key — NEVER commit (secrets)
+android/encrypted_upload_key.zip
+android/upload_certificate.pem
+android/pepk.jar
+*.keystore
+*.jks

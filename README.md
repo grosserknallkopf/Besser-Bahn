@@ -119,6 +119,7 @@ Es ist wichtig, sich der Datenschutzaspekte beim Nutzen digitaler Angebote der D
 - [x] Logo zur Android-App hinzufügen
 - [ ] die totale menge an geld die man gespart hat tracken.
 - [ ] Ratelimit mit proxys oder so umgehen
+- [ ] Onboard-Zugdaten via WifiOnICE/ICE-Portal anzeigen (Geschwindigkeit, GPS-Position, nächste Halte, Verspätung). Quelle: `https://iceportal.de/api1/rs/status` (Tempo/GPS/Zugtyp) und `https://iceportal.de/api1/rs/tripInfo/trip` (Halte/Verspätung) — nur im Zug-WLAN erreichbar. App soll automatisch erkennen, ob ein solches Portal aktiv ist, und die Live-Daten einblenden. **Nur im Zug umsetzbar/testbar.**
 
 
 ## Spenden

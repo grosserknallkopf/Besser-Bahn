@@ -1,8 +1,8 @@
 name: besser_bahn
-description: "Find cheaper split ticket options for Deutsche Bahn journeys."
+description: "Die bessere Bahn-App. Privacy-first, für Vielfahrer."
 publish_to: 'none'
 
-version: 1.0.3+7
+version: 2.0.0+1
 
 environment:
   sdk: ^3.8.1
@@ -11,27 +11,32 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_riverpod: ^2.6.1
+  go_router: ^14.8.1
   http: ^1.1.0
   url_launcher: ^6.1.12
+  flutter_map: ^7.0.2
+  latlong2: ^0.9.1
+  intl: ^0.19.0
+  shared_preferences: ^2.3.4
+  flutter_svg: ^2.0.9
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
   flutter_launcher_icons: ^0.13.1
-  flutter_svg: ^2.0.9  # Added for SVG support
 
 # Flutter launcher icons configuration
 flutter_launcher_icons:
   android: true
   ios: true
   remove_alpha_ios: true
-  image_path_android: "assets/icon/app_icon.png"  # PNG fallback for Android
-  image_path_ios: "assets/icon/app_icon.png"  # PNG fallback for iOS
-  adaptive_icon_background: "#EC0016"  # DB Red color
-  adaptive_icon_foreground: "assets/icon/app_icon.png"  # PNG for adaptive icon foreground
-  adaptive_icon_monochrome: "assets/icon/app_icon_monochrome.png"  # Enables Material You themed icon
-  # SVG support
+  image_path_android: "assets/icon/app_icon.png"
+  image_path_ios: "assets/icon/app_icon.png"
+  adaptive_icon_background: "#EC0016"
+  adaptive_icon_foreground: "assets/icon/app_icon.png"
+  adaptive_icon_monochrome: "assets/icon/app_icon_monochrome.png"
   web:
     generate: false
   windows:
@@ -42,13 +47,5 @@ flutter_launcher_icons:
 flutter:
   uses-material-design: true
 
-  # Add your assets here
   assets:
     - assets/icon/
-    # Add other asset folders as needed
-
-  # Uncomment and add custom fonts if needed
-  # fonts:
-  #   - family: Schyler
-  #     fonts:
-  #       - asset: fonts/Schyler-Regular.ttf

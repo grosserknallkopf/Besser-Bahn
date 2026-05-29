@@ -9,3 +9,5 @@ wheels/
 # Virtual environments
 .venv
 key.properties
+# Tool caches
+.playwright-mcp/

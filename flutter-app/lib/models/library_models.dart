@@ -1,0 +1,97 @@
+import 'station.dart';
+
+/// A station the user has searched for or starred. [pinned] means it shows in
+/// the favorites list — set manually (tap star) or automatically once
+/// [useCount] crosses the auto-star threshold. Even unpinned entries are kept
+/// to power the "recents" suggestions.
+class FavoriteStation {
+  final Station station;
+  final bool pinned;
+  final int useCount;
+  final int lastUsedMs;
+
+  const FavoriteStation({
+    required this.station,
+    this.pinned = false,
+    this.useCount = 0,
+    this.lastUsedMs = 0,
+  });
+
+  FavoriteStation copyWith({
+    bool? pinned,
+    int? useCount,
+    int? lastUsedMs,
+  }) {
+    return FavoriteStation(
+      station: station,
+      pinned: pinned ?? this.pinned,
+      useCount: useCount ?? this.useCount,
+      lastUsedMs: lastUsedMs ?? this.lastUsedMs,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'station': station.toJson(),
+        'pinned': pinned,
+        'useCount': useCount,
+        'lastUsedMs': lastUsedMs,
+      };
+
+  factory FavoriteStation.fromJson(Map<String, dynamic> json) =>
+      FavoriteStation(
+        station:
+            Station.fromJson(json['station'] as Map<String, dynamic>? ?? {}),
+        pinned: json['pinned'] as bool? ?? false,
+        useCount: json['useCount'] as int? ?? 0,
+        lastUsedMs: json['lastUsedMs'] as int? ?? 0,
+      );
+}
+
+/// A saved origin→destination pair for one-tap re-search.
+class SavedRoute {
+  final Station from;
+  final Station to;
+
+  const SavedRoute({required this.from, required this.to});
+
+  /// Stable identity, used for dedup and toggling.
+  String get key => '${from.id}_${to.id}';
+
+  Map<String, dynamic> toJson() => {
+        'from': from.toJson(),
+        'to': to.toJson(),
+      };
+
+  factory SavedRoute.fromJson(Map<String, dynamic> json) => SavedRoute(
+        from: Station.fromJson(json['from'] as Map<String, dynamic>? ?? {}),
+        to: Station.fromJson(json['to'] as Map<String, dynamic>? ?? {}),
+      );
+}
+
+/// A saved train. [query] is what gets fed back into the train lookup (e.g.
+/// "ICE 148"); [label] is the human-readable name shown on the chip.
+class SavedTrain {
+  final String query;
+  final String label;
+  final String? fromStationId;
+
+  const SavedTrain({
+    required this.query,
+    required this.label,
+    this.fromStationId,
+  });
+
+  String get key => fromStationId == null ? query : '$query@$fromStationId';
+
+  Map<String, dynamic> toJson() => {
+        'query': query,
+        'label': label,
+        'fromStationId': fromStationId,
+      };
+
+  factory SavedTrain.fromJson(Map<String, dynamic> json) => SavedTrain(
+        query: json['query'] as String? ?? '',
+        label: json['label'] as String? ?? '',
+        fromStationId: json['fromStationId'] as String?,
+      );
+}

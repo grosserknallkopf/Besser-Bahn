@@ -1,0 +1,22 @@
+<en-GB>
+First Google Play release!
+
+• Find cheaper split-ticket options for Deutsche Bahn journeys
+• Save up to 60% on long-distance train tickets
+• BahnCard 25/50 support (1st & 2nd class)
+• Deutschland-Ticket integration
+• Direct booking links to bahn.de
+• 100% local - no data collection, no ads
+• Open source & free
+</en-GB>
+<de-DE>
+Erste Google Play Veröffentlichung!
+
+• Finde günstigere Split-Ticket-Optionen für Deutsche Bahn Verbindungen
+• Spare bis zu 60% auf Fernverkehrstickets
+• BahnCard 25/50 Unterstützung (1. & 2. Klasse)
+• Deutschland-Ticket Integration
+• Direkte Buchungslinks zu bahn.de
+• 100% lokal - keine Datensammlung, keine Werbung
+• Open Source & kostenlos
+</de-DE>
