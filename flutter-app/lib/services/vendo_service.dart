@@ -21,6 +21,8 @@ class VendoService {
       'application/x.db.vendo.mob.verbindungssuche.v9+json';
   static const _locationMedia = 'application/x.db.vendo.mob.location.v3+json';
   static const _zuglaufMedia = 'application/x.db.vendo.mob.zuglauf.v2+json';
+  static const _shareMedia =
+      'application/x.db.vendo.mob.verbindungteilen.v1+json';
 
   final _rng = Random();
 
@@ -119,6 +121,47 @@ class VendoService {
       earlierRef: data['frueherContext'] as String?,
       laterRef: data['spaeterContext'] as String?,
     );
+  }
+
+  /// Official bahn.de "Reise teilen" deep link for [journey] — the exact same
+  /// `vbid` link the DB Navigator app produces. It opens the EXACT connection
+  /// (all legs, this departure) on bahn.de, NOT a pre-filled search.
+  ///
+  /// Flow (mirrors the app): POST the connection's full HAFAS recon context
+  /// (`GH`, == the search response's `verbindung.kontext`) to `/teilen`; the
+  /// backend mints a short `vbid` that resolves to the journey. Returns null if
+  /// the journey carries no recon context (then the caller should fall back to
+  /// a pre-filled search link).
+  Future<String?> shareJourney(Journey journey) async {
+    final recon = journey.refreshToken;
+    // `/teilen` needs the full HAFAS recon string. The `checksum` fallback we
+    // also store in refreshToken (e.g. "43bc223b_3") is NOT a recon ctx — the
+    // `¶` marker distinguishes them. Bail so the caller can use a search link.
+    if (recon == null || !recon.contains('¶')) return null;
+
+    final dep = journey.plannedDeparture ?? journey.departure;
+    final body = <String, dynamic>{
+      'GH': recon,
+      if (dep != null) 'HD': _isoWithOffset(dep),
+      'SO': journey.origin?.name ?? '',
+      'ZO': journey.destination?.name ?? '',
+    };
+    final url = '$_base/angebote/verbindung/teilen';
+    final res = await _client
+        .post(Uri.parse(url),
+            headers: _headers(_shareMedia),
+            body: utf8.encode(json.encode(body)))
+        .timeout(const Duration(seconds: 10));
+    AppLog.log('teilen HTTP ${res.statusCode} (${res.bodyBytes.length}B)',
+        tag: 'vendo');
+    if (res.statusCode != 201 && res.statusCode != 200) {
+      AppLog.log('teilen non-2xx body: ${_snippet(res.bodyBytes)}', tag: 'vendo');
+      return null;
+    }
+    final data = json.decode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+    final vbid = data['vbid'] as String?;
+    if (vbid == null || vbid.isEmpty) return null;
+    return 'https://www.bahn.de/buchung/start?vbid=$vbid';
   }
 
   /// The exact track geometry (the rails the train actually runs on) for a

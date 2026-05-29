@@ -245,6 +245,75 @@ def check_vendo_journey() -> str:
     return f"{len(conns)} journeys, first has {len(legs)} legs{price_txt}"
 
 
+def check_vendo_share() -> str:
+    """
+    "Reise teilen": POST a connection's full HAFAS recon ctx (verbindung.kontext,
+    field GH) to /angebote/verbindung/teilen → backend mints a `vbid` that
+    resolves to the EXACT connection. Powers VendoService.shareJourney, which
+    builds https://www.bahn.de/buchung/start?vbid=<vbid>. We first search to get
+    a fresh kontext (recon strings are time-bound), then share it.
+    """
+    search_media = "application/x.db.vendo.mob.verbindungssuche.v9+json"
+    search_body = {
+        "autonomeReservierung": False,
+        "einstiegsTypList": ["STANDARD"],
+        "fahrverguenstigungen": {
+            "deutschlandTicketVorhanden": False,
+            "nurDeutschlandTicketVerbindungen": False,
+        },
+        "klasse": "KLASSE_2",
+        "reiseHin": {"wunsch": {
+            "abgangsLocationId": KIEL_LOC,
+            "alternativeHalteBerechnung": True,
+            "verkehrsmittel": ["ALL"],
+            "zeitWunsch": {
+                "reiseDatum": datetime.now().astimezone().isoformat(),
+                "zeitPunktArt": "ABFAHRT",
+            },
+            "zielLocationId": BERLIN_LOC,
+        }},
+        "reisendenProfil": {"reisende": [{
+            "ermaessigungen": ["KEINE_ERMAESSIGUNG KLASSENLOS"],
+            "reisendenTyp": "ERWACHSENER",
+        }]},
+        "reservierungsKontingenteVorhanden": False,
+    }
+    sr = requests.post(
+        "https://app.services-bahn.de/mob/angebote/fahrplan",
+        headers=_vendo_headers(search_media), data=json.dumps(search_body),
+        timeout=TIMEOUT,
+    )
+    sr.raise_for_status()
+    conns = sr.json().get("verbindungen", [])
+    if not conns:
+        raise CheckError("no verbindungen to share")
+    vb = conns[0]["verbindung"]
+    recon = vb.get("kontext")
+    if not recon or "¶" not in recon:
+        raise CheckError("first verbindung carries no recon kontext")
+
+    share_media = "application/x.db.vendo.mob.verbindungteilen.v1+json"
+    abschnitte = vb.get("verbindungsAbschnitte", [])
+    hd = abschnitte[0].get("abgangsDatum") if abschnitte else None
+    share_body = {
+        "GH": recon,
+        "HD": hd,
+        "SO": "Kiel Hbf",
+        "ZO": "Berlin Hbf",
+    }
+    r = requests.post(
+        "https://app.services-bahn.de/mob/angebote/verbindung/teilen",
+        headers=_vendo_headers(share_media), data=json.dumps(share_body),
+        timeout=TIMEOUT,
+    )
+    if r.status_code not in (200, 201):
+        raise CheckError(f"teilen HTTP {r.status_code}")
+    vbid = r.json().get("vbid")
+    if not vbid:
+        raise CheckError("teilen response has no vbid")
+    return f"vbid minted ({vbid[:8]}…) → bahn.de/buchung/start?vbid=…"
+
+
 def check_vendo_journey_pagination() -> str:
     """
     Earlier/later buttons: the journey response carries frueherContext/
@@ -590,6 +659,7 @@ CHECKS = [
     ("vendo location search", check_vendo_location, False),
     ("vendo journey + prices (v9)", check_vendo_journey, False),
     ("vendo journey pagination (context)", check_vendo_journey_pagination, False),
+    ("vendo share journey (teilen vbid)", check_vendo_share, False),
     ("vendo train polyline (zuglauf)", check_vendo_train_polyline, False),
     ("vendo seat map (gsd free seats)", check_vendo_seat_map, False),
     ("bahnhof.de station map (karte)", check_bahnhof_map, False),

@@ -7,6 +7,7 @@ import '../../models/journey.dart';
 import '../../models/library_models.dart';
 import '../../models/station.dart';
 import '../../models/trip.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../providers/library_provider.dart';
@@ -43,6 +44,11 @@ class ConnectionDetailScreen extends ConsumerWidget {
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.ios_share),
+            tooltip: 'Reise teilen',
+            onPressed: () => _shareJourney(context, ref),
+          ),
           IconButton(
             icon: const Icon(Icons.open_in_new),
             tooltip: 'Auf bahn.de öffnen / buchen',
@@ -95,16 +101,50 @@ class ConnectionDetailScreen extends ConsumerWidget {
   /// Open this connection on bahn.de (pre-filled with date + the user's
   /// BahnCard / Deutschland-Ticket) so the price matches and the user can book.
   void _openOnBahn(BuildContext context, WidgetRef ref) {
-    final o = journey.origin, d = journey.destination;
-    final dep = journey.plannedDeparture ?? journey.departure;
-    if (o == null || d == null || dep == null) {
+    final url = _searchLink(ref);
+    if (url == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Verbindung nicht verfügbar.')),
       );
       return;
     }
+    launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  }
+
+  /// Share an official bahn.de "Reise teilen" link to the EXACT connection (the
+  /// `vbid` deep link the DB Navigator app produces). Falls back to a pre-filled
+  /// search link if the journey carries no recon context.
+  Future<void> _shareJourney(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    String? link;
+    try {
+      link = await ref.read(vendoServiceProvider).shareJourney(journey);
+    } catch (_) {/* fall back below */}
+    link ??= _searchLink(ref);
+    if (link == null) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Reise lässt sich nicht teilen.')),
+      );
+      return;
+    }
+    final o = journey.origin?.name ?? '';
+    final d = journey.destination?.name ?? '';
+    await SharePlus.instance.share(
+      ShareParams(
+        text: link,
+        subject: o.isNotEmpty && d.isNotEmpty ? '$o → $d' : 'Bahn-Reise',
+      ),
+    );
+  }
+
+  /// Pre-filled bahn.de fahrplan-suche link (origin/destination, date, BahnCard /
+  /// Deutschland-Ticket) — used for "open/book" and as the share fallback.
+  String? _searchLink(WidgetRef ref) {
+    final o = journey.origin, d = journey.destination;
+    final dep = journey.plannedDeparture ?? journey.departure;
+    if (o == null || d == null || dep == null) return null;
     final s = ref.read(settingsProvider);
-    final url = DbApiService.generateJourneyLink(
+    return DbApiService.generateJourneyLink(
       fromName: o.name,
       toName: d.name,
       fromId: o.id,
@@ -113,7 +153,6 @@ class ConnectionDetailScreen extends ConsumerWidget {
       bahnCard: s.bahnCard,
       deutschlandTicket: s.hasDeutschlandTicket,
     );
-    launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
   }
 
   /// Build the ordered station list (split points) from the journey's legs and

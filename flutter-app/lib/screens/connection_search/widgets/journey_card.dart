@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../../models/journey.dart';
 import '../../../core/extensions.dart';
+import '../../../providers/service_providers.dart';
 import '../../../widgets/delay_badge.dart';
 import '../../../widgets/platform_badge.dart';
 import '../../../widgets/occupancy_indicator.dart';
@@ -27,6 +29,9 @@ class JourneyCard extends ConsumerWidget {
           // Show the FULL connection (all legs + transfers), not just leg 1.
           context.push('/connection', extra: journey);
         },
+        // Long-press shares the official bahn.de "Reise teilen" link to this
+        // exact connection — no need to open the detail screen first.
+        onLongPress: () => _share(context, ref),
         child: Padding(
           padding: const EdgeInsets.all(12),
           child: Row(
@@ -153,6 +158,28 @@ class JourneyCard extends ConsumerWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Future<void> _share(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    String? link;
+    try {
+      link = await ref.read(vendoServiceProvider).shareJourney(journey);
+    } catch (_) {/* no shareable link */}
+    if (link == null) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Reise lässt sich nicht teilen.')),
+      );
+      return;
+    }
+    final o = journey.origin?.name ?? '';
+    final d = journey.destination?.name ?? '';
+    await SharePlus.instance.share(
+      ShareParams(
+        text: link,
+        subject: o.isNotEmpty && d.isNotEmpty ? '$o → $d' : 'Bahn-Reise',
       ),
     );
   }
