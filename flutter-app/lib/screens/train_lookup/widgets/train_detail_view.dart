@@ -119,6 +119,27 @@ class _TrainDetailViewState extends ConsumerState<TrainDetailView> {
     );
   }
 
+  /// Leg-wide amenities derived from the Wagenreihung — shown in the gap
+  /// between the boarding and alighting stop (bike spaces, quiet zone, …).
+  List<({IconData icon, String label})> _legAmenities(CoachSequence? cs) {
+    if (cs == null) return const [];
+    final coaches = cs.allCoaches;
+    final out = <({IconData icon, String label})>[];
+    if (coaches.any((c) => c.hasBikeSpace)) {
+      out.add((icon: Icons.directions_bike, label: 'Fahrradmitnahme'));
+    }
+    if (coaches.any((c) => c.hasWheelchairSpace)) {
+      out.add((icon: Icons.accessible, label: 'Rollstuhlplatz'));
+    }
+    if (coaches.any((c) => c.hasFamilyZone)) {
+      out.add((icon: Icons.family_restroom, label: 'Familienbereich'));
+    }
+    if (coaches.any((c) => c.hasQuietZone)) {
+      out.add((icon: Icons.volume_off, label: 'Ruhebereich'));
+    }
+    return out;
+  }
+
   int? _effectiveWagon(SeatMap? map) {
     if (_selectedWagon != null) return _selectedWagon;
     if (map == null) return null;
