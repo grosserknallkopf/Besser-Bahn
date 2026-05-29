@@ -14,6 +14,10 @@ class CoachSequenceView extends StatelessWidget {
   final int? selectedWagon;
   final void Function(Coach coach)? onCoachTap;
 
+  /// Seat-plan content rendered inside this same card, below the train — so the
+  /// free-seat view lives *in* the Wagenreihung instead of a separate section.
+  final Widget? seatPlan;
+
   const CoachSequenceView({
     super.key,
     required this.sequence,
@@ -21,6 +25,7 @@ class CoachSequenceView extends StatelessWidget {
     this.freeByWagon = const {},
     this.selectedWagon,
     this.onCoachTap,
+    this.seatPlan,
   });
 
   @override
@@ -33,11 +38,15 @@ class CoachSequenceView extends StatelessWidget {
 
     return Card(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
             Row(
               children: [
                 Text('Wagenreihung',
@@ -101,18 +110,22 @@ class CoachSequenceView extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   for (var i = 0; i < coaches.length; i++) ...[
-                    _Car(
-                      coach: coaches[i],
-                      isFront: i == 0,
-                      isRear: i == coaches.length - 1,
-                      selectable: selectable,
-                      freeCount: freeByWagon[coaches[i].wagonNumber],
-                      isSelected: selectedWagon != null &&
-                          coaches[i].wagonNumber == selectedWagon,
-                      onTap: onCoachTap == null
-                          ? null
-                          : () => onCoachTap!(coaches[i]),
-                    ),
+                    if (coaches[i].isLocomotive &&
+                        (i == 0 || i == coaches.length - 1))
+                      _HeadCar(front: i == 0)
+                    else
+                      _Car(
+                        coach: coaches[i],
+                        isFront: i == 0,
+                        isRear: i == coaches.length - 1,
+                        selectable: selectable,
+                        freeCount: freeByWagon[coaches[i].wagonNumber],
+                        isSelected: selectedWagon != null &&
+                            coaches[i].wagonNumber == selectedWagon,
+                        onTap: onCoachTap == null
+                            ? null
+                            : () => onCoachTap!(coaches[i]),
+                      ),
                     if (i < coaches.length - 1) const _Coupler(),
                   ],
                 ],
@@ -157,6 +170,12 @@ class CoachSequenceView extends StatelessWidget {
             ],
           ],
         ),
+      ),
+      if (seatPlan != null) ...[
+        const Divider(height: 1),
+        seatPlan!,
+      ],
+        ],
       ),
     );
   }
@@ -337,4 +356,71 @@ class _Car extends StatelessWidget {
     }
     return parts.join(' · ');
   }
+}
+
+/// An end power car (Triebkopf) drawn as a streamlined ICE nose, not a plain
+/// rounded box. The nose tapers to a soft point at the train's outer end; a
+/// dark windscreen band sits near the tip. [front] = nose points left.
+class _HeadCar extends StatelessWidget {
+  final bool front;
+  const _HeadCar({required this.front});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: 'Triebkopf',
+      child: CustomPaint(
+        size: const Size(58, 46),
+        painter: _NosePainter(front: front),
+      ),
+    );
+  }
+}
+
+class _NosePainter extends CustomPainter {
+  final bool front;
+  const _NosePainter({required this.front});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // Build the silhouette nose-left, then mirror for a rear car.
+    if (!front) {
+      canvas.translate(size.width, 0);
+      canvas.scale(-1, 1);
+    }
+    final w = size.width, h = size.height;
+    const c = 6.0; // rounding of the inner (coupling) end
+
+    final body = Path()
+      ..moveTo(w - c, 0)
+      ..lineTo(w * 0.40, 0)
+      // upper sweep into the nose tip
+      ..cubicTo(w * 0.12, 0, 0, h * 0.18, 0, h * 0.5)
+      // lower sweep back out
+      ..cubicTo(0, h * 0.82, w * 0.12, h, w * 0.40, h)
+      ..lineTo(w - c, h)
+      ..arcToPoint(Offset(w, h - c), radius: const Radius.circular(c))
+      ..lineTo(w, c)
+      ..arcToPoint(Offset(w - c, 0), radius: const Radius.circular(c))
+      ..close();
+
+    canvas.drawPath(body, Paint()..color = AppColors.locomotive);
+    canvas.drawPath(
+      body,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5
+        ..color = Colors.black.withValues(alpha: 0.25),
+    );
+
+    // Windscreen near the tip.
+    final screen = RRect.fromRectAndRadius(
+      Rect.fromLTWH(w * 0.10, h * 0.30, w * 0.20, h * 0.40),
+      const Radius.circular(3),
+    );
+    canvas.drawRRect(screen, Paint()..color = Colors.black.withValues(alpha: 0.38));
+  }
+
+  @override
+  bool shouldRepaint(covariant _NosePainter old) => old.front != front;
 }

@@ -8,18 +8,16 @@ import '../../../models/trip.dart';
 import '../../../services/seat_map_service.dart';
 import '../../../theme/app_colors.dart';
 
-/// The "Freie Sitzplätze" card: a collapsible panel showing, for the coach the
-/// user picked, which seats are free (status 0). The coach picker is the
-/// Wagenreihung train above when present ([hasExternalSelector]); otherwise the
-/// panel draws its own DB-style train strip.
-class SeatPlanSection extends StatelessWidget {
+/// The free-seat panel, rendered *inside* the Wagenreihung card (no separate
+/// section or expand button). Shows, for the coach the user picked on the
+/// train above ([hasExternalSelector]), which seats are free (status 0). When
+/// there's no Wagenreihung, it draws its own DB-style train strip as picker.
+class SeatPlanBody extends StatelessWidget {
   final Trip trip;
-  final bool expanded;
-  final VoidCallback onToggle;
   final bool firstClass;
   final ValueChanged<bool> onFirstClass;
 
-  /// Result of `seatMapProvider`; null while collapsed (not yet watched).
+  /// Result of `seatMapProvider`.
   final AsyncValue<SeatMap?>? seatAsync;
 
   /// The wagon currently selected (already resolved to a sensible default by
@@ -31,11 +29,9 @@ class SeatPlanSection extends StatelessWidget {
   /// must not draw a second strip here.
   final bool hasExternalSelector;
 
-  const SeatPlanSection({
+  const SeatPlanBody({
     super.key,
     required this.trip,
-    required this.expanded,
-    required this.onToggle,
     required this.firstClass,
     required this.onFirstClass,
     required this.seatAsync,
@@ -53,54 +49,21 @@ class SeatPlanSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (!isAvailableFor(trip)) return const SizedBox.shrink();
     final theme = Theme.of(context);
-    return Card(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          InkWell(
-            onTap: onToggle,
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  const Icon(Icons.event_seat, color: AppColors.onTime),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text('Freie Sitzplätze',
-                        style: theme.textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.bold)),
-                  ),
-                  Icon(expanded ? Icons.expand_less : Icons.expand_more),
-                ],
-              ),
-            ),
-          ),
-          if (expanded) ...[
-            const Divider(height: 1),
-            _body(context, theme),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _body(BuildContext context, ThemeData theme) {
     final async = seatAsync;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Class toggle.
+        // Title + class toggle.
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
           child: Row(
             children: [
-              Text('Klasse',
-                  style: theme.textTheme.bodyMedium
-                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+              const Icon(Icons.event_seat, size: 20, color: AppColors.onTime),
+              const SizedBox(width: 8),
+              Text('Freie Sitzplätze',
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.bold)),
               const Spacer(),
               SegmentedButton<bool>(
                 style: const ButtonStyle(visualDensity: VisualDensity.compact),

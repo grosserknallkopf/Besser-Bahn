@@ -144,6 +144,32 @@ class DbApiService {
     ];
   }
 
+  /// Open/book a WHOLE connection on bahn.de: the standard fahrplan-suche deep
+  /// link, pre-filled with origin/destination, date and the user's BahnCard /
+  /// Deutschland-Ticket so the shown price matches the app.
+  static String generateJourneyLink({
+    required String fromName,
+    required String toName,
+    required String fromId,
+    required String toId,
+    required String departureIso,
+    BahnCardType bahnCard = BahnCardType.none,
+    bool deutschlandTicket = false,
+  }) {
+    final from = Uri.encodeComponent(fromName);
+    final to = Uri.encodeComponent(toName);
+    final hd = Uri.encodeComponent(departureIso.split('.').first);
+    final dtFlag = deutschlandTicket ? 'true' : 'false';
+    final bcCode = bahnCard.bookingCode;
+    final bcParam = bcCode.isNotEmpty ? '&rk=$bcCode' : '';
+
+    return 'https://www.bahn.de/buchung/fahrplan/suche#'
+        'sts=true&so=$from&zo=$to'
+        '&soid=$fromId&zoid=$toId'
+        '&hd=$hd'
+        '&dt=$dtFlag$bcParam';
+  }
+
   /// Generate a booking link for a split ticket
   static String generateBookingLink(SplitTicket ticket, {
     BahnCardType bahnCard = BahnCardType.none,

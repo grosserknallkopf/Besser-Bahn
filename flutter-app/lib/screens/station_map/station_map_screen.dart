@@ -179,36 +179,12 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
               onSelected: (s) => notifier.loadForStation(s),
             ),
           ),
-          if (state.transferNote != null)
-            Container(
-              width: double.infinity,
-              margin: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.tertiaryContainer,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.swap_calls,
-                      size: 18,
-                      color:
-                          Theme.of(context).colorScheme.onTertiaryContainer),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      state.transferNote!,
-                      style: TextStyle(
-                        color:
-                            Theme.of(context).colorScheme.onTertiaryContainer,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          if (state.highlightGleis != null && map != null)
+          // Transfer: one legend with colour-matched Ausstieg/Einstieg chips
+          // (red/green = exactly the map colours). Otherwise the single
+          // boarding banner.
+          if (state.secondaryGleis != null && map != null)
+            _transferLegend(context, state)
+          else if (state.highlightGleis != null && map != null)
             _BoardingBanner(
               gleis: state.highlightGleis!,
               section: state.highlightSection,
@@ -216,6 +192,72 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
               note: state.transferNote,
             ),
           Expanded(child: _buildBody(context, state, notifier)),
+        ],
+      ),
+    );
+  }
+
+  /// "Gleis 7 G-I" / "Gleis 14" label for a banner chip.
+  String _gleisLabel(String? g, ({String start, String end})? s) {
+    if (g == null) return '';
+    return s == null ? 'Gleis $g' : 'Gleis $g ${s.start}-${s.end}';
+  }
+
+  /// Colour-matched transfer legend: red Ausstieg → green Einstieg, so the
+  /// banner and the map markers read as the same thing.
+  Widget _transferLegend(BuildContext context, StationMapState state) {
+    Widget chip(IconData icon, String role, String gleis, Color color) {
+      return Expanded(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: color,
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 18, color: Colors.white),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(role,
+                        style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600)),
+                    Text(gleis,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 6),
+      child: Row(
+        children: [
+          chip(Icons.logout, 'Ausstieg',
+              _gleisLabel(state.secondaryGleis, state.secondarySection),
+              roleColor(GleisRole.alight)!),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 6),
+            child: Icon(Icons.arrow_forward, size: 18),
+          ),
+          chip(Icons.login, 'Einstieg',
+              _gleisLabel(state.highlightGleis, state.highlightSection),
+              roleColor(GleisRole.board)!),
         ],
       ),
     );
@@ -340,6 +382,10 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
               MarkerLayer(
                   markers: _sectionMarkers(state.secondarySectionLine,
                       roleColor(state.secondaryRole) ?? Colors.red)),
+            // "Ausstieg"/"Einstieg" labels floating above the two Gleise so
+            // the map itself says which is which.
+            if (state.secondaryGleis != null)
+              MarkerLayer(markers: _roleTagMarkers(state)),
             // "Mein Standort": the direction line to the target, the GPS
             // accuracy circle, and the blue dot — drawn on top of the POIs.
             if (_userFix != null) ...[
@@ -508,6 +554,48 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
           ),
         ),
     ];
+  }
+
+  /// Floating "Ausstieg" (red) / "Einstieg" (green) labels above the two
+  /// highlighted Gleise, so the map is self-explanatory.
+  List<Marker> _roleTagMarkers(StationMapState s) {
+    final out = <Marker>[];
+    void add(MapPoi? poi, GleisRole role, String text) {
+      final c = roleColor(role);
+      if (poi == null || c == null) return;
+      out.add(Marker(
+        point: poi.latLng,
+        width: 100,
+        height: 64,
+        alignment: Alignment.bottomCenter,
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 20),
+          child: Align(
+            alignment: Alignment.bottomCenter,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: c,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: Colors.white, width: 1.5),
+                boxShadow: [
+                  BoxShadow(color: c.withAlpha(120), blurRadius: 6),
+                ],
+              ),
+              child: Text(text,
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold)),
+            ),
+          ),
+        ),
+      ));
+    }
+
+    add(s.secondaryHighlightPoi, s.secondaryRole, 'Ausstieg');
+    add(s.highlightPoi, s.highlightRole, 'Einstieg');
+    return out;
   }
 
   /// Straight-line distance (metres) from the user's fix to the target.
