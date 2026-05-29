@@ -8,7 +8,6 @@ import '../../../core/extensions.dart';
 import '../../../core/share_text.dart';
 import '../../../providers/service_providers.dart';
 import '../../../widgets/delay_badge.dart';
-import '../../../widgets/platform_badge.dart';
 import '../../../widgets/occupancy_indicator.dart';
 import '../../../widgets/prediction_badge.dart';
 
@@ -85,16 +84,6 @@ class JourneyCard extends ConsumerWidget {
                     children: [
                       _timeWithDelay(context, journey.plannedDeparture,
                           journey.legs.firstOrNull?.departureDelay),
-                      if (journey.legs.firstOrNull?.departurePlatform != null ||
-                          journey.legs.firstOrNull?.plannedDeparturePlatform !=
-                              null) ...[
-                        const SizedBox(height: 3),
-                        PlatformChip(
-                          platform: journey.legs.firstOrNull?.departurePlatform,
-                          plannedPlatform:
-                              journey.legs.firstOrNull?.plannedDeparturePlatform,
-                        ),
-                      ],
                     ],
                   ),
 
@@ -116,16 +105,6 @@ class JourneyCard extends ConsumerWidget {
                     children: [
                       _timeWithDelay(context, journey.plannedArrival,
                           journey.legs.lastOrNull?.arrivalDelay),
-                      if (journey.legs.lastOrNull?.arrivalPlatform != null ||
-                          journey.legs.lastOrNull?.plannedArrivalPlatform !=
-                              null) ...[
-                        const SizedBox(height: 3),
-                        PlatformChip(
-                          platform: journey.legs.lastOrNull?.arrivalPlatform,
-                          plannedPlatform:
-                              journey.legs.lastOrNull?.plannedArrivalPlatform,
-                        ),
-                      ],
                     ],
                   ),
                 ],
