@@ -29,7 +29,7 @@ import sys
 import time
 import urllib.parse
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -702,6 +702,7 @@ CHECKS = [
     ("vendo location search", check_vendo_location, False),
     ("vendo journey + prices (v9)", check_vendo_journey, False),
     ("vendo journey pagination (context)", check_vendo_journey_pagination, False),
+    ("vendo weitere abfahrten (segment)", check_vendo_weitere_abfahrten, False),
     ("vendo share journey (teilen vbid)", check_vendo_share, False),
     ("vendo train polyline (zuglauf)", check_vendo_train_polyline, False),
     ("vendo seat map (gsd free seats)", check_vendo_seat_map, False),
