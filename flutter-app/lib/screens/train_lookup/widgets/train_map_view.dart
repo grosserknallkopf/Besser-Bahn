@@ -5,6 +5,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../../core/tile_cache.dart';
 import '../../../models/trip.dart';
 import '../../../providers/service_providers.dart';
 import '../../../theme/app_colors.dart';
@@ -187,6 +188,7 @@ class TrainMap extends StatelessWidget {
           subdomains: const ['a', 'b', 'c', 'd'],
           retinaMode: RetinaMode.isHighDensity(context),
           userAgentPackageName: 'de.chuk.besserebahn',
+          tileProvider: TileCache.provider(),
           maxZoom: 20,
         ),
         PolylineLayer(

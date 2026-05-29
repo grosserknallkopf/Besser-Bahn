@@ -24,6 +24,7 @@ dependencies:
   flutter_web_auth_2: ^5.0.2     # OAuth2 browser flow (Träwelling)
   flutter_secure_storage: ^10.3.1 # access/refresh token storage
   crypto: ^3.0.7                 # PKCE code challenge (SHA-256)
+  flutter_map_tile_caching: ^10.1.1
 
 dev_dependencies:
   flutter_test:
