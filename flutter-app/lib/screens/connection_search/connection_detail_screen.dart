@@ -429,8 +429,7 @@ class _ConnectionDetailScreenState
     final mins = delaySec ~/ 60;
     return Row(
       mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.baseline,
-      textBaseline: TextBaseline.alphabetic,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Text('$label ',
             style: theme.textTheme.bodySmall
@@ -438,14 +437,23 @@ class _ConnectionDetailScreenState
         Text(time.hhmm,
             style: theme.textTheme.titleLarge
                 ?.copyWith(fontWeight: FontWeight.bold)),
+        // Delay as a clear pill (white on red/amber) next to *this* time — so a
+        // late arrival shows behind the arrival time, not a tiny grey "+15".
         if (mins > 0)
           Padding(
-            padding: const EdgeInsets.only(left: 3),
-            child: Text('+$mins',
-                style: TextStyle(
-                    color: mins <= 5 ? Colors.orange : Colors.red,
-                    fontSize: 14,
-                    fontWeight: FontWeight.bold)),
+            padding: const EdgeInsets.only(left: 5),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: mins <= 5 ? Colors.orange.shade700 : Colors.red.shade700,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text('+$mins',
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold)),
+            ),
           ),
       ],
     );
