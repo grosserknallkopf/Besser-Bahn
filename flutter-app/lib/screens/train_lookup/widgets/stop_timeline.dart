@@ -143,7 +143,11 @@ class _StopTimelineState extends State<StopTimeline> {
         expandable: middleCount > 0,
       ));
       // Wagenreihung etc. — part of the train element, inside this same card.
-      if (widget.trainExtra != null) rows.add(widget.trainExtra!);
+      // Wrapped on the spine so its header indents to the same content column as
+      // the rows above and the route line runs continuously down its left side.
+      if (widget.trainExtra != null) {
+        rows.add(_inlineExtra(context, widget.trainExtra!));
+      }
       if (_expandedMiddle && middleCount > 0) {
         for (var i = board + 1; i < alight; i++) {
           rows.add(_stopRow(i, board, alight, hasTop: true, hasBottom: true));
@@ -539,6 +543,36 @@ class _StopTimelineState extends State<StopTimeline> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  /// Wrap a folded sub-section (the Wagenreihung / seat-plan panel) onto the
+  /// route spine: an empty time gutter, the continuous timeline line, then the
+  /// section in the content column. No gap before the content — the section's
+  /// own inner padding (12) supplies it — so its header lines up with the train
+  /// header and stop names above, and the line passes down its left side.
+  Widget _inlineExtra(BuildContext context, Widget child) {
+    final lineColor = Theme.of(context).colorScheme.primary.withAlpha(60);
+    return IntrinsicHeight(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 0, 16, 0),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const SizedBox(width: _kSpineWidth),
+            const SizedBox(width: 12),
+            SizedBox(
+              width: 20,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [Container(width: 2, color: lineColor)],
+              ),
+            ),
+            Expanded(child: child),
+          ],
         ),
       ),
     );
