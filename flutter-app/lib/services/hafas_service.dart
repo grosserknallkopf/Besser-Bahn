@@ -5,7 +5,6 @@ import '../core/constants.dart';
 import '../core/polyline_cache.dart';
 import '../models/station.dart';
 import '../models/departure.dart';
-import '../models/journey.dart';
 import '../models/trip.dart';
 import 'vendo_service.dart';
 
@@ -391,40 +390,6 @@ class HafasService {
       destination: dest,
       stopovers: stopovers,
     );
-  }
-
-  // ============================================================
-  // JOURNEY PAGINATION (HAFAS only, graceful failure)
-  // ============================================================
-
-  Future<JourneyResult> loadMoreJourneys({
-    required String fromId,
-    required String toId,
-    String? earlierThan,
-    String? laterThan,
-    int results = 3,
-    bool stopovers = true,
-  }) async {
-    final params = <String, String>{
-      'from': fromId,
-      'to': toId,
-      'results': results.toString(),
-      'stopovers': stopovers.toString(),
-      'language': 'de',
-    };
-    if (earlierThan != null) params['earlierThan'] = earlierThan;
-    if (laterThan != null) params['laterThan'] = laterThan;
-
-    final uri =
-        Uri.parse('$_hafasBase/journeys').replace(queryParameters: params);
-    final response = await _client
-        .get(uri, headers: _headers)
-        .timeout(const Duration(seconds: 5));
-    if (response.statusCode != 200) {
-      throw Exception('Pagination not available');
-    }
-    final data = json.decode(response.body) as Map<String, dynamic>;
-    return JourneyResult.fromHafas(data);
   }
 
   // ============================================================

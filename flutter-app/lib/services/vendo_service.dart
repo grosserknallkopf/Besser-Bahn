@@ -41,6 +41,7 @@ class VendoService {
     DateTime? dateTime,
     bool isArrival = false,
     bool firstClass = false,
+    String? context,
   }) async {
     final body = {
       'autonomeReservierung': false,
@@ -60,6 +61,10 @@ class VendoService {
             'zeitPunktArt': isArrival ? 'ANKUNFT' : 'ABFAHRT',
           },
           'zielLocationId': toLocationId,
+          // Earlier/later pagination: the DB Navigator backend returns
+          // frueherContext/spaeterContext tokens; replaying one here scrolls
+          // the result window. Field is `context` (English), not `kontext`.
+          if (context != null) 'context': context,
         },
       },
       'reisendenProfil': {
@@ -106,6 +111,8 @@ class VendoService {
           .whereType<Map<String, dynamic>>()
           .map(_parseConnection)
           .toList(),
+      earlierRef: data['frueherContext'] as String?,
+      laterRef: data['spaeterContext'] as String?,
     );
   }
 

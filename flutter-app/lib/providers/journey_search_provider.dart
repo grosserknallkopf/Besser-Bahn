@@ -148,51 +148,56 @@ class JourneySearchNotifier extends Notifier<JourneySearchState> {
     }
   }
 
-  Future<void> loadEarlier() async {
-    final token = state.result?.earlierRef;
+  /// Load earlier connections by replaying the Vendo `frueherContext` token,
+  /// prepending the (deduped) results and advancing the earlier token.
+  Future<void> loadEarlier() => _loadMore(earlier: true);
+
+  /// Load later connections via the `spaeterContext` token.
+  Future<void> loadLater() => _loadMore(earlier: false);
+
+  Future<void> _loadMore({required bool earlier}) async {
+    final current = state.result;
+    final token = earlier ? current?.earlierRef : current?.laterRef;
     if (token == null || state.from == null || state.to == null) return;
 
-    state = state.copyWith(isLoading: true);
+    state = state.copyWith(isLoading: true, error: null);
     try {
-      final hafas = ref.read(hafasServiceProvider);
-      final more = await hafas.loadMoreJourneys(
-        fromId: state.from!.id,
-        toId: state.to!.id,
-        earlierThan: token,
+      final vendo = ref.read(vendoServiceProvider);
+      final more = await vendo.searchJourneys(
+        fromLocationId: state.from!.vendoLocationId,
+        toLocationId: state.to!.vendoLocationId,
+        dateTime: state.dateTime ?? DateTime.now(),
+        isArrival: state.isArrival,
+        context: token,
       );
+
+      // Dedupe against what we already show (paged windows can overlap).
+      final existing = current?.journeys ?? const [];
+      final seen = existing.map(_journeyKey).toSet();
+      final fresh =
+          more.journeys.where((j) => seen.add(_journeyKey(j))).toList();
+
       final combined = JourneyResult(
-        journeys: [...more.journeys, ...?state.result?.journeys],
-        earlierRef: more.earlierRef,
-        laterRef: state.result?.laterRef,
+        journeys: earlier
+            ? [...fresh, ...existing]
+            : [...existing, ...fresh],
+        // Advance only the token we scrolled; keep the other end intact.
+        earlierRef: earlier ? more.earlierRef : current?.earlierRef,
+        laterRef: earlier ? current?.laterRef : more.laterRef,
       );
       state = state.copyWith(result: combined, isLoading: false);
     } catch (e) {
+      AppLog.log('loadMore(${earlier ? "earlier" : "later"}) failed: $e',
+          tag: 'journey');
       state = state.copyWith(isLoading: false);
     }
   }
 
-  Future<void> loadLater() async {
-    final token = state.result?.laterRef;
-    if (token == null || state.from == null || state.to == null) return;
-
-    state = state.copyWith(isLoading: true);
-    try {
-      final hafas = ref.read(hafasServiceProvider);
-      final more = await hafas.loadMoreJourneys(
-        fromId: state.from!.id,
-        toId: state.to!.id,
-        laterThan: token,
-      );
-      final combined = JourneyResult(
-        journeys: [...?state.result?.journeys, ...more.journeys],
-        earlierRef: state.result?.earlierRef,
-        laterRef: more.laterRef,
-      );
-      state = state.copyWith(result: combined, isLoading: false);
-    } catch (e) {
-      state = state.copyWith(isLoading: false);
-    }
-  }
+  /// Stable identity for a journey, to dedupe overlapping paged windows.
+  String _journeyKey(Journey j) =>
+      j.refreshToken ??
+      '${j.departure?.toIso8601String()}|${j.arrival?.toIso8601String()}'
+          '|${j.legs.firstOrNull?.line?.name ?? ''}';
 
   void clear() {
     state = const JourneySearchState();

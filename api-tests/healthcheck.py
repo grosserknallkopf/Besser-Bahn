@@ -208,6 +208,64 @@ def check_vendo_journey() -> str:
     return f"{len(conns)} journeys, first has {len(legs)} legs{price_txt}"
 
 
+def check_vendo_journey_pagination() -> str:
+    """
+    Earlier/later buttons: the journey response carries frueherContext/
+    spaeterContext tokens; replaying one in reiseHin.wunsch.context scrolls the
+    window. Verify the token comes back and earlier actually returns earlier
+    departures (powers loadEarlier/loadLater in journey_search_provider).
+    """
+    media = "application/x.db.vendo.mob.verbindungssuche.v9+json"
+
+    def body(context: str | None = None) -> dict:
+        wunsch = {
+            "abgangsLocationId": KIEL_LOC,
+            "alternativeHalteBerechnung": True,
+            "verkehrsmittel": ["ALL"],
+            "zeitWunsch": {
+                "reiseDatum": datetime.now().astimezone().isoformat(),
+                "zeitPunktArt": "ABFAHRT",
+            },
+            "zielLocationId": BERLIN_LOC,
+        }
+        if context:
+            wunsch["context"] = context
+        return {
+            "autonomeReservierung": False, "einstiegsTypList": ["STANDARD"],
+            "fahrverguenstigungen": {"deutschlandTicketVorhanden": False,
+                                     "nurDeutschlandTicketVerbindungen": False},
+            "klasse": "KLASSE_2", "reiseHin": {"wunsch": wunsch},
+            "reisendenProfil": {"reisende": [{
+                "ermaessigungen": ["KEINE_ERMAESSIGUNG KLASSENLOS"],
+                "reisendenTyp": "ERWACHSENER"}]},
+            "reservierungsKontingenteVorhanden": False,
+        }
+
+    def first_dep(d: dict):
+        c = d.get("verbindungen", [])
+        if not c:
+            return None
+        return c[0]["verbindung"]["verbindungsAbschnitte"][0].get("abgangsDatum")
+
+    url = "https://app.services-bahn.de/mob/angebote/fahrplan"
+    base = requests.post(url, headers=_vendo_headers(media),
+                         data=json.dumps(body()), timeout=TIMEOUT)
+    base.raise_for_status()
+    bd = base.json()
+    tok = bd.get("frueherContext")
+    if not tok:
+        raise CheckError("no frueherContext token in journey response")
+    earlier = requests.post(url, headers=_vendo_headers(media),
+                            data=json.dumps(body(tok)), timeout=TIMEOUT)
+    earlier.raise_for_status()
+    ed = earlier.json()
+    b0, e0 = first_dep(bd), first_dep(ed)
+    if not e0 or not b0 or e0 >= b0:
+        raise CheckError(f"earlier ctx did not return earlier trains "
+                         f"(base={b0}, earlier={e0})")
+    return f"pagination ok (base {b0[11:16]} -> earlier {e0[11:16]})"
+
+
 def check_vendo_train_polyline() -> str:
     """
     GET /mob/zuglauf/{id} — the exact track geometry DB Navigator draws on its
@@ -398,6 +456,7 @@ CHECKS = [
     ("bahn.de train run (fahrt)", check_bahn_train_run, False),
     ("vendo location search", check_vendo_location, False),
     ("vendo journey + prices (v9)", check_vendo_journey, False),
+    ("vendo journey pagination (context)", check_vendo_journey_pagination, False),
     ("vendo train polyline (zuglauf)", check_vendo_train_polyline, False),
     ("bahnhof.de station map (karte)", check_bahnhof_map, False),
     ("map bay ↔ departures link", check_bay_departure_link, True),
