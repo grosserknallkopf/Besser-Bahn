@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'departure.dart';
 import 'journey.dart' show OccupancyLevel;
 import 'station.dart';
@@ -119,10 +121,28 @@ class Trip {
           final progress = total > 0 ? elapsed / total : 0.0;
 
           if (current.stop.hasLocation && next.stop.hasLocation) {
-            final lat = current.stop.latitude! +
+            // Straight chord between the two stops — the naive estimate. This
+            // cuts across the landscape, so the marker floats off the rails.
+            var lat = current.stop.latitude! +
                 (next.stop.latitude! - current.stop.latitude!) * progress;
-            final lng = current.stop.longitude! +
+            var lng = current.stop.longitude! +
                 (next.stop.longitude! - current.stop.longitude!) * progress;
+
+            // Once the real DB track geometry is loaded, snap onto it: walk the
+            // polyline between the two stops at the same time-progress so the
+            // train sits where it would actually be on the rails.
+            final snapped = _snapToTrack(
+              fromLat: current.stop.latitude!,
+              fromLng: current.stop.longitude!,
+              toLat: next.stop.latitude!,
+              toLng: next.stop.longitude!,
+              progress: progress,
+            );
+            if (snapped != null) {
+              lat = snapped[0];
+              lng = snapped[1];
+            }
+
             return CurrentPosition(
               latitude: lat,
               longitude: lng,
@@ -135,6 +155,82 @@ class Trip {
       }
     }
     return null;
+  }
+
+  /// Snaps a time-progress between two stops onto the real track [polyline].
+  ///
+  /// Finds the polyline vertices nearest the two stops, then walks the track
+  /// between them by [progress] of the cumulative *track* distance (not the
+  /// straight chord). Returns `[lat, lng]`, or `null` when there is no usable
+  /// geometry so the caller keeps the straight-line fallback.
+  List<double>? _snapToTrack({
+    required double fromLat,
+    required double fromLng,
+    required double toLat,
+    required double toLng,
+    required double progress,
+  }) {
+    final poly = polyline;
+    if (poly == null || poly.length < 2) return null;
+
+    final i0 = _nearestIndex(poly, fromLat, fromLng);
+    final i1 = _nearestIndex(poly, toLat, toLng);
+    if (i0 == i1) return null;
+
+    final lo = i0 < i1 ? i0 : i1;
+    final hi = i0 < i1 ? i1 : i0;
+
+    // Cumulative distance along the track slice between the two stops.
+    final seg = <double>[0];
+    var total = 0.0;
+    for (var i = lo; i < hi; i++) {
+      total += _dist(
+          poly[i]['lat']!, poly[i]['lng']!, poly[i + 1]['lat']!, poly[i + 1]['lng']!);
+      seg.add(total);
+    }
+    if (total <= 0) return null;
+
+    // Progress runs from→to; flip it when the track is indexed to→from.
+    final p = i0 <= i1 ? progress : 1 - progress;
+    final target = (p.clamp(0.0, 1.0)) * total;
+
+    for (var i = 0; i < seg.length - 1; i++) {
+      if (target <= seg[i + 1]) {
+        final segLen = seg[i + 1] - seg[i];
+        final t = segLen > 0 ? (target - seg[i]) / segLen : 0.0;
+        final a = poly[lo + i];
+        final b = poly[lo + i + 1];
+        return [
+          a['lat']! + (b['lat']! - a['lat']!) * t,
+          a['lng']! + (b['lng']! - a['lng']!) * t,
+        ];
+      }
+    }
+    final last = poly[hi];
+    return [last['lat']!, last['lng']!];
+  }
+
+  static int _nearestIndex(
+      List<Map<String, double>> poly, double lat, double lng) {
+    var best = 0;
+    var bestD = double.infinity;
+    for (var i = 0; i < poly.length; i++) {
+      final d = _dist(lat, lng, poly[i]['lat']!, poly[i]['lng']!);
+      if (d < bestD) {
+        bestD = d;
+        best = i;
+      }
+    }
+    return best;
+  }
+
+  /// Cheap squared equirectangular distance — fine for nearest-point / segment
+  /// comparisons over a single trip's extent (no sqrt, no earth radius needed).
+  static double _dist(double aLat, double aLng, double bLat, double bLng) {
+    final mLat = (aLat + bLat) * 0.5 * (math.pi / 180);
+    final dLat = bLat - aLat;
+    final dLng = (bLng - aLng) * math.cos(mLat);
+    return dLat * dLat + dLng * dLng;
   }
 }
 
