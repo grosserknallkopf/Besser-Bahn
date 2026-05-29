@@ -3,7 +3,6 @@ import '../../../models/journey.dart' show OccupancyLevel;
 import '../../../models/trip.dart';
 import '../../../core/extensions.dart';
 import '../../../widgets/occupancy_indicator.dart';
-import '../../../widgets/platform_badge.dart';
 
 /// Stop list for a train. When [boardingId]/[alightingId] are given (i.e. the
 /// timeline is shown for one leg of a journey, not a standalone train lookup),
@@ -474,7 +473,7 @@ class _StopRow extends StatelessWidget {
                   children: [
                     Row(
                       children: [
-                        Flexible(
+                        Expanded(
                           child: Text(
                             stopover.stop.name,
                             style: TextStyle(
@@ -495,6 +494,14 @@ class _StopRow extends StatelessWidget {
                               color: muted
                                   ? theme.colorScheme.primary.withAlpha(130)
                                   : theme.colorScheme.primary),
+                        ],
+                        // Gleis lives on the right, on the same line as the
+                        // station name: blue-bordered normally, red-bordered
+                        // (with struck-through old platform) when it changed.
+                        if (stopover.platform != null ||
+                            stopover.plannedPlatform != null) ...[
+                          const SizedBox(width: 8),
+                          _platformChip(context),
                         ],
                       ],
                     ),
@@ -529,11 +536,6 @@ class _StopRow extends StatelessWidget {
                                   color: theme.colorScheme.error,
                                   fontSize: 12,
                                   fontWeight: FontWeight.bold)),
-                        if (stopover.platform != null)
-                          PlatformBadge(
-                            platform: stopover.platform,
-                            plannedPlatform: stopover.plannedPlatform,
-                          ),
                         if (stopover.occupancy != OccupancyLevel.unknown)
                           Row(
                             mainAxisSize: MainAxisSize.min,
@@ -555,6 +557,54 @@ class _StopRow extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// Gleis chip, right-aligned on the station-name line. Blue outline normally;
+  /// red outline + struck-through old platform when the Gleis changed.
+  Widget _platformChip(BuildContext context) {
+    final theme = Theme.of(context);
+    final display = stopover.platform ?? stopover.plannedPlatform;
+    if (display == null || display.isEmpty) return const SizedBox.shrink();
+    final changed = stopover.platform != null &&
+        stopover.plannedPlatform != null &&
+        stopover.platform != stopover.plannedPlatform;
+    final color = changed ? Colors.red : Colors.blue;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withAlpha(muted ? 120 : 200)),
+        color: color.withAlpha(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (changed && stopover.plannedPlatform != null) ...[
+            Text(
+              stopover.plannedPlatform!,
+              style: TextStyle(
+                fontSize: 11,
+                color: theme.colorScheme.onSurfaceVariant,
+                decoration: TextDecoration.lineThrough,
+              ),
+            ),
+            const SizedBox(width: 4),
+          ],
+          Text(
+            'Gl. $display',
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: changed
+                  ? Colors.red
+                  : (muted
+                      ? theme.colorScheme.onSurfaceVariant
+                      : theme.colorScheme.onSurface),
+            ),
+          ),
+        ],
       ),
     );
   }

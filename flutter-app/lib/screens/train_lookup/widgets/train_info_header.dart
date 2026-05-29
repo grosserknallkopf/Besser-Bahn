@@ -3,6 +3,7 @@ import '../../../models/journey.dart' show OccupancyLevel;
 import '../../../models/trip.dart';
 import '../../../core/extensions.dart';
 import '../../../widgets/occupancy_indicator.dart';
+import 'train_map_view.dart';
 
 class TrainInfoHeader extends StatelessWidget {
   final Trip trip;
@@ -39,8 +40,16 @@ class TrainInfoHeader extends StatelessWidget {
                         ?.copyWith(fontWeight: FontWeight.bold),
                   ),
                 ),
+                // Route map: hidden by default, opened fullscreen from here.
+                if (trip.stopovers.any((s) => s.stop.hasLocation))
+                  IconButton(
+                    icon: const Icon(Icons.map_outlined),
+                    tooltip: 'Streckenverlauf',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: () => openTrainMap(context, trip),
+                  ),
                 if (action != null) ...[
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 4),
                   action!,
                 ],
               ],

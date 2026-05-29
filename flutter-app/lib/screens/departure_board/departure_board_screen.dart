@@ -9,7 +9,6 @@ import '../../widgets/station_search_field.dart';
 import '../../widgets/delay_badge.dart';
 import '../../widgets/platform_badge.dart';
 import '../../widgets/app_menu_button.dart';
-import '../../widgets/traewelling_avatar_button.dart';
 import '../../core/extensions.dart';
 import '../../core/auto_refresh.dart';
 import 'departure_map_view.dart';
@@ -42,7 +41,6 @@ class _DepartureBoardScreenState extends ConsumerState<DepartureBoardScreen>
         title: Text(state.station?.name ?? 'Abfahrtstafel'),
         actions: [
           const AppMenuButton(),
-          const TraewellingAvatarButton(),
           if (state.station != null)
             IconButton(
               tooltip:

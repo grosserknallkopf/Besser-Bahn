@@ -5,7 +5,6 @@ import '../../core/extensions.dart';
 import '../../models/library_models.dart';
 import '../../providers/library_provider.dart';
 import '../../widgets/app_menu_button.dart';
-import '../../widgets/traewelling_avatar_button.dart';
 import '../connection_search/widgets/journey_card.dart';
 
 /// "Reisen" — the user's saved connections, like the DB Navigator. Upcoming
@@ -23,7 +22,7 @@ class JourneysScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Reisen'),
-        actions: const [TraewellingAvatarButton(), AppMenuButton()],
+        actions: const [AppMenuButton()],
       ),
       body: upcoming.isEmpty && past.isEmpty
           ? _empty(context)

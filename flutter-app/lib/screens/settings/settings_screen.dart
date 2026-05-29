@@ -5,7 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/constants.dart';
 import '../../models/split_ticket.dart';
 import '../../providers/settings_provider.dart';
-import '../../widgets/traewelling_avatar_button.dart';
+import '../../providers/traewelling_provider.dart';
 
 class SettingsScreen extends ConsumerWidget {
   const SettingsScreen({super.key});
@@ -19,7 +19,6 @@ class SettingsScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Einstellungen'),
-        actions: const [TraewellingAvatarButton()],
       ),
       body: ListView(
         padding: const EdgeInsets.only(bottom: 32),
@@ -56,6 +55,38 @@ class SettingsScreen extends ConsumerWidget {
               ),
             ),
           ),
+
+          _sectionHeader(context, 'Träwelling'),
+
+          // Träwelling login/account — moved here from the tab AppBars so it
+          // lives in one place: log in/out and reach the hub from Settings.
+          Builder(builder: (context) {
+            final auth = ref.watch(traewellingAuthProvider);
+            final user = auth.user;
+            return Card(
+              margin: const EdgeInsets.symmetric(horizontal: 16),
+              child: ListTile(
+                leading: CircleAvatar(
+                  radius: 16,
+                  backgroundColor: theme.colorScheme.primaryContainer,
+                  backgroundImage: (user?.profilePicture?.isNotEmpty ?? false)
+                      ? NetworkImage(user!.profilePicture!)
+                      : null,
+                  child: (user?.profilePicture?.isNotEmpty ?? false)
+                      ? null
+                      : Icon(Icons.person_outline,
+                          size: 18,
+                          color: theme.colorScheme.onPrimaryContainer),
+                ),
+                title: Text(user != null ? user.displayName : 'Träwelling'),
+                subtitle: Text(user != null
+                    ? '@${user.username} · angemeldet'
+                    : 'Nicht angemeldet · zum Einloggen tippen'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => context.push('/trawelling'),
+              ),
+            );
+          }),
 
           _sectionHeader(context, 'Profil'),
 

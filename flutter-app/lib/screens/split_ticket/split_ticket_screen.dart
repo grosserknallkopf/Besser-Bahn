@@ -8,7 +8,6 @@ import '../../models/split_ticket.dart';
 import '../../providers/split_ticket_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../services/db_api_service.dart';
-import '../../widgets/traewelling_avatar_button.dart';
 import '../../theme/app_colors.dart';
 
 /// Split-ticket analysis — purely a viewer of [splitTicketProvider]. The
@@ -32,7 +31,6 @@ class SplitTicketScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Split-Ticketing'),
-        actions: const [TraewellingAvatarButton()],
       ),
       body: ListView(
         padding: const EdgeInsets.only(bottom: 32),

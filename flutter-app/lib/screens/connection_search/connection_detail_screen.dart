@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/extensions.dart';
 import '../../core/share_text.dart';
 import '../../models/coach_sequence.dart';
 import '../../models/journey.dart';
@@ -299,19 +300,28 @@ class _ConnectionDetailScreenState
   Widget _summary(BuildContext context) {
     final theme = Theme.of(context);
     final t = journey.transfers;
+    final dep = journey.plannedDeparture;
+    final arr = journey.plannedArrival;
+    final depDelay = journey.legs.firstOrNull?.departureDelay ?? 0;
+    final arrDelay = journey.legs.lastOrNull?.arrivalDelay ?? 0;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Big "ab 20:00 → an 23:45" headline, top-left, with the price right.
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Text(journey.durationString,
-                  style: theme.textTheme.titleMedium
-                      ?.copyWith(fontWeight: FontWeight.bold)),
-              const SizedBox(width: 12),
-              Text(t == 0 ? 'Direkt' : '$t Umstieg${t > 1 ? 'e' : ''}',
-                  style: theme.textTheme.bodyMedium),
+              if (dep != null) ...[
+                _summaryTime(context, 'ab', dep, depDelay),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 6),
+                  child: Icon(Icons.arrow_forward,
+                      size: 18, color: theme.colorScheme.onSurfaceVariant),
+                ),
+              ],
+              if (arr != null) _summaryTime(context, 'an', arr, arrDelay),
               const Spacer(),
               if (journey.price != null)
                 Text(journey.price!.formatted,
@@ -320,10 +330,51 @@ class _ConnectionDetailScreenState
                         color: theme.colorScheme.primary)),
             ],
           ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Text(journey.durationString,
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(fontWeight: FontWeight.w600)),
+              const SizedBox(width: 10),
+              Text(t == 0 ? 'Direkt' : '$t Umstieg${t > 1 ? 'e' : ''}',
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+            ],
+          ),
           const SizedBox(height: 8),
           PredictionBadge(journey: journey, axis: Axis.horizontal),
         ],
       ),
+    );
+  }
+
+  /// "ab/an HH:MM" with a red "+N" when the leg endpoint is delayed.
+  Widget _summaryTime(
+      BuildContext context, String label, DateTime time, int delaySec) {
+    final theme = Theme.of(context);
+    final mins = delaySec ~/ 60;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.baseline,
+      textBaseline: TextBaseline.alphabetic,
+      children: [
+        Text('$label ',
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+        Text(time.hhmm,
+            style: theme.textTheme.titleLarge
+                ?.copyWith(fontWeight: FontWeight.bold)),
+        if (mins > 0)
+          Padding(
+            padding: const EdgeInsets.only(left: 3),
+            child: Text('+$mins',
+                style: TextStyle(
+                    color: mins <= 5 ? Colors.orange : Colors.red,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold)),
+          ),
+      ],
     );
   }
 

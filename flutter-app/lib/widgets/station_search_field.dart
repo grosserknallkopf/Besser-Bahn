@@ -11,6 +11,10 @@ class StationSearchField extends ConsumerStatefulWidget {
   final IconData? prefixIcon;
   final TextEditingController? controller;
 
+  /// Compact rendering: smaller height, tighter padding, smaller icons — used
+  /// where the form must stay tight (the connection search header).
+  final bool dense;
+
   const StationSearchField({
     super.key,
     required this.hint,
@@ -18,6 +22,7 @@ class StationSearchField extends ConsumerStatefulWidget {
     required this.onSelected,
     this.prefixIcon,
     this.controller,
+    this.dense = false,
   });
 
   @override
@@ -260,13 +265,24 @@ class _StationSearchFieldState extends ConsumerState<StationSearchField> {
       child: TextField(
         controller: _controller,
         focusNode: _focusNode,
+        style: widget.dense ? const TextStyle(fontSize: 14) : null,
         decoration: InputDecoration(
           hintText: widget.hint,
-          prefixIcon:
-              widget.prefixIcon != null ? Icon(widget.prefixIcon) : null,
+          isDense: widget.dense,
+          contentPadding: widget.dense
+              ? const EdgeInsets.symmetric(horizontal: 8, vertical: 8)
+              : null,
+          prefixIcon: widget.prefixIcon != null
+              ? Icon(widget.prefixIcon, size: widget.dense ? 18 : null)
+              : null,
+          prefixIconConstraints: widget.dense
+              ? const BoxConstraints(minWidth: 36, minHeight: 36)
+              : null,
           suffixIcon: _controller.text.isNotEmpty
               ? IconButton(
-                  icon: const Icon(Icons.clear, size: 20),
+                  icon: Icon(Icons.clear, size: widget.dense ? 18 : 20),
+                  visualDensity:
+                      widget.dense ? VisualDensity.compact : null,
                   onPressed: () {
                     _controller.clear();
                     ref.read(stationSearchProvider.notifier).clear();
@@ -275,6 +291,9 @@ class _StationSearchFieldState extends ConsumerState<StationSearchField> {
                     setState(() {});
                   },
                 )
+              : null,
+          suffixIconConstraints: widget.dense
+              ? const BoxConstraints(minWidth: 36, minHeight: 36)
               : null,
         ),
         onChanged: (value) {

@@ -7,7 +7,6 @@ import '../../providers/journey_search_provider.dart';
 import '../../providers/library_provider.dart';
 import '../../widgets/station_search_field.dart';
 import '../../widgets/app_menu_button.dart';
-import '../../widgets/traewelling_avatar_button.dart';
 import 'widgets/journey_card.dart';
 
 class ConnectionSearchScreen extends ConsumerStatefulWidget {
@@ -62,7 +61,6 @@ class _ConnectionSearchScreenState
         title: const Text('Verbindungen'),
         actions: [
           const AppMenuButton(),
-          const TraewellingAvatarButton(),
           if (state.from != null && state.to != null)
             Builder(builder: (context) {
               final saved = ref
@@ -106,13 +104,13 @@ class _ConnectionSearchScreenState
         children: [
           // Search form
           Card(
-            margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+            margin: const EdgeInsets.fromLTRB(12, 6, 12, 0),
             child: Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(8),
               child: Column(
                 children: [
-                  // From/To with the swap button vertically centred to the
-                  // right, so both fields stay equal width and aligned.
+                  // From/To stacked tight together (fields share a divider gap
+                  // of just 4px) with the swap button vertically centred right.
                   Row(
                     children: [
                       Expanded(
@@ -124,21 +122,24 @@ class _ConnectionSearchScreenState
                               initialStation: state.from,
                               controller: _fromController,
                               onSelected: notifier.setFrom,
+                              dense: true,
                             ),
-                            const SizedBox(height: 8),
+                            const SizedBox(height: 4),
                             StationSearchField(
                               hint: 'Nach',
                               prefixIcon: Icons.location_on,
                               initialStation: state.to,
                               controller: _toController,
                               onSelected: notifier.setTo,
+                              dense: true,
                             ),
                           ],
                         ),
                       ),
                       const SizedBox(width: 4),
                       IconButton.filledTonal(
-                        icon: const Icon(Icons.swap_vert),
+                        icon: const Icon(Icons.swap_vert, size: 20),
+                        visualDensity: VisualDensity.compact,
                         tooltip: 'Tauschen',
                         onPressed: () {
                           notifier.swapStations();
@@ -149,7 +150,7 @@ class _ConnectionSearchScreenState
                       ),
                     ],
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 6),
                   Row(
                     children: [
                       Expanded(
@@ -158,9 +159,12 @@ class _ConnectionSearchScreenState
                           borderRadius: BorderRadius.circular(12),
                           child: InputDecorator(
                             decoration: const InputDecoration(
-                              prefixIcon: Icon(Icons.access_time),
+                              isDense: true,
+                              prefixIcon: Icon(Icons.access_time, size: 18),
+                              prefixIconConstraints:
+                                  BoxConstraints(minWidth: 34, minHeight: 34),
                               contentPadding: EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 10),
+                                  horizontal: 8, vertical: 8),
                             ),
                             child: Text(
                               state.dateTime != null
@@ -172,8 +176,12 @@ class _ConnectionSearchScreenState
                           ),
                         ),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: 6),
                       SegmentedButton<bool>(
+                        style: SegmentedButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                        ),
                         segments: const [
                           ButtonSegment(value: false, label: Text('Ab')),
                           ButtonSegment(value: true, label: Text('An')),
@@ -182,23 +190,23 @@ class _ConnectionSearchScreenState
                         onSelectionChanged: (v) =>
                             notifier.setIsArrival(v.first),
                       ),
+                      const SizedBox(width: 6),
+                      FilledButton(
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          minimumSize: const Size(0, 40),
+                        ),
+                        onPressed: state.isLoading ? null : _search,
+                        child: state.isLoading
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white),
+                              )
+                            : const Icon(Icons.search),
+                      ),
                     ],
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: FilledButton.icon(
-                      onPressed: state.isLoading ? null : _search,
-                      icon: state.isLoading
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: Colors.white),
-                            )
-                          : const Icon(Icons.search),
-                      label: const Text('Suchen'),
-                    ),
                   ),
                 ],
               ),

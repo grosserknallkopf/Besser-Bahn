@@ -12,7 +12,6 @@ import '../../services/location_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/bay_departures_sheet.dart';
 import '../../widgets/app_menu_button.dart';
-import '../../widgets/traewelling_avatar_button.dart';
 import '../../widgets/station_search_field.dart';
 
 /// Highlight colour for a journey role: Einstieg green, Ausstieg red, Umstieg
@@ -159,7 +158,6 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
         title: Text(state.station?.name ?? 'Bahnhofskarte'),
         actions: [
           const AppMenuButton(),
-          const TraewellingAvatarButton(),
           if (map != null)
             IconButton(
               tooltip: 'Zentrieren',

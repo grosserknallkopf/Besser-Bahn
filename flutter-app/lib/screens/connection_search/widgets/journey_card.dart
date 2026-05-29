@@ -85,13 +85,10 @@ class JourneyCard extends ConsumerWidget {
                     children: [
                       _timeWithDelay(context, journey.plannedDeparture,
                           journey.legs.firstOrNull?.departureDelay),
-                      if (journey.legs.firstOrNull?.departurePlatform != null)
-                        PlatformBadge(
-                          platform:
-                              journey.legs.firstOrNull?.departurePlatform,
-                          plannedPlatform: journey
-                              .legs.firstOrNull?.plannedDeparturePlatform,
-                        ),
+                      if (journey.legs.firstOrNull?.departurePlatform != null ||
+                          journey.legs.firstOrNull?.plannedDeparturePlatform !=
+                              null)
+                        _depPlatform(context, journey.legs.firstOrNull!),
                     ],
                   ),
 
@@ -105,8 +102,15 @@ class JourneyCard extends ConsumerWidget {
                               fontWeight: FontWeight.w600),
                         ),
                         const SizedBox(height: 2),
-                        _transferIndicator(context, journey.transfers,
-                            transitLegs),
+                        Text(
+                          journey.transfers == 0
+                              ? 'Direkt'
+                              : '${journey.transfers} Umstieg'
+                                  '${journey.transfers > 1 ? 'e' : ''}',
+                          style: TextStyle(
+                              fontSize: 11,
+                              color: theme.colorScheme.onSurfaceVariant),
+                        ),
                       ],
                     ),
                   ),
@@ -128,6 +132,13 @@ class JourneyCard extends ConsumerWidget {
                   ),
                 ],
               ),
+
+              // Proportional leg-length bar: each train's width ∝ time spent on
+              // it, so you see at a glance which leg dominates the trip.
+              if (transitLegs.length > 1) ...[
+                const SizedBox(height: 8),
+                _legLengthBar(context, transitLegs),
+              ],
 
               const SizedBox(height: 8),
 
@@ -201,42 +212,113 @@ class JourneyCard extends ConsumerWidget {
     );
   }
 
-  Widget _transferIndicator(
-      BuildContext context, int transfers, List<JourneyLeg> legs) {
+  /// Departure platform shown in the preview ("Gl. 3"), red when the train
+  /// leaves from a platform other than the scheduled one (abweichende Abfahrt).
+  Widget _depPlatform(BuildContext context, JourneyLeg leg) {
     final theme = Theme.of(context);
-    if (transfers == 0) {
-      return Text('Direkt',
-          style: TextStyle(
-              fontSize: 11, color: theme.colorScheme.onSurfaceVariant));
+    final display = leg.departurePlatform ?? leg.plannedDeparturePlatform;
+    if (display == null || display.isEmpty) return const SizedBox.shrink();
+    final changed = leg.hasDeparturePlatformChange;
+    final color = changed ? Colors.red : theme.colorScheme.onSurfaceVariant;
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.layers, size: 12, color: color),
+          const SizedBox(width: 2),
+          if (changed && leg.plannedDeparturePlatform != null) ...[
+            Text(leg.plannedDeparturePlatform!,
+                style: TextStyle(
+                    fontSize: 11,
+                    color: theme.colorScheme.onSurfaceVariant,
+                    decoration: TextDecoration.lineThrough)),
+            const SizedBox(width: 3),
+          ],
+          Text('Gl. $display',
+              style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: changed ? Colors.red : null)),
+        ],
+      ),
+    );
+  }
+
+  /// Horizontal bar split proportionally to each leg's travel time, labelled
+  /// with the line name and the % of the trip spent on it.
+  Widget _legLengthBar(BuildContext context, List<JourneyLeg> legs) {
+    int legMinutes(JourneyLeg l) {
+      final d = l.departure ?? l.plannedDeparture;
+      final a = l.arrival ?? l.plannedArrival;
+      if (d != null && a != null) {
+        final m = a.difference(d).inMinutes;
+        if (m > 0) return m;
+      }
+      return 1;
     }
+
+    final mins = legs.map(legMinutes).toList();
+    final total = mins.fold<int>(0, (s, m) => s + m);
+    if (total <= 0) return const SizedBox.shrink();
+    // Keep every leg visible: a leg never gets less than ~10% of the bar width.
+    final minFlex = (total * 0.10).round().clamp(1, total);
+
     return Row(
-      mainAxisSize: MainAxisSize.min,
-      mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        for (int i = 0; i < legs.length; i++) ...[
-          Container(
-            width: 20,
-            height: 3,
-            decoration: BoxDecoration(
-              color: theme.colorScheme.primary,
-              borderRadius: BorderRadius.circular(2),
+        for (var i = 0; i < legs.length; i++) ...[
+          if (i > 0) const SizedBox(width: 3),
+          Expanded(
+            flex: mins[i] < minFlex ? minFlex : mins[i],
+            child: _legSegment(
+              context,
+              legs[i].line?.displayName ?? '',
+              (mins[i] / total * 100).round(),
+              _productColor(context, legs[i]),
             ),
           ),
-          if (i < legs.length - 1)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 2),
-              child: Container(
-                width: 4,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.onSurfaceVariant,
-                  shape: BoxShape.circle,
-                ),
-              ),
-            ),
         ],
       ],
     );
+  }
+
+  Widget _legSegment(
+      BuildContext context, String label, int percent, Color color) {
+    return Container(
+      height: 24,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: color.withAlpha(40),
+        border: Border.all(color: color.withAlpha(160)),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Text(
+            label.isEmpty ? '$percent%' : '$label · $percent%',
+            maxLines: 1,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Colour per train product, so segments are visually distinct.
+  Color _productColor(BuildContext context, JourneyLeg leg) {
+    final p = (leg.line?.productName ?? leg.line?.displayName ?? '')
+        .toUpperCase();
+    if (p.startsWith('ICE')) return Colors.red.shade700;
+    if (p.startsWith('IC') || p.startsWith('EC')) return Colors.blue.shade700;
+    if (p.startsWith('RE') || p.startsWith('RB')) return Colors.teal.shade700;
+    if (p.startsWith('S')) return Colors.green.shade700;
+    return Theme.of(context).colorScheme.primary;
   }
 
   Widget _productChip(BuildContext context, JourneyLeg leg) {
