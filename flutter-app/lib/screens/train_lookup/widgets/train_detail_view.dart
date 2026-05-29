@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../models/coach_sequence.dart';
 import '../../../models/trip.dart';
 import 'coach_sequence_view.dart';
+import 'seat_map_view.dart';
 import 'stop_timeline.dart';
 import 'train_info_header.dart';
 import 'train_map_view.dart';
@@ -38,6 +39,7 @@ class TrainDetailView extends StatelessWidget {
         TrainInfoHeader(trip: trip),
         TrainMapView(trip: trip),
         if (coach != null) CoachSequenceView(sequence: coach!),
+        SeatMapSection(trip: trip),
         StopTimeline(
           stopovers: trip.stopovers,
           onStopTap: onStopTap,

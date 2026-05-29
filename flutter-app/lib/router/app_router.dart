@@ -92,6 +92,14 @@ final appRouter = GoRouter(
       builder: (context, state) =>
           ConnectionDetailScreen(journey: state.extra as Journey),
     ),
+    // Split-ticket analysis pushed from a connection (above the tab shell) so
+    // it gets a real back button — unlike the /split tab which has none.
+    GoRoute(
+      path: '/split-ticket',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (context, state) =>
+          SplitTicketScreen(journey: state.extra as Journey?),
+    ),
     // A single train's run, pushed (with back button) from a connection leg
     // or anywhere — renders the same train view as the tab.
     GoRoute(

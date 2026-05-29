@@ -24,8 +24,10 @@ Endpoint map (see app code in flutter-app/lib/services/):
 from __future__ import annotations
 
 import json
+import re
 import sys
 import time
+import urllib.parse
 import uuid
 from datetime import datetime, timezone
 
@@ -484,6 +486,101 @@ def check_website_journey_still_blocked() -> str:
     return f"still unusable as expected ({reason}); use vendo instead"
 
 
+def check_vendo_seat_map() -> str:
+    """Graphical seat display (gsd) — the 'free seats' feature.
+
+    Drives `gsd_v3` straight from a journey leg's train number + boarding/
+    alighting EVA + planned times (no auth, no booking zugfahrtKey). Asserts
+    the SSR page still carries `ssr_data` with coaches → plaetze {status,
+    nummer}, and that the per-coach geometry endpoint still returns elements.
+    """
+    media = "application/x.db.vendo.mob.verbindungssuche.v9+json"
+    body = {
+        "autonomeReservierung": False,
+        "einstiegsTypList": ["STANDARD"],
+        "fahrverguenstigungen": {"deutschlandTicketVorhanden": False,
+                                 "nurDeutschlandTicketVerbindungen": False},
+        "klasse": "KLASSE_2",
+        "reiseHin": {"wunsch": {
+            "abgangsLocationId": KIEL_LOC, "alternativeHalteBerechnung": True,
+            "verkehrsmittel": ["ALL"],
+            "zeitWunsch": {"reiseDatum": datetime.now().astimezone().isoformat(),
+                           "zeitPunktArt": "ABFAHRT"},
+            "zielLocationId": BERLIN_LOC}},
+        "reisendenProfil": {"reisende": [{
+            "ermaessigungen": ["KEINE_ERMAESSIGUNG KLASSENLOS"],
+            "reisendenTyp": "ERWACHSENER"}]},
+        "reservierungsKontingenteVorhanden": False,
+    }
+    r = requests.post("https://app.services-bahn.de/mob/angebote/fahrplan",
+                      headers=_vendo_headers(media), data=json.dumps(body),
+                      timeout=TIMEOUT)
+    r.raise_for_status()
+    # Find the first long-distance leg (ICE/IC/EC) — those carry a seat plan.
+    leg = None
+    for c in r.json().get("verbindungen", []):
+        for a in c["verbindung"]["verbindungsAbschnitte"]:
+            if (a.get("produktGattung") or "").upper() in ("ICE", "IC", "EC", "ECE"):
+                leg = a
+                break
+        if leg:
+            break
+    if leg is None:
+        raise CheckError("no long-distance leg to derive a seat-map request")
+
+    fahrt_nr = str(leg.get("zugNummer") or leg.get("verkehrsmittelNummer") or "")
+    ab_eva = str(leg["abgangsOrt"].get("evaNr") or "")
+    an_eva = str(leg["ankunftsOrt"].get("evaNr") or "")
+    # gsd wants naive local time (no offset suffix).
+    ab_t = (leg.get("abgangsDatum") or "").split("+")[0]
+    an_t = (leg.get("ankunftsDatum") or "").split("+")[0]
+    if not (fahrt_nr and ab_eva and an_eva and ab_t and an_t):
+        raise CheckError("leg missing zugNummer/evaNr/times for gsd request")
+
+    data = {"buchungskontext": {"quellSystem": "SIMA", "buchungsKontextId": str(uuid.uuid4()),
+            "buchungsKontextDaten": {"zugnummer": fahrt_nr, "zugfahrtKey": "",
+                "abfahrtHalt": {"locationId": ab_eva, "abfahrtZeit": ab_t},
+                "ankunftHalt": {"locationId": an_eva, "ankunftZeit": an_t},
+                "inventarsystem": "RIFF",
+                "platzbedarfe": [{"platzprofilCode": "StandardEinzelperson",
+                                  "anzahl": 1.0, "klasse": "KLASSE_2"}]}},
+            "correlationID": _corr_id(), "lang": "de", "theme": "app"}
+    url = ("https://app.services-bahn.de/mob/gsd/gsd_v3?data="
+           + urllib.parse.quote(json.dumps(data, separators=(",", ":"))))
+    g = requests.get(url, headers={"User-Agent": DBNAV_UA}, timeout=TIMEOUT)
+    g.raise_for_status()
+    m = re.search(r"id='ssr_data'\s*>(.*?)</script>", g.text, re.S)
+    if not m:
+        raise CheckError("gsd_v3 page has no ssr_data blob")
+    ssr = json.loads(m.group(1))
+    coaches = [w for zt in ssr.get("zugfahrt", {}).get("zugteile", [])
+               for w in zt.get("wagen", [])]
+    if not coaches:
+        raise CheckError("gsd ssr_data has no coaches")
+    plaetze = coaches[0].get("plaetze", [])
+    if not plaetze or "status" not in plaetze[0] or "nummer" not in plaetze[0]:
+        raise CheckError("coach plaetze missing status/nummer")
+    free = sum(1 for w in coaches for p in w["plaetze"] if p.get("status") == 0)
+    total = sum(len(w["plaetze"]) for w in coaches)
+
+    # Per-coach geometry endpoint.
+    wtyp = coaches[0].get("wagentyp", "")
+    if not wtyp:
+        raise CheckError("coach missing wagentyp for geometry lookup")
+    w = requests.get(
+        f"https://app.services-bahn.de/mob/gsd/api/wagentypen/{urllib.parse.quote(wtyp)}",
+        headers={"User-Agent": DBNAV_UA}, timeout=TIMEOUT)
+    w.raise_for_status()
+    teile = w.json().get("wagenteile", [])
+    if not teile or not teile[0].get("elemente"):
+        raise CheckError("wagentyp geometry has no elemente")
+    el = teile[0]["elemente"][0]
+    if "x" not in el or "y" not in el or "type" not in el:
+        raise CheckError("geometry element missing x/y/type")
+    return (f"zug {fahrt_nr}: {len(coaches)} coaches, {free}/{total} free, "
+            f"geometry ok ({len(teile[0]['elemente'])} elems)")
+
+
 # (name, callable, soft) — soft checks warn instead of fail.
 CHECKS = [
     ("bahn.de autocomplete (orte)", check_bahn_autocomplete, False),
@@ -494,6 +591,7 @@ CHECKS = [
     ("vendo journey + prices (v9)", check_vendo_journey, False),
     ("vendo journey pagination (context)", check_vendo_journey_pagination, False),
     ("vendo train polyline (zuglauf)", check_vendo_train_polyline, False),
+    ("vendo seat map (gsd free seats)", check_vendo_seat_map, False),
     ("bahnhof.de station map (karte)", check_bahnhof_map, False),
     ("map bay ↔ departures link", check_bay_departure_link, True),
     ("map Gleis ↔ departures (normalised)", check_gleis_departure_link, False),

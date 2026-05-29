@@ -123,7 +123,7 @@ class ConnectionDetailScreen extends ConsumerWidget {
           date: date,
           directPrice: journey.price?.amount ?? 0,
         );
-    context.go('/split');
+    context.push('/split-ticket', extra: journey);
   }
 
   Widget _summary(BuildContext context) {

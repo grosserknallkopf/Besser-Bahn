@@ -42,12 +42,17 @@ class VendoService {
     bool isArrival = false,
     bool firstClass = false,
     String? context,
+    // The traveller's reduction in DB's "<ART> <KLASSE>" form (e.g.
+    // "BAHNCARD25 KLASSE_2"); defaults to none. Whether a Deutschland-Ticket is
+    // held. Both come from Einstellungen so prices match what the user pays.
+    String ermaessigung = 'KEINE_ERMAESSIGUNG KLASSENLOS',
+    bool deutschlandTicket = false,
   }) async {
     final body = {
       'autonomeReservierung': false,
       'einstiegsTypList': ['STANDARD'],
       'fahrverguenstigungen': {
-        'deutschlandTicketVorhanden': false,
+        'deutschlandTicketVorhanden': deutschlandTicket,
         'nurDeutschlandTicketVerbindungen': false,
       },
       'klasse': firstClass ? 'KLASSE_1' : 'KLASSE_2',
@@ -70,7 +75,7 @@ class VendoService {
       'reisendenProfil': {
         'reisende': [
           {
-            'ermaessigungen': ['KEINE_ERMAESSIGUNG KLASSENLOS'],
+            'ermaessigungen': [ermaessigung],
             'reisendenTyp': 'ERWACHSENER',
           }
         ],
@@ -157,12 +162,17 @@ class VendoService {
     required String to,
     DateTime? dateTime,
     bool deutschlandTicket = false,
+    bool firstClass = false,
+    String ermaessigung = 'KEINE_ERMAESSIGUNG KLASSENLOS',
   }) async {
     try {
       final result = await searchJourneys(
         fromLocationId: _loc(from),
         toLocationId: _loc(to),
         dateTime: dateTime,
+        firstClass: firstClass,
+        ermaessigung: ermaessigung,
+        deutschlandTicket: deutschlandTicket,
       );
       if (result.journeys.isEmpty) {
         return const SegmentPrice(price: double.infinity, isDTicketCovered: false);

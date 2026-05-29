@@ -2,7 +2,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/station.dart';
 import '../core/app_log.dart';
 import '../models/journey.dart';
+import '../models/split_ticket.dart' show BahnCardType;
 import 'service_providers.dart';
+import 'settings_provider.dart';
 
 enum JourneySortMode { departure, arrival, duration, transfers }
 
@@ -133,11 +135,15 @@ class JourneySearchNotifier extends Notifier<JourneySearchState> {
       // (chronically down) were removed — they never succeeded and only added a
       // multi-second hang before the real error surfaced.
       final vendo = ref.read(vendoServiceProvider);
+      final settings = ref.read(settingsProvider);
       final result = await vendo.searchJourneys(
         fromLocationId: from.vendoLocationId,
         toLocationId: to.vendoLocationId,
         dateTime: state.dateTime ?? DateTime.now(),
         isArrival: state.isArrival,
+        firstClass: settings.bahnCard.isFirstClass,
+        ermaessigung: settings.bahnCard.vendoErmaessigung,
+        deutschlandTicket: settings.hasDeutschlandTicket,
       );
       AppLog.log('vendo result: ${result.journeys.length} journeys',
           tag: 'journey');
@@ -163,12 +169,16 @@ class JourneySearchNotifier extends Notifier<JourneySearchState> {
     state = state.copyWith(isLoading: true, error: null);
     try {
       final vendo = ref.read(vendoServiceProvider);
+      final settings = ref.read(settingsProvider);
       final more = await vendo.searchJourneys(
         fromLocationId: state.from!.vendoLocationId,
         toLocationId: state.to!.vendoLocationId,
         dateTime: state.dateTime ?? DateTime.now(),
         isArrival: state.isArrival,
         context: token,
+        firstClass: settings.bahnCard.isFirstClass,
+        ermaessigung: settings.bahnCard.vendoErmaessigung,
+        deutschlandTicket: settings.hasDeutschlandTicket,
       );
 
       // Dedupe against what we already show (paged windows can overlap).

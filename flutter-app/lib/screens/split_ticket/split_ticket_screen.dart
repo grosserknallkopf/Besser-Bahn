@@ -2,9 +2,11 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../models/journey.dart';
 import '../../models/split_ticket.dart';
 import '../../providers/split_ticket_provider.dart';
 import '../../providers/settings_provider.dart';
@@ -15,7 +17,11 @@ import '../../core/constants.dart';
 import '../../theme/app_colors.dart';
 
 class SplitTicketScreen extends ConsumerStatefulWidget {
-  const SplitTicketScreen({super.key});
+  /// The connection this analysis was launched from, if any. When set, the
+  /// result offers a way back to the actual trains of that route.
+  final Journey? journey;
+
+  const SplitTicketScreen({super.key, this.journey});
 
   @override
   ConsumerState<SplitTicketScreen> createState() => _SplitTicketScreenState();
@@ -390,9 +396,11 @@ class _SplitTicketScreenState extends ConsumerState<SplitTicketScreen> {
 
           // Results
           if (state.result != null) ...[
+            _buildAssumptions(context),
             _buildPriceComparison(context, state.result!),
             for (int i = 0; i < state.result!.tickets.length; i++)
               _buildTicketCard(context, state.result!.tickets[i], i + 1),
+            if (widget.journey != null) _buildShowRoute(context),
           ],
 
           // Logs
@@ -438,6 +446,83 @@ class _SplitTicketScreenState extends ConsumerState<SplitTicketScreen> {
                       color: theme.colorScheme.onSurfaceVariant)),
             ],
           ],
+        ),
+      ),
+    );
+  }
+
+  /// Show the search assumptions so the price is unambiguous: which BahnCard
+  /// and whether a Deutschland-Ticket was applied (both from Einstellungen).
+  Widget _buildAssumptions(BuildContext context) {
+    final theme = Theme.of(context);
+    final s = ref.watch(settingsProvider);
+    final hasBC = s.bahnCard != BahnCardType.none;
+    return Card(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.tune, size: 16,
+                    color: theme.colorScheme.onSurfaceVariant),
+                const SizedBox(width: 6),
+                Text('Preise gelten für',
+                    style: theme.textTheme.titleSmall),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 4,
+              children: [
+                Chip(
+                  avatar: Icon(hasBC ? Icons.credit_card : Icons.credit_card_off,
+                      size: 16),
+                  label: Text(hasBC ? s.bahnCard.label : 'ohne BahnCard'),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                ),
+                Chip(
+                  avatar: Icon(
+                      s.hasDeutschlandTicket
+                          ? Icons.check_circle
+                          : Icons.cancel,
+                      size: 16,
+                      color: s.hasDeutschlandTicket ? AppColors.onTime : null),
+                  label: Text(s.hasDeutschlandTicket
+                      ? 'mit Deutschland-Ticket'
+                      : 'ohne Deutschland-Ticket'),
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'In den Einstellungen änderbar.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Back to the actual trains: open the connection this split came from, with
+  /// every leg/train shown in order so the rider can pick them.
+  Widget _buildShowRoute(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: SizedBox(
+        width: double.infinity,
+        child: OutlinedButton.icon(
+          onPressed: () => context.push('/connection', extra: widget.journey),
+          icon: const Icon(Icons.alt_route),
+          label: const Text('Züge dieser Verbindung anzeigen'),
         ),
       ),
     );

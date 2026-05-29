@@ -7,8 +7,15 @@ import '../services/station_map_service.dart';
 import '../services/vendo_service.dart';
 import '../services/traewelling_service.dart';
 import '../services/prediction_service.dart';
+import '../services/seat_map_service.dart';
 
 final hafasServiceProvider = Provider<HafasService>((ref) => HafasService());
+
+final seatMapServiceProvider = Provider<SeatMapService>((ref) {
+  final service = SeatMapService();
+  ref.onDispose(service.dispose);
+  return service;
+});
 
 final coachSequenceServiceProvider =
     Provider<CoachSequenceService>((ref) => CoachSequenceService());
