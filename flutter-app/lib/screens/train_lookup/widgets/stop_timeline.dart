@@ -142,18 +142,17 @@ class _StopTimelineState extends State<StopTimeline> {
       // intermediate stops) → alight endpoint (big Gleis).
       rows.add(_stopRow(board, board, alight,
           hasTop: beforeCount > 0 && _expandedBefore, hasBottom: true));
+      // Train card + Wagenreihung in ONE spine block, so the leg duration in the
+      // gutter sits vertically centred across the whole thing (between the board
+      // departure above and the alight arrival below), and the route line runs
+      // continuously down their left side.
       rows.add(_inlineTrainBlock(
         context,
         middleCount: middleCount,
         duration: _legDuration(stops, board, alight),
         expandable: middleCount > 0,
+        extra: widget.trainExtra,
       ));
-      // Wagenreihung etc. — part of the train element, inside this same card.
-      // Wrapped on the spine so its header indents to the same content column as
-      // the rows above and the route line runs continuously down its left side.
-      if (widget.trainExtra != null) {
-        rows.add(_inlineExtra(context, widget.trainExtra!));
-      }
       if (_expandedMiddle && middleCount > 0) {
         for (var i = board + 1; i < alight; i++) {
           rows.add(_stopRow(i, board, alight, hasTop: true, hasBottom: true));
@@ -452,133 +451,98 @@ class _StopTimelineState extends State<StopTimeline> {
   Widget _inlineTrainBlock(BuildContext context,
       {required int middleCount,
       required String? duration,
-      required bool expandable}) {
+      required bool expandable,
+      Widget? extra}) {
     final theme = Theme.of(context);
     final primary = theme.colorScheme.primary;
     final lineColor = primary.withAlpha(60);
     final amenities = widget.legAmenities;
     final expanded = _expandedMiddle;
-    return InkWell(
+
+    // The tappable train part (header + Zwischenhalte expander + amenities).
+    // Left-padded by 12 so its content lines up at the same column (x≈92) as
+    // the stop names and the Wagenreihung's own inner padding below.
+    final trainPart = InkWell(
       onTap: expandable
           ? () => setState(() => _expandedMiddle = !_expandedMiddle)
           : null,
-      child: IntrinsicHeight(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 0, 16, 0),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // spine gutter: leg duration, centred against the train card
-              SizedBox(
-                width: _kSpineWidth,
-                child: duration == null
-                    ? const SizedBox.shrink()
-                    : Align(
-                        // Vertically centred in the gap between the two stop
-                        // times, right-aligned so it sits in the same column.
-                        alignment: Alignment.centerRight,
-                        child: Text(
-                          duration,
-                          textAlign: TextAlign.right,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 0, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (widget.header != null) widget.header!,
+            if (expandable) ...[
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Icon(expanded ? Icons.unfold_less : Icons.more_horiz,
+                      size: 18, color: primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '$middleCount ${middleCount == 1 ? 'Zwischenhalt' : 'Zwischenhalte'}'
+                      '${expanded ? ' ausblenden' : ' anzeigen'}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: primary,
+                        fontWeight: FontWeight.w600,
                       ),
-              ),
-              const SizedBox(width: 12),
-              // continuous timeline line joining the board dot to the alight dot
-              SizedBox(
-                width: 20,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [Container(width: 2, color: lineColor)],
-                ),
-              ),
-              const SizedBox(width: 12),
-              // content: train header + (optional) Zwischenhalte expander + amenities
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (widget.header != null) widget.header!,
-                      if (expandable) ...[
-                        const SizedBox(height: 12),
-                        Row(
-                          children: [
-                            Icon(
-                                expanded
-                                    ? Icons.unfold_less
-                                    : Icons.more_horiz,
-                                size: 18,
-                                color: primary),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                '$middleCount ${middleCount == 1 ? 'Zwischenhalt' : 'Zwischenhalte'}'
-                                '${expanded ? ' ausblenden' : ' anzeigen'}',
-                                style: theme.textTheme.bodySmall?.copyWith(
-                                  color: primary,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                            Icon(
-                                expanded
-                                    ? Icons.expand_less
-                                    : Icons.expand_more,
-                                size: 18,
-                                color: primary),
-                          ],
-                        ),
-                      ],
-                      if (amenities.isNotEmpty) ...[
-                        const SizedBox(height: 10),
-                        Wrap(
-                          spacing: 12,
-                          runSpacing: 6,
-                          children: [
-                            for (final a in amenities)
-                              Tooltip(
-                                message: a.label,
-                                child: Icon(a.icon,
-                                    size: 17,
-                                    color:
-                                        theme.colorScheme.onSurfaceVariant),
-                              ),
-                          ],
-                        ),
-                      ],
-                    ],
+                    ),
                   ),
-                ),
+                  Icon(expanded ? Icons.expand_less : Icons.expand_more,
+                      size: 18, color: primary),
+                ],
               ),
             ],
-          ),
+            if (amenities.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 12,
+                runSpacing: 6,
+                children: [
+                  for (final a in amenities)
+                    Tooltip(
+                      message: a.label,
+                      child: Icon(a.icon,
+                          size: 17,
+                          color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                ],
+              ),
+            ],
+          ],
         ),
       ),
     );
-  }
 
-  /// Wrap a folded sub-section (the Wagenreihung / seat-plan panel) onto the
-  /// route spine: an empty time gutter, the continuous timeline line, then the
-  /// section in the content column. No gap before the content — the section's
-  /// own inner padding (12) supplies it — so its header lines up with the train
-  /// header and stop names above, and the line passes down its left side.
-  Widget _inlineExtra(BuildContext context, Widget child) {
-    final lineColor = Theme.of(context).colorScheme.primary.withAlpha(60);
     return IntrinsicHeight(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(8, 0, 16, 0),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const SizedBox(width: _kSpineWidth),
+            // spine gutter: leg duration, vertically centred across the WHOLE
+            // block (train header + Wagenreihung) — i.e. midway between the
+            // board departure above and the alight arrival below, regardless of
+            // what's stacked between them.
+            SizedBox(
+              width: _kSpineWidth,
+              child: duration == null
+                  ? const SizedBox.shrink()
+                  : Align(
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        duration,
+                        textAlign: TextAlign.right,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+            ),
             const SizedBox(width: 12),
+            // continuous timeline line down the whole block's left side
             SizedBox(
               width: 20,
               child: Row(
@@ -587,7 +551,17 @@ class _StopTimelineState extends State<StopTimeline> {
                 children: [Container(width: 2, color: lineColor)],
               ),
             ),
-            Expanded(child: child),
+            // No extra gap here: trainPart's left:12 and the Wagenreihung's own
+            // inner 12 both land the content at the same column as the stops.
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  trainPart,
+                  ?extra,
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -730,8 +704,11 @@ class _StopRow extends StatelessWidget {
               child: Padding(
                 // Inter-stop gap below the row — dropped to a minimum on the
                 // last visible stop (no line continues), so there's no dead
-                // space under e.g. the alight station.
-                padding: EdgeInsets.only(bottom: hasBottom ? 22 : 4),
+                // space under e.g. the alight station. With a footer (the
+                // wing-train split banner) the train card sits right under it,
+                // so we tighten the gap — no ~1cm of dead space between them.
+                padding: EdgeInsets.only(
+                    bottom: footer != null ? 6 : (hasBottom ? 22 : 4)),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
