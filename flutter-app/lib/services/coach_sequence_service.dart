@@ -39,28 +39,36 @@ class CoachSequenceService {
     return CoachSequence.fromJson(result);
   }
 
-  /// Get coach sequence from a departure object
+  /// Categories the vehicle-sequence endpoint actually serves. Long-distance
+  /// (ICE/IC/EC) *and* the regional trains (RE/RB/IRE) — the latter matters for
+  /// wing trains (Flügelzüge, e.g. the RE7 that splits in Neumünster into a Kiel
+  /// and a Flensburg portion): the Wagenreihung is the only source that says
+  /// *which* coaches go where. S-Bahn / bus / tram have no sequence → skipped.
+  static const _coachCategories = {
+    'ICE', 'IC', 'EC', 'ECE', 'RE', 'RB', 'IRE', 'RJ', 'RJX', 'EN', 'NJ', 'D',
+  };
+
+  /// Get coach sequence for a train portion.
+  ///
+  /// [category] - product (ICE, IC, RE, RB, …).
+  /// [trainNumber] - the *train* number (Zugnummer / fahrtNr, e.g. "11266"),
+  ///   NOT the line number — a wing train's two portions share the line "RE 7"
+  ///   but carry distinct train numbers.
   Future<CoachSequence?> getCoachSequenceForDeparture({
-    required String lineName,
+    required String category,
+    required String trainNumber,
     required String stationEva,
     required DateTime? departureTime,
   }) async {
     if (departureTime == null) return null;
 
-    // Parse category and number from line name (e.g., "ICE 148" -> ICE, 148)
-    final parts = lineName.split(' ');
-    if (parts.length < 2) return null;
-
-    final category = parts[0].toUpperCase();
-    final number = int.tryParse(parts.last);
-    if (number == null) return null;
-
-    // Only long-distance trains have coach sequence data
-    if (!['ICE', 'IC', 'EC', 'ECE'].contains(category)) return null;
+    final cat = category.toUpperCase().trim();
+    final number = int.tryParse(trainNumber.trim());
+    if (number == null || !_coachCategories.contains(cat)) return null;
 
     try {
       return await getCoachSequence(
-        category: category,
+        category: cat,
         number: number,
         stationEva: stationEva,
         date: departureTime,

@@ -187,7 +187,8 @@ class TrainLookupNotifier extends Notifier<TrainLookupState> {
       if (currentStop == null) return;
 
       final cs = await coachService.getCoachSequenceForDeparture(
-        lineName: trip.line.displayName,
+        category: trip.line.productName,
+        trainNumber: trip.line.fahrtNr,
         stationEva: currentStop.stop.id,
         departureTime: currentStop.departure ?? currentStop.arrival,
       );

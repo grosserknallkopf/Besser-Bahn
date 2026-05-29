@@ -38,6 +38,11 @@ class TrainDetailView extends ConsumerStatefulWidget {
   /// in the inline train block. Only the connection leg view passes it.
   final Widget? predictionStrip;
 
+  /// Station the user rides to on this leg — used to highlight the correct
+  /// portion of a splitting train (Flügelzug) in the Wagenreihung. Null on a
+  /// standalone train lookup.
+  final String? legDestinationName;
+
   const TrainDetailView({
     super.key,
     required this.trip,
@@ -47,6 +52,7 @@ class TrainDetailView extends ConsumerStatefulWidget {
     this.alightingId,
     this.headerAction,
     this.predictionStrip,
+    this.legDestinationName,
   });
 
   @override
@@ -109,6 +115,7 @@ class _TrainDetailViewState extends ConsumerState<TrainDetailView> {
             onCoachTap: (c) => setState(() => _selectedWagon = c.wagonNumber),
             seatPlan: seatPlan,
             embedded: true,
+            targetDestination: widget.legDestinationName,
           )
         : seatPlan;
 

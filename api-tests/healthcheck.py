@@ -744,6 +744,83 @@ def check_vendo_seat_map() -> str:
             f"geometry ok ({len(teile[0]['elemente'])} elems)")
 
 
+def check_wagenreihung_split() -> str:
+    """Wing-train (Flügelzug) coach data.
+
+    The app now fetches the Wagenreihung for regional trains too (RE/RB), not
+    just long-distance, so it can answer the one question the official app
+    buries: *which coaches go to my destination* when a train splits. The
+    vehicle-sequence endpoint must keep returning per-portion `groups`, each
+    with `transport.destination.name` and per-vehicle `platformPosition.sector`.
+
+    Probed on the RE corridor Hamburg → Kiel (the RE7 splits in Neumünster into
+    a Kiel and a Flensburg portion). Soft: the splitting service only runs at
+    certain times, and the endpoint is occasionally flaky.
+    """
+    media = "application/x.db.vendo.mob.verbindungssuche.v9+json"
+    noon = (datetime.now().astimezone().replace(hour=12, minute=0)
+            + timedelta(days=1)).isoformat()
+    body = {
+        "autonomeReservierung": False, "einstiegsTypList": ["STANDARD"],
+        "fahrverguenstigungen": {"deutschlandTicketVorhanden": False,
+                                 "nurDeutschlandTicketVerbindungen": False},
+        "klasse": "KLASSE_2",
+        "reiseHin": {"wunsch": {
+            "abgangsLocationId": HAMBURG_LOC, "alternativeHalteBerechnung": True,
+            "verkehrsmittel": ["ALL"],
+            "zeitWunsch": {"reiseDatum": noon, "zeitPunktArt": "ABFAHRT"},
+            "zielLocationId": KIEL_LOC}},
+        "reisendenProfil": {"reisende": [{
+            "ermaessigungen": ["KEINE_ERMAESSIGUNG KLASSENLOS"],
+            "reisendenTyp": "ERWACHSENER"}]},
+        "reservierungsKontingenteVorhanden": False,
+    }
+    r = requests.post(
+        "https://app.services-bahn.de/mob/angebote/fahrplan",
+        headers=_vendo_headers(media), data=json.dumps(body), timeout=TIMEOUT)
+    r.raise_for_status()
+    conns = r.json().get("verbindungen", [])
+    leg = None
+    for c in conns:
+        for a in c["verbindung"]["verbindungsAbschnitte"]:
+            if a.get("typ") == "FAHRZEUG" and a.get("kurztext") in (
+                    "RE", "RB", "IRE"):
+                leg = a
+                break
+        if leg:
+            break
+    if leg is None:
+        raise CheckError("no RE/RB leg in Hamburg→Kiel results")
+
+    dep = datetime.fromisoformat(leg["abgangsDatum"])
+    eva = leg["halte"][0]["ort"].get("evaNr", "8002549")
+    rr = requests.get(
+        "https://www.bahn.de/web/api/reisebegleitung/wagenreihung/vehicle-sequence",
+        params={
+            "administrationId": "80", "category": leg["kurztext"],
+            "date": f"{dep.year}-{dep.month:02d}-{dep.day:02d}",
+            "evaNumber": eva, "number": leg["zugNummer"],
+            "time": dep.astimezone(timezone.utc).isoformat().replace(
+                "+00:00", "Z"),
+        }, headers=_browser_headers(), timeout=TIMEOUT)
+    rr.raise_for_status()
+    groups = rr.json().get("groups", [])
+    if not groups:
+        raise CheckError("vehicle-sequence returned no groups")
+    dests = []
+    for g in groups:
+        t = g.get("transport")
+        if not isinstance(t, dict):
+            raise CheckError("group missing 'transport' object")
+        d = (t.get("destination") or {}).get("name")
+        if d:
+            dests.append(d)
+    if len(groups) > 1 and len(dests) < 2:
+        raise CheckError("split train but group destinations missing")
+    tag = " SPLIT→" + "/".join(dests) if len(groups) > 1 else " (solo)"
+    return f"{leg['langtext']}: {len(groups)} portion(s){tag}"
+
+
 # (name, callable, soft) — soft checks warn instead of fail.
 CHECKS = [
     ("bahn.de autocomplete (orte)", check_bahn_autocomplete, False),
@@ -758,6 +835,7 @@ CHECKS = [
     ("vendo share journey (teilen vbid)", check_vendo_share, False),
     ("vendo train polyline (zuglauf)", check_vendo_train_polyline, False),
     ("vendo seat map (gsd free seats)", check_vendo_seat_map, False),
+    ("wagenreihung wing-train split (RE)", check_wagenreihung_split, True),
     ("bahnhof.de station map (karte)", check_bahnhof_map, False),
     ("map bay ↔ departures link", check_bay_departure_link, True),
     ("map Gleis ↔ departures (normalised)", check_gleis_departure_link, False),

@@ -327,8 +327,7 @@ class _ConnectionDetailScreenState
           keep.add(inner[(k * step).floor()]);
         }
       }
-      stops
-        ..removeWhere((s) => !keep.contains(s));
+      stops.removeWhere((s) => !keep.contains(s));
     }
 
     if (stops.length < 2) {
@@ -933,7 +932,8 @@ class _LegSectionState extends ConsumerState<_LegSection>
         final cs = await ref
             .read(coachSequenceServiceProvider)
             .getCoachSequenceForDeparture(
-              lineName: leg.line?.displayName ?? '',
+              category: leg.line?.productName ?? '',
+              trainNumber: leg.line?.fahrtNr ?? '',
               stationEva: leg.origin.id,
               departureTime: leg.departure,
             );
@@ -1028,6 +1028,8 @@ class _LegSectionState extends ConsumerState<_LegSection>
         predictionStrip: (!leg.isWalking && leg.line != null)
             ? LegPredictionBadge(leg: leg, nextLeg: widget.nextTransitLeg)
             : null,
+        legDestinationName:
+            leg.destination.name.isNotEmpty ? leg.destination.name : null,
       );
     }
     // Loading / fallback: still show the leg summary so the user sees the train.

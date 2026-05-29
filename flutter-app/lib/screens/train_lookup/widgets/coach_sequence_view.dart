@@ -22,6 +22,13 @@ class CoachSequenceView extends StatefulWidget {
   /// can be embedded inside the train's own card (not a separate section).
   final bool embedded;
 
+  /// The station the user actually rides to on this leg. When the train splits
+  /// (multiple groups with different destinations — a Flügelzug), this picks the
+  /// portion the user must board and surfaces its platform section up front:
+  /// "Für {target}: Abschnitt I einsteigen". Null on a standalone train lookup —
+  /// then all portions are listed without a "for you" highlight.
+  final String? targetDestination;
+
   const CoachSequenceView({
     super.key,
     required this.sequence,
@@ -31,6 +38,7 @@ class CoachSequenceView extends StatefulWidget {
     this.onCoachTap,
     this.seatPlan,
     this.embedded = false,
+    this.targetDestination,
   });
 
   @override
@@ -81,6 +89,12 @@ class _CoachSequenceViewState extends State<CoachSequenceView> {
                 ],
               ),
             ),
+
+            // Wing-train guidance: shown ALWAYS (even collapsed), because
+            // "which portion do I board?" is the single most important fact for
+            // a splitting train — you decide it on the platform, before opening
+            // any detail.
+            if (sequence.groups.length > 1) _splitBanner(context),
 
             if (_expanded) ...[
             const SizedBox(height: 8),
@@ -200,6 +214,126 @@ class _CoachSequenceViewState extends State<CoachSequenceView> {
       child: body,
     );
   }
+
+  /// Up-front guidance for a splitting train: highlight the portion bound for
+  /// the user's destination and its platform section, list the other portion(s)
+  /// so it's clear what NOT to board.
+  Widget _splitBanner(BuildContext context) {
+    final theme = Theme.of(context);
+    final groups = widget.sequence.groups;
+    final target = widget.targetDestination;
+    CoachGroup? mine;
+    if (target != null && target.isNotEmpty) {
+      for (final g in groups) {
+        if (_destMatches(g.transport.destination, target)) {
+          mine = g;
+          break;
+        }
+      }
+    }
+    final bg = theme.colorScheme.tertiaryContainer;
+    final fg = theme.colorScheme.onTertiaryContainer;
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.call_split, size: 18, color: fg),
+              const SizedBox(width: 6),
+              Text('Zug teilt sich',
+                  style: theme.textTheme.bodyMedium
+                      ?.copyWith(fontWeight: FontWeight.bold, color: fg)),
+            ],
+          ),
+          if (mine != null) ...[
+            const SizedBox(height: 6),
+            _bannerLine(
+              context,
+              fg,
+              primary: true,
+              icon: Icons.check_circle,
+              text: _sectorsOf(mine).isNotEmpty
+                  ? 'Für $target: in Abschnitt ${_sectorsOf(mine)} einsteigen'
+                  : 'Für $target: Zugteil Richtung '
+                      '${mine.transport.destination ?? target}',
+            ),
+          ],
+          const SizedBox(height: 4),
+          for (final g in groups)
+            if (!identical(g, mine))
+              _bannerLine(
+                context,
+                fg,
+                primary: false,
+                icon: Icons.train_outlined,
+                text: _sectorsOf(g).isNotEmpty
+                    ? 'Richtung ${g.transport.destination ?? "?"} · '
+                        'Abschnitt ${_sectorsOf(g)}'
+                    : 'Richtung ${g.transport.destination ?? "?"}',
+              ),
+          if (mine == null) ...[
+            const SizedBox(height: 4),
+            Text('Vor Einstieg Fahrtzielanzeige am Zug beachten.',
+                style:
+                    theme.textTheme.bodySmall?.copyWith(color: fg.withAlpha(200))),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _bannerLine(BuildContext context, Color fg,
+      {required bool primary, required IconData icon, required String text}) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: primary ? 16 : 14, color: primary ? fg : fg.withAlpha(180)),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              text,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: primary ? fg : fg.withAlpha(200),
+                fontWeight: primary ? FontWeight.w700 : FontWeight.w400,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Distinct platform sections the coaches of [g] occupy, e.g. "I" or "G–I".
+  String _sectorsOf(CoachGroup g) {
+    final s = <String>{};
+    for (final c in g.coaches) {
+      final sec = c.platformPosition?.sector;
+      if (sec != null && sec.trim().isNotEmpty) s.add(sec.trim());
+    }
+    final list = s.toList()..sort();
+    return list.join('–');
+  }
+
+  bool _destMatches(String? a, String b) {
+    final na = _norm(a ?? ''), nb = _norm(b);
+    if (na.isEmpty || nb.isEmpty) return false;
+    return na == nb || na.contains(nb) || nb.contains(na);
+  }
+
+  String _norm(String s) => s
+      .toLowerCase()
+      .replaceAll('hauptbahnhof', 'hbf')
+      .replaceAll(RegExp(r'[^a-zäöüß0-9]'), '');
 
   Widget _legendItem(Color color, String label) {
     return Row(
