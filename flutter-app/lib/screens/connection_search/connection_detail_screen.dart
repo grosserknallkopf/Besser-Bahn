@@ -162,6 +162,7 @@ class ConnectionDetailScreen extends ConsumerWidget {
             station,
             highlightGleis: depGleis ?? arrGleis,
             transferNote: note,
+            role: GleisRole.transfer,
           );
       context.push('/station-map');
     }
@@ -289,6 +290,11 @@ class _LegSectionState extends ConsumerState<_LegSection>
     ref.read(stationMapProvider.notifier).loadForStation(
           stop.stop,
           highlightGleis: stop.platform,
+          role: stop.isTerminus
+              ? GleisRole.alight
+              : stop.isOrigin
+                  ? GleisRole.board
+                  : GleisRole.none,
         );
     context.push('/station-map');
   }

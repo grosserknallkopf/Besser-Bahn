@@ -7,6 +7,10 @@ import '../models/station_map.dart';
 import '../services/station_map_service.dart';
 import 'service_providers.dart';
 
+/// What the highlighted Gleis means for the rider — drives the map banner
+/// wording: where you get on (Einstieg), off (Ausstieg) or change (Umstieg).
+enum GleisRole { board, alight, transfer, none }
+
 /// Normalise a track label to its base id ("6A-C" → "6", "2 A-C" → "2").
 String normalizeGleis(String g) {
   g = g.trim();
@@ -102,6 +106,10 @@ class StationMapState {
   /// e.g. "Ankunft Gleis 7 · Weiter ab Gleis 12". Null otherwise.
   final String? transferNote;
 
+  /// What the highlighted Gleis is for (Einstieg/Ausstieg/Umstieg). Defaults to
+  /// [GleisRole.board] so a plain boarding highlight reads "Einstieg".
+  final GleisRole highlightRole;
+
   final bool isLoading;
   final String? error;
 
@@ -113,6 +121,7 @@ class StationMapState {
     this.highlightGleis,
     this.highlightSection,
     this.transferNote,
+    this.highlightRole = GleisRole.board,
     this.isLoading = false,
     this.error,
   });
@@ -125,6 +134,7 @@ class StationMapState {
     String? highlightGleis,
     ({String start, String end})? highlightSection,
     String? transferNote,
+    GleisRole? highlightRole,
     bool clearHighlight = false,
     bool clearSection = false,
     bool clearTransferNote = false,
@@ -144,6 +154,9 @@ class StationMapState {
           : (highlightSection ?? this.highlightSection),
       transferNote:
           clearTransferNote ? null : (transferNote ?? this.transferNote),
+      highlightRole: clearHighlight
+          ? GleisRole.none
+          : (highlightRole ?? this.highlightRole),
       isLoading: isLoading ?? this.isLoading,
       error: clearError ? null : (error ?? this.error),
     );
@@ -373,8 +386,12 @@ class StationMapNotifier extends Notifier<StationMapState> {
 
   /// Load the map for a station. Pass [highlightGleis] when coming from a
   /// journey so the boarding track is highlighted and its floor pre-selected.
+  /// [role] sets whether that Gleis is the rider's Einstieg, Ausstieg or Umstieg
+  /// — so the banner doesn't call the destination an "Einstieg".
   Future<void> loadForStation(Station station,
-      {String? highlightGleis, String? transferNote}) async {
+      {String? highlightGleis,
+      String? transferNote,
+      GleisRole role = GleisRole.board}) async {
     final raw = highlightGleis?.trim() ?? '';
     final hl = raw.isNotEmpty ? normalizeGleis(raw) : null;
     final section = raw.isNotEmpty ? parseGleisSection(raw) : null;
@@ -383,6 +400,7 @@ class StationMapNotifier extends Notifier<StationMapState> {
       highlightGleis: hl,
       highlightSection: section,
       transferNote: transferNote,
+      highlightRole: hl == null ? GleisRole.none : role,
       clearHighlight: hl == null,
       // Without an explicit section, drop any stale one from a previous train
       // (else every train would keep showing the first train's "G–I").

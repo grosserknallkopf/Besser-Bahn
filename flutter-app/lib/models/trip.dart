@@ -181,6 +181,18 @@ class Stopover {
       plannedDeparturePlatform != null &&
       departurePlatform != plannedDeparturePlatform;
 
+  /// First stop of the run: it has a departure but no arrival → an Einstieg.
+  bool get isOrigin =>
+      (departure != null || plannedDeparture != null) &&
+      arrival == null &&
+      plannedArrival == null;
+
+  /// Last stop of the run: it has an arrival but no departure → an Ausstieg.
+  bool get isTerminus =>
+      (arrival != null || plannedArrival != null) &&
+      departure == null &&
+      plannedDeparture == null;
+
   String? get platform => departurePlatform ?? arrivalPlatform;
   String? get plannedPlatform =>
       plannedDeparturePlatform ?? plannedArrivalPlatform;

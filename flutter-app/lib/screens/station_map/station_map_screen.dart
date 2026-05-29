@@ -191,6 +191,8 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
             _BoardingBanner(
               gleis: state.highlightGleis!,
               section: state.highlightSection,
+              role: state.highlightRole,
+              note: state.transferNote,
             ),
           Expanded(child: _buildBody(context, state, notifier)),
         ],
@@ -1065,7 +1067,14 @@ class _CategoryMeta {
 class _BoardingBanner extends StatelessWidget {
   final String gleis;
   final ({String start, String end})? section;
-  const _BoardingBanner({required this.gleis, this.section});
+  final GleisRole role;
+  final String? note;
+  const _BoardingBanner({
+    required this.gleis,
+    this.section,
+    this.role = GleisRole.board,
+    this.note,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1075,29 +1084,44 @@ class _BoardingBanner extends StatelessWidget {
         : sec.start == sec.end
             ? ', Abschnitt ${sec.start}'
             : ', Abschnitt ${sec.start}–${sec.end}';
+
+    // Wording, icon and colour follow what the Gleis is FOR — so the arrival
+    // station reads "Ausstieg", not "Einstieg".
+    final (String lead, IconData icon, Color color) = switch (role) {
+      GleisRole.alight => ('Dein Ausstieg: ', Icons.logout, AppColors.onTime),
+      GleisRole.transfer => ('Umstieg: ', Icons.swap_calls, AppColors.dbRed),
+      GleisRole.board => ('Dein Einstieg: ', Icons.login, AppColors.dbRed),
+      GleisRole.none => ('', Icons.place, AppColors.dbRed),
+    };
+
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: AppColors.dbRed.withAlpha(30),
+        color: color.withAlpha(30),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.dbRed, width: 1),
+        border: Border.all(color: color, width: 1),
       ),
       child: Row(
         children: [
-          const Icon(Icons.directions_walk, color: AppColors.dbRed, size: 20),
+          Icon(icon, color: color, size: 20),
           const SizedBox(width: 8),
           Expanded(
             child: Text.rich(
               TextSpan(
                 children: [
-                  const TextSpan(text: 'Dein Einstieg: '),
+                  if (lead.isNotEmpty) TextSpan(text: lead),
                   TextSpan(
                     text: 'Gleis $gleis$sectionText',
                     style: const TextStyle(fontWeight: FontWeight.bold),
                   ),
                   const TextSpan(text: ' (auf der Karte markiert)'),
+                  if (note != null && note!.isNotEmpty)
+                    TextSpan(
+                      text: '\n$note',
+                      style: const TextStyle(fontSize: 12),
+                    ),
                 ],
               ),
             ),

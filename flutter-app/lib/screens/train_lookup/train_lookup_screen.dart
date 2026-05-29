@@ -331,6 +331,11 @@ class _TrainLookupScreenState extends ConsumerState<TrainLookupScreen>
               ref.read(stationMapProvider.notifier).loadForStation(
                     stop.stop,
                     highlightGleis: stop.platform,
+                    role: stop.isTerminus
+                        ? GleisRole.alight
+                        : stop.isOrigin
+                            ? GleisRole.board
+                            : GleisRole.none,
                   );
               // push (not go) → full-screen with a back button + swipe-back.
               context.push('/station-map');
