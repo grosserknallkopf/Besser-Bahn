@@ -132,12 +132,18 @@ class VendoService {
   /// backend mints a short `vbid` that resolves to the journey. Returns null if
   /// the journey carries no recon context (then the caller should fall back to
   /// a pre-filled search link).
+  // vbid links are stable per recon ctx — cache so "öffnen" and "teilen" of the
+  // same connection mint the link once, not twice.
+  final _shareCache = <String, String>{};
+
   Future<String?> shareJourney(Journey journey) async {
     final recon = journey.refreshToken;
     // `/teilen` needs the full HAFAS recon string. The `checksum` fallback we
     // also store in refreshToken (e.g. "43bc223b_3") is NOT a recon ctx — the
     // `¶` marker distinguishes them. Bail so the caller can use a search link.
     if (recon == null || !recon.contains('¶')) return null;
+    final cached = _shareCache[recon];
+    if (cached != null) return cached;
 
     final dep = journey.plannedDeparture ?? journey.departure;
     final body = <String, dynamic>{
@@ -161,7 +167,9 @@ class VendoService {
     final data = json.decode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
     final vbid = data['vbid'] as String?;
     if (vbid == null || vbid.isEmpty) return null;
-    return 'https://www.bahn.de/buchung/start?vbid=$vbid';
+    final link = 'https://www.bahn.de/buchung/start?vbid=$vbid';
+    _shareCache[recon] = link;
+    return link;
   }
 
   /// The exact track geometry (the rails the train actually runs on) for a

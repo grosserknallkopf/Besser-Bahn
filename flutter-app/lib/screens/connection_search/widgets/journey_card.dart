@@ -5,6 +5,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../../models/journey.dart';
 import '../../../core/extensions.dart';
+import '../../../core/share_text.dart';
 import '../../../providers/service_providers.dart';
 import '../../../widgets/delay_badge.dart';
 import '../../../widgets/platform_badge.dart';
@@ -178,7 +179,7 @@ class JourneyCard extends ConsumerWidget {
     final d = journey.destination?.name ?? '';
     await SharePlus.instance.share(
       ShareParams(
-        text: link,
+        text: journeyShareText(journey, link),
         subject: o.isNotEmpty && d.isNotEmpty ? '$o → $d' : 'Bahn-Reise',
       ),
     );

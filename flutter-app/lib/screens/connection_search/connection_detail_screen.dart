@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/share_text.dart';
 import '../../models/coach_sequence.dart';
 import '../../models/journey.dart';
 import '../../models/library_models.dart';
@@ -98,12 +99,18 @@ class ConnectionDetailScreen extends ConsumerWidget {
     );
   }
 
-  /// Open this connection on bahn.de (pre-filled with date + the user's
-  /// BahnCard / Deutschland-Ticket) so the price matches and the user can book.
-  void _openOnBahn(BuildContext context, WidgetRef ref) {
-    final url = _searchLink(ref);
+  /// Open this connection on bahn.de. Prefers the official `vbid` deep link
+  /// (opens the EXACT connection), and only falls back to a pre-filled search
+  /// link if the journey carries no recon context.
+  Future<void> _openOnBahn(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    String? url;
+    try {
+      url = await ref.read(vendoServiceProvider).shareJourney(journey);
+    } catch (_) {/* fall back below */}
+    url ??= _searchLink(ref);
     if (url == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      messenger.showSnackBar(
         const SnackBar(content: Text('Verbindung nicht verfügbar.')),
       );
       return;
@@ -111,9 +118,9 @@ class ConnectionDetailScreen extends ConsumerWidget {
     launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
   }
 
-  /// Share an official bahn.de "Reise teilen" link to the EXACT connection (the
-  /// `vbid` deep link the DB Navigator app produces). Falls back to a pre-filled
-  /// search link if the journey carries no recon context.
+  /// Share like the official DB app: rich text (route, date, each train with
+  /// platforms) ending in the `vbid` deep link to the EXACT connection. Falls
+  /// back to a pre-filled search link if no recon context is available.
   Future<void> _shareJourney(BuildContext context, WidgetRef ref) async {
     final messenger = ScaffoldMessenger.of(context);
     String? link;
@@ -131,7 +138,7 @@ class ConnectionDetailScreen extends ConsumerWidget {
     final d = journey.destination?.name ?? '';
     await SharePlus.instance.share(
       ShareParams(
-        text: link,
+        text: journeyShareText(journey, link),
         subject: o.isNotEmpty && d.isNotEmpty ? '$o → $d' : 'Bahn-Reise',
       ),
     );
