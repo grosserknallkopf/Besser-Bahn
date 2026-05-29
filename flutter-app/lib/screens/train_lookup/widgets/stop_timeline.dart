@@ -30,6 +30,11 @@ class StopTimeline extends StatefulWidget {
   /// title) — used to fold the train header into the same block.
   final Widget? header;
 
+  /// Optional widget rendered right under the train header, INSIDE this card
+  /// (e.g. the collapsible Wagenreihung) — so it's part of the train element,
+  /// not a separate section.
+  final Widget? trainExtra;
+
   /// When true, return content without the surrounding Card/margin so it can be
   /// embedded in a shared card.
   final bool embedded;
@@ -48,6 +53,7 @@ class StopTimeline extends StatefulWidget {
     this.alightingId,
     this.legAmenities = const [],
     this.header,
+    this.trainExtra,
     this.embedded = false,
     this.inlineHeader = false,
   });
@@ -55,6 +61,10 @@ class StopTimeline extends StatefulWidget {
   @override
   State<StopTimeline> createState() => _StopTimelineState();
 }
+
+/// Left time/duration gutter width — tight so the stop content gets the room
+/// instead of dead space under the times.
+const double _kSpineWidth = 40.0;
 
 class _StopTimelineState extends State<StopTimeline> {
   bool _expandedBefore = false;
@@ -132,6 +142,8 @@ class _StopTimelineState extends State<StopTimeline> {
         duration: _legDuration(stops, board, alight),
         expandable: middleCount > 0,
       ));
+      // Wagenreihung etc. — part of the train element, inside this same card.
+      if (widget.trainExtra != null) rows.add(widget.trainExtra!);
       if (_expandedMiddle && middleCount > 0) {
         for (var i = board + 1; i < alight; i++) {
           rows.add(_stopRow(i, board, alight, hasTop: true, hasBottom: true));
@@ -205,6 +217,8 @@ class _StopTimelineState extends State<StopTimeline> {
             widget.header!,
             const Divider(height: 1),
           ],
+          // Wagenreihung etc. as part of the train element (standalone view).
+          if (widget.trainExtra != null) widget.trainExtra!,
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
             child: Text(
@@ -270,7 +284,7 @@ class _StopTimelineState extends State<StopTimeline> {
             // Mirror the Zwischenhalte row exactly: spine (52) + gap (12) +
             // line column (20) + gap (12) → the content (icon + label) lines up
             // with the "N Zwischenhalte" text, not just the stop names.
-            const SizedBox(width: 52),
+            const SizedBox(width: _kSpineWidth),
             const SizedBox(width: 12),
             const SizedBox(width: 20),
             const SizedBox(width: 12),
@@ -316,7 +330,7 @@ class _StopTimelineState extends State<StopTimeline> {
             children: [
               // spine: leg duration, centred between the two stop times
               SizedBox(
-                width: 52,
+                width: _kSpineWidth,
                 child: duration == null
                     ? const SizedBox.shrink()
                     : Center(
@@ -433,7 +447,7 @@ class _StopTimelineState extends State<StopTimeline> {
             children: [
               // spine gutter: leg duration, centred against the train card
               SizedBox(
-                width: 52,
+                width: _kSpineWidth,
                 child: duration == null
                     ? const SizedBox.shrink()
                     : Center(
@@ -580,7 +594,7 @@ class _StopRow extends StatelessWidget {
           children: [
             // Time spine column
             SizedBox(
-              width: 52,
+              width: _kSpineWidth,
               child: _spineTime(
                   spinePlanned, spineReal, spineDelay, cancelled, textColor),
             ),
@@ -798,17 +812,26 @@ class _StopRow extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        Text(
-          planned.hhmm,
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-            color: cancelled
-                ? Colors.red
-                : (delayed ? baseColor.withAlpha(140) : baseColor),
-            decoration: (cancelled || delayed)
-                ? TextDecoration.lineThrough
-                : null,
+        // Planned time occupies the same fixed-height row as the station name,
+        // vertically centred — so it lines up with the timeline dot (which
+        // targets that same centre), not floating above it.
+        SizedBox(
+          height: _nameRowHeight,
+          child: Align(
+            alignment: Alignment.centerRight,
+            child: Text(
+              planned.hhmm,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: cancelled
+                    ? Colors.red
+                    : (delayed ? baseColor.withAlpha(140) : baseColor),
+                decoration: (cancelled || delayed)
+                    ? TextDecoration.lineThrough
+                    : null,
+              ),
+            ),
           ),
         ),
         if (delayed && real != null)

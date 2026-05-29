@@ -382,7 +382,7 @@ class _ConnectionDetailScreenState
                   child: Text(
                     '${journey.origin?.name ?? ''} → '
                     '${journey.destination?.name ?? ''}',
-                    style: theme.textTheme.titleMedium
+                    style: theme.textTheme.titleLarge
                         ?.copyWith(fontWeight: FontWeight.bold),
                   ),
                 ),

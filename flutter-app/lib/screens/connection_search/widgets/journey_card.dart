@@ -87,31 +87,26 @@ class JourneyCard extends ConsumerWidget {
                           journey.legs.firstOrNull?.departureDelay),
                       if (journey.legs.firstOrNull?.departurePlatform != null ||
                           journey.legs.firstOrNull?.plannedDeparturePlatform !=
-                              null)
-                        _depPlatform(context, journey.legs.firstOrNull!),
+                              null) ...[
+                        const SizedBox(height: 3),
+                        PlatformChip(
+                          platform: journey.legs.firstOrNull?.departurePlatform,
+                          plannedPlatform:
+                              journey.legs.firstOrNull?.plannedDeparturePlatform,
+                        ),
+                      ],
                     ],
                   ),
 
-                  // Duration & transfers
+                  // Duration — bigger; the transfer count is obvious from the
+                  // train pills below, so no "N Umstiege" text here.
                   Expanded(
-                    child: Column(
-                      children: [
-                        Text(
-                          journey.durationString,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                              fontWeight: FontWeight.w600),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          journey.transfers == 0
-                              ? 'Direkt'
-                              : '${journey.transfers} Umstieg'
-                                  '${journey.transfers > 1 ? 'e' : ''}',
-                          style: TextStyle(
-                              fontSize: 11,
-                              color: theme.colorScheme.onSurfaceVariant),
-                        ),
-                      ],
+                    child: Center(
+                      child: Text(
+                        journey.durationString,
+                        style: theme.textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.bold),
+                      ),
                     ),
                   ),
 
@@ -121,13 +116,16 @@ class JourneyCard extends ConsumerWidget {
                     children: [
                       _timeWithDelay(context, journey.plannedArrival,
                           journey.legs.lastOrNull?.arrivalDelay),
-                      if (journey.legs.lastOrNull?.arrivalPlatform != null)
-                        PlatformBadge(
-                          platform:
-                              journey.legs.lastOrNull?.arrivalPlatform,
-                          plannedPlatform: journey
-                              .legs.lastOrNull?.plannedArrivalPlatform,
+                      if (journey.legs.lastOrNull?.arrivalPlatform != null ||
+                          journey.legs.lastOrNull?.plannedArrivalPlatform !=
+                              null) ...[
+                        const SizedBox(height: 3),
+                        PlatformChip(
+                          platform: journey.legs.lastOrNull?.arrivalPlatform,
+                          plannedPlatform:
+                              journey.legs.lastOrNull?.plannedArrivalPlatform,
                         ),
+                      ],
                     ],
                   ),
                 ],
@@ -197,39 +195,6 @@ class JourneyCard extends ConsumerWidget {
         const SizedBox(width: 4),
         DelayBadge(delaySeconds: delaySec),
       ],
-    );
-  }
-
-  /// Departure platform shown in the preview ("Gl. 3"), red when the train
-  /// leaves from a platform other than the scheduled one (abweichende Abfahrt).
-  Widget _depPlatform(BuildContext context, JourneyLeg leg) {
-    final theme = Theme.of(context);
-    final display = leg.departurePlatform ?? leg.plannedDeparturePlatform;
-    if (display == null || display.isEmpty) return const SizedBox.shrink();
-    final changed = leg.hasDeparturePlatformChange;
-    final color = changed ? Colors.red : theme.colorScheme.onSurfaceVariant;
-    return Padding(
-      padding: const EdgeInsets.only(top: 2),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          TrackIcon(size: 13, color: color),
-          const SizedBox(width: 3),
-          if (changed && leg.plannedDeparturePlatform != null) ...[
-            Text(leg.plannedDeparturePlatform!,
-                style: TextStyle(
-                    fontSize: 11,
-                    color: theme.colorScheme.onSurfaceVariant,
-                    decoration: TextDecoration.lineThrough)),
-            const SizedBox(width: 3),
-          ],
-          Text(display,
-              style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: changed ? Colors.red : null)),
-        ],
-      ),
     );
   }
 

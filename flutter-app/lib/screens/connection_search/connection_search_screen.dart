@@ -185,11 +185,13 @@ class _ConnectionSearchScreenState
                             ),
                           ),
                         ),
-                        const SizedBox(width: 6),
+                        const SizedBox(width: 4),
                         SegmentedButton<bool>(
                           style: SegmentedButton.styleFrom(
                             visualDensity: VisualDensity.compact,
-                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            padding: const EdgeInsets.symmetric(horizontal: 6),
+                            tapTargetSize:
+                                MaterialTapTargetSize.shrinkWrap,
                           ),
                           segments: const [
                             ButtonSegment(value: false, label: Text('Ab')),
@@ -199,11 +201,12 @@ class _ConnectionSearchScreenState
                           onSelectionChanged: (v) =>
                               notifier.setIsArrival(v.first),
                         ),
-                        const SizedBox(width: 6),
+                        const SizedBox(width: 4),
                         FilledButton(
                           style: FilledButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
                             minimumSize: const Size(0, 0),
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           ),
                           onPressed: state.isLoading ? null : _search,
                           child: state.isLoading
@@ -213,7 +216,7 @@ class _ConnectionSearchScreenState
                                   child: CircularProgressIndicator(
                                       strokeWidth: 2, color: Colors.white),
                                 )
-                              : const Icon(Icons.search),
+                              : const Icon(Icons.search, size: 20),
                         ),
                       ],
                     ),

@@ -98,12 +98,25 @@ class _TrainDetailViewState extends ConsumerState<TrainDetailView> {
     // set — then the train header folds inline onto the route spine.
     final isLeg = widget.boardingId != null || widget.alightingId != null;
 
+    // Wagenreihung (or, when there's none, the bare seat-plan panel) folded
+    // INTO the train card as a sub-section, not a separate card.
+    final Widget? trainExtra = widget.coach != null
+        ? CoachSequenceView(
+            sequence: widget.coach!,
+            selectable: reservable && _seatsExpanded,
+            freeByWagon: freeByWagon,
+            selectedWagon: effectiveWagon,
+            onCoachTap: (c) => setState(() => _selectedWagon = c.wagonNumber),
+            seatPlan: seatPlan,
+            embedded: true,
+          )
+        : seatPlan;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // One block: train name/info folded into the same card as the Halte
-        // timeline (the duplicate origin→destination times are gone). On a leg,
-        // the header renders inline on the route line (DB-Navigator style).
+        // One block: train name/info + Wagenreihung + Halte timeline, all in
+        // one card. On a leg the header renders inline on the route line.
         StopTimeline(
           stopovers: trip.stopovers,
           onStopTap: widget.onStopTap,
@@ -118,25 +131,8 @@ class _TrainDetailViewState extends ConsumerState<TrainDetailView> {
             padding: isLeg ? EdgeInsets.zero : null,
             predictionStrip: isLeg ? widget.predictionStrip : null,
           ),
+          trainExtra: trainExtra,
         ),
-        if (widget.coach != null)
-          CoachSequenceView(
-            sequence: widget.coach!,
-            selectable: reservable && _seatsExpanded,
-            freeByWagon: freeByWagon,
-            selectedWagon: effectiveWagon,
-            onCoachTap: (c) => setState(() => _selectedWagon = c.wagonNumber),
-            seatPlan: seatPlan,
-          )
-        else if (seatPlan != null)
-          Card(
-            margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            clipBehavior: Clip.antiAlias,
-            child: Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: seatPlan,
-            ),
-          ),
       ],
     );
   }

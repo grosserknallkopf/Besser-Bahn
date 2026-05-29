@@ -50,6 +50,57 @@ class _TrackPainter extends CustomPainter {
   bool shouldRepaint(_TrackPainter old) => old.color != color;
 }
 
+/// Gleis shown in a bordered box: blue outline normally, red (with the old
+/// platform struck through) when it changed. Same look as the stop timeline, so
+/// the platform reads identically in the preview, summary and detail.
+class PlatformChip extends StatelessWidget {
+  final String? platform;
+  final String? plannedPlatform;
+
+  const PlatformChip({super.key, this.platform, this.plannedPlatform});
+
+  @override
+  Widget build(BuildContext context) {
+    final display = platform ?? plannedPlatform;
+    if (display == null || display.isEmpty) return const SizedBox.shrink();
+    final changed = platform != null &&
+        plannedPlatform != null &&
+        platform != plannedPlatform;
+    final color = changed ? Colors.red : Colors.blue;
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: color.withAlpha(200)),
+        color: color.withAlpha(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          TrackIcon(
+              size: 13,
+              color: changed ? Colors.red : theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 3),
+          if (changed && plannedPlatform != null) ...[
+            Text(plannedPlatform!,
+                style: TextStyle(
+                    fontSize: 11,
+                    color: theme.colorScheme.onSurfaceVariant,
+                    decoration: TextDecoration.lineThrough)),
+            const SizedBox(width: 4),
+          ],
+          Text(display,
+              style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: changed ? Colors.red : theme.colorScheme.onSurface)),
+        ],
+      ),
+    );
+  }
+}
+
 class PlatformBadge extends StatelessWidget {
   final String? platform;
   final String? plannedPlatform;

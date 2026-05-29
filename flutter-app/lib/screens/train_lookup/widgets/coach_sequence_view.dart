@@ -18,6 +18,10 @@ class CoachSequenceView extends StatefulWidget {
   /// free-seat view lives *in* the Wagenreihung instead of a separate section.
   final Widget? seatPlan;
 
+  /// When true, render without the surrounding Card/margin so the Wagenreihung
+  /// can be embedded inside the train's own card (not a separate section).
+  final bool embedded;
+
   const CoachSequenceView({
     super.key,
     required this.sequence,
@@ -26,6 +30,7 @@ class CoachSequenceView extends StatefulWidget {
     this.selectedWagon,
     this.onCoachTap,
     this.seatPlan,
+    this.embedded = false,
   });
 
   @override
@@ -45,6 +50,7 @@ class _CoachSequenceViewState extends State<CoachSequenceView> {
     final selectedWagon = widget.selectedWagon;
     final onCoachTap = widget.onCoachTap;
     final seatPlan = widget.seatPlan;
+    final embedded = widget.embedded;
 
     final theme = Theme.of(context);
     final coaches = sequence.allCoaches;
@@ -52,10 +58,7 @@ class _CoachSequenceViewState extends State<CoachSequenceView> {
 
     final platformLength = sequence.platform.length;
 
-    return Card(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
+    final body = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
@@ -71,18 +74,8 @@ class _CoachSequenceViewState extends State<CoachSequenceView> {
                       style: theme.textTheme.titleSmall
                           ?.copyWith(fontWeight: FontWeight.bold)),
                   const Spacer(),
-                  Text('Gleis ${sequence.departurePlatform}',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w600)),
-                  if (sequence.hasPlatformChange) ...[
-                    const SizedBox(width: 4),
-                    Text('(plan: ${sequence.scheduledPlatform})',
-                        style: TextStyle(
-                            color: AppColors.delay,
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold)),
-                  ],
-                  const SizedBox(width: 6),
+                  // Gleis NOT repeated here — already on the boarding stop above
+                  // (shown red there when it changed).
                   Icon(_expanded ? Icons.expand_less : Icons.expand_more,
                       size: 20, color: theme.colorScheme.onSurfaceVariant),
                 ],
@@ -198,7 +191,13 @@ class _CoachSequenceViewState extends State<CoachSequenceView> {
         seatPlan,
       ],
         ],
-      ),
+      );
+
+    if (embedded) return body;
+    return Card(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      clipBehavior: Clip.antiAlias,
+      child: body,
     );
   }
 
