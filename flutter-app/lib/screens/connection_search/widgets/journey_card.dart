@@ -282,13 +282,15 @@ class JourneyCard extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Proportional coloured segment with the line name inside.
+        // Proportional segment, transparent look: tinted fill + coloured border
+        // and coloured label (the earlier style).
         Container(
           height: 26,
           alignment: Alignment.center,
           padding: const EdgeInsets.symmetric(horizontal: 4),
           decoration: BoxDecoration(
-            color: color,
+            color: color.withAlpha(28),
+            border: Border.all(color: color.withAlpha(150)),
             borderRadius: BorderRadius.circular(6),
           ),
           child: FittedBox(
@@ -296,10 +298,8 @@ class JourneyCard extends ConsumerWidget {
             child: Text(
               label,
               maxLines: 1,
-              style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
-                  color: Colors.white),
+              style: TextStyle(
+                  fontSize: 12, fontWeight: FontWeight.w700, color: color),
             ),
           ),
         ),

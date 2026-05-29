@@ -313,47 +313,61 @@ class _ConnectionDetailScreenState
     final arr = journey.plannedArrival;
     final depDelay = journey.legs.firstOrNull?.departureDelay ?? 0;
     final arrDelay = journey.legs.lastOrNull?.arrivalDelay ?? 0;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Big "ab 20:00 → an 23:45" headline, top-left, with the price right.
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              if (dep != null) ...[
-                _summaryTime(context, 'ab', dep, depDelay),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 6),
-                  child: Icon(Icons.arrow_forward,
-                      size: 18, color: theme.colorScheme.onSurfaceVariant),
-                ),
+    // One top block summarising the whole connection: ab→an times + price,
+    // total duration · number of transfers, and the connection-wide
+    // Anschluss/Pünktlichkeit. The per-train scores live inside each leg below.
+    return Card(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Big "ab 20:00 → an 23:45" headline, top-left, with the price right.
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                if (dep != null) ...[
+                  _summaryTime(context, 'ab', dep, depDelay),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    child: Icon(Icons.arrow_forward,
+                        size: 18, color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                ],
+                if (arr != null) _summaryTime(context, 'an', arr, arrDelay),
+                const Spacer(),
+                if (journey.price != null)
+                  Text(journey.price!.formatted,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: theme.colorScheme.primary)),
               ],
-              if (arr != null) _summaryTime(context, 'an', arr, arrDelay),
-              const Spacer(),
-              if (journey.price != null)
-                Text(journey.price!.formatted,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: theme.colorScheme.primary)),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Row(
-            children: [
-              Text(journey.durationString,
-                  style: theme.textTheme.bodyMedium
-                      ?.copyWith(fontWeight: FontWeight.w600)),
-              const SizedBox(width: 10),
-              Text(t == 0 ? 'Direkt' : '$t Umstieg${t > 1 ? 'e' : ''}',
-                  style: theme.textTheme.bodyMedium
-                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
-            ],
-          ),
-          const SizedBox(height: 8),
-          PredictionBadge(journey: journey, axis: Axis.horizontal),
-        ],
+            ),
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Icon(Icons.schedule,
+                    size: 15, color: theme.colorScheme.onSurfaceVariant),
+                const SizedBox(width: 4),
+                Text(journey.durationString,
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(fontWeight: FontWeight.w600)),
+                const SizedBox(width: 12),
+                Icon(Icons.swap_calls,
+                    size: 15, color: theme.colorScheme.onSurfaceVariant),
+                const SizedBox(width: 4),
+                Text(t == 0 ? 'Direkt' : '$t Umstieg${t > 1 ? 'e' : ''}',
+                    style: theme.textTheme.bodyMedium
+                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
+              ],
+            ),
+            const SizedBox(height: 10),
+            const Divider(height: 1),
+            const SizedBox(height: 10),
+            PredictionBadge(journey: journey, axis: Axis.horizontal),
+          ],
+        ),
       ),
     );
   }
