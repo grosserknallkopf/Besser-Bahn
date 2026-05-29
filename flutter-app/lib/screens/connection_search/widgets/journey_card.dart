@@ -43,8 +43,8 @@ class JourneyCard extends ConsumerWidget {
               Expanded(
                 child: Column(
             children: [
-              // Route row: which station to which station — so a saved/searched
-              // connection is identifiable at a glance, not just by its times.
+              // Route row: origin (left) and destination (right). No arrow —
+              // a search always runs left→right, so it adds nothing.
               Row(
                 children: [
                   Expanded(
@@ -56,11 +56,7 @@ class JourneyCard extends ConsumerWidget {
                           fontSize: 13, fontWeight: FontWeight.w600),
                     ),
                   ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: Icon(Icons.arrow_forward,
-                        size: 13, color: theme.colorScheme.onSurfaceVariant),
-                  ),
+                  const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       journey.destination?.name ?? '',
@@ -94,7 +90,7 @@ class JourneyCard extends ConsumerWidget {
                       child: Text(
                         journey.durationString,
                         style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.bold),
+                            fontWeight: FontWeight.bold, fontSize: 18),
                       ),
                     ),
                   ),

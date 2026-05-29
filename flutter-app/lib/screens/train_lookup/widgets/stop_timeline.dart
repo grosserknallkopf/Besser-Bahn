@@ -278,7 +278,7 @@ class _StopTimelineState extends State<StopTimeline> {
     return InkWell(
       onTap: onTap,
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        padding: const EdgeInsets.fromLTRB(8, 6, 16, 6),
         child: Row(
           children: [
             // Mirror the Zwischenhalte row exactly: spine (52) + gap (12) +
@@ -324,7 +324,7 @@ class _StopTimelineState extends State<StopTimeline> {
       onTap: onTap,
       child: IntrinsicHeight(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.fromLTRB(8, 0, 16, 0),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -333,10 +333,13 @@ class _StopTimelineState extends State<StopTimeline> {
                 width: _kSpineWidth,
                 child: duration == null
                     ? const SizedBox.shrink()
-                    : Center(
+                    : Align(
+                        // Vertically centred in the gap between the two stop
+                        // times, right-aligned so it sits in the same column.
+                        alignment: Alignment.centerRight,
                         child: Text(
                           duration,
-                          textAlign: TextAlign.center,
+                          textAlign: TextAlign.right,
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant,
                             fontWeight: FontWeight.w600,
@@ -441,7 +444,7 @@ class _StopTimelineState extends State<StopTimeline> {
           : null,
       child: IntrinsicHeight(
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.fromLTRB(8, 0, 16, 0),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -450,10 +453,13 @@ class _StopTimelineState extends State<StopTimeline> {
                 width: _kSpineWidth,
                 child: duration == null
                     ? const SizedBox.shrink()
-                    : Center(
+                    : Align(
+                        // Vertically centred in the gap between the two stop
+                        // times, right-aligned so it sits in the same column.
+                        alignment: Alignment.centerRight,
                         child: Text(
                           duration,
-                          textAlign: TextAlign.center,
+                          textAlign: TextAlign.right,
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant,
                             fontWeight: FontWeight.w600,
@@ -587,7 +593,7 @@ class _StopRow extends StatelessWidget {
             : theme.colorScheme.primary;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.fromLTRB(8, 0, 16, 0),
       child: IntrinsicHeight(
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
