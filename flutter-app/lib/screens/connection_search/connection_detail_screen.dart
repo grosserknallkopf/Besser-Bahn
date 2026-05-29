@@ -100,11 +100,8 @@ class _ConnectionDetailScreenState
     final legs = journey.legs;
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          '${journey.origin?.name ?? ''} → ${journey.destination?.name ?? ''}',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
+        // Full route is cut off on a phone here → moved into the summary block.
+        title: const Text('Verbindung'),
         actions: [
           // Teilen + Öffnen folded into one button → a small menu asks which.
           PopupMenuButton<int>(
@@ -373,6 +370,22 @@ class _ConnectionDetailScreenState
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // Full route here (moved out of the AppBar, where it was clipped on
+            // a phone) — free to wrap onto a second line.
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Text(
+                    '${journey.origin?.name ?? ''} → '
+                    '${journey.destination?.name ?? ''}',
+                    style: theme.textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
             // Big "ab 20:00 → an 23:45" headline, top-left, with the price right.
             Row(
               crossAxisAlignment: CrossAxisAlignment.center,
