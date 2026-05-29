@@ -267,19 +267,16 @@ class _StopTimelineState extends State<StopTimeline> {
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         child: Row(
           children: [
-            // Match the stop rows: spine (52) + gap (12) puts the expander icon
-            // on the timeline axis, and the label lines up with the stop names.
+            // Mirror the Zwischenhalte row exactly: spine (52) + gap (12) +
+            // line column (20) + gap (12) → the content (icon + label) lines up
+            // with the "N Zwischenhalte" text, not just the stop names.
             const SizedBox(width: 52),
             const SizedBox(width: 12),
-            SizedBox(
-              width: 20,
-              child: Icon(
-                expanded ? Icons.unfold_less : Icons.more_vert,
-                size: 18,
-                color: theme.colorScheme.primary,
-              ),
-            ),
+            const SizedBox(width: 20),
             const SizedBox(width: 12),
+            Icon(expanded ? Icons.unfold_less : Icons.more_horiz,
+                size: 18, color: theme.colorScheme.primary),
+            const SizedBox(width: 8),
             Expanded(
               child: Text(
                 label,
