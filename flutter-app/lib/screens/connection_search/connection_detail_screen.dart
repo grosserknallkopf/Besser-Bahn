@@ -177,8 +177,7 @@ class _ConnectionDetailScreenState
                   i > 0 ? legs[i - 1] : null,
                   i + 1 < legs.length ? legs[i + 1] : null)
             else ...[
-              if (legs[i].disruptions.isNotEmpty)
-                _disruptionBanner(context, legs[i].disruptions),
+              _LegNotes(notes: _visibleNotes(legs[i].disruptions)),
               _LegSection(
                 key: ValueKey('leg-$i-${legs[i].tripId}-$_refreshTick'),
                 leg: legs[i],
@@ -476,43 +475,12 @@ class _ConnectionDetailScreenState
 
   /// Warning banner above a leg listing its disruption notes (HIM messages,
   /// realtime notes) — e.g. "Aufzug in Elmshorn außer Betrieb".
-  /// Generic leg notices (lift out of service, construction, …). Deliberately
-  /// LOW-KEY grey — red is reserved for the wing-train split warning, the one
-  /// note where boarding wrong actually strands you. An out-of-order lift should
-  /// not shout in the same colour.
-  Widget _disruptionBanner(BuildContext context, List<String> notes) {
-    final theme = Theme.of(context);
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          for (final n in notes)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 2),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.info_outline,
-                      size: 15, color: theme.colorScheme.onSurfaceVariant),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(n,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant)),
-                  ),
-                ],
-              ),
-            ),
-        ],
-      ),
-    );
-  }
+  /// Notes worth keeping in the (collapsed) leg-notes menu. Drops the wing-train
+  /// split note — the loud red banner under the boarding stop says it better, so
+  /// keeping the text too would just be the clutter we're trying to remove.
+  List<String> _visibleNotes(List<String> notes) => notes
+      .where((n) => !n.toLowerCase().contains('zugteil'))
+      .toList();
 
   /// Tone for an available transfer time: red ≤2 min (Anschluss gefährdet),
   /// amber ≤5, else null (normal). Returns (textColor, warningText).
@@ -1007,7 +975,7 @@ class _LegSectionState extends ConsumerState<_LegSection>
     final isLegBoarding =
         (stop.stop.id.isNotEmpty && stop.stop.id == leg.origin.id) ||
             (stop.stop.name.isNotEmpty && stop.stop.name == leg.origin.name);
-    if (coach != null && isLegBoarding) {
+    if (coach != null && coach.splits && isLegBoarding) {
       final portion = coach.portionTo(leg.destination.name);
       final range = portion?.sectorRange;
       if (range != null) {
@@ -1073,6 +1041,91 @@ class _LegSectionState extends ConsumerState<_LegSection>
         subtitle: Text(
             '${leg.origin.name} → ${leg.destination.name}'
             '${leg.direction != null ? '  ·  Richtung ${leg.direction}' : ''}'),
+      ),
+    );
+  }
+}
+
+/// Collapsed leg notices (lift out of service, "fährt mit anderem Fahrzeug", …).
+/// These are low-value most of the time, so they sit behind a single tap — out
+/// of the way until the rider actually wants them. The wing-train split note is
+/// filtered out upstream (the red banner covers it). Renders nothing when empty.
+class _LegNotes extends StatefulWidget {
+  final List<String> notes;
+  const _LegNotes({required this.notes});
+
+  @override
+  State<_LegNotes> createState() => _LegNotesState();
+}
+
+class _LegNotesState extends State<_LegNotes> {
+  bool _open = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final notes = widget.notes;
+    if (notes.isEmpty) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            onTap: () => setState(() => _open = !_open),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, size: 15, color: muted),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _open
+                          ? 'Hinweise ausblenden'
+                          : '${notes.length} ${notes.length == 1 ? 'Hinweis' : 'Hinweise'}',
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: muted, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                  Icon(_open ? Icons.expand_less : Icons.expand_more,
+                      size: 18, color: muted),
+                ],
+              ),
+            ),
+          ),
+          if (_open)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (final n in notes)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 2),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('•', style: TextStyle(color: muted)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(n,
+                                style: theme.textTheme.bodySmall
+                                    ?.copyWith(color: muted)),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+        ],
       ),
     );
   }

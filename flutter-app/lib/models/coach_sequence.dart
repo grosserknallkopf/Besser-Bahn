@@ -42,6 +42,21 @@ class CoachSequence {
       scheduledPlatform != null &&
       departurePlatform != scheduledPlatform;
 
+  /// True only for a real Flügelzug: ≥2 portions bound for DIFFERENT
+  /// destinations. Multiple coach groups that all share one destination (e.g.
+  /// two units coupled and running together the whole way) are NOT a split —
+  /// you can board anywhere, so no "board the right portion" warning applies.
+  /// When destinations are unknown we deliberately return false (don't warn on
+  /// a guess).
+  bool get splits {
+    if (groups.length < 2) return false;
+    final dests = groups
+        .map((g) => _normStation(g.transport.destination ?? ''))
+        .where((s) => s.isNotEmpty)
+        .toSet();
+    return dests.length > 1;
+  }
+
   /// On a splitting train (a Flügelzug, ≥2 groups), the portion bound for
   /// [destinationName] — matched on a normalised station name. Null when the
   /// train doesn't split or no portion matches.

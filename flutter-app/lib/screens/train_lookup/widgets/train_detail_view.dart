@@ -108,7 +108,10 @@ class _TrainDetailViewState extends ConsumerState<TrainDetailView> {
     // boarding stop (where you decide which portion to board); otherwise it
     // stays inside the Wagenreihung card.
     final coach = widget.coach;
-    final splitBanner = (isLeg && coach != null && coach.groups.length > 1)
+    // Only a REAL split (portions to different destinations) gets the red
+    // warning — not every train that merely has >1 coach group (e.g. an RE that
+    // runs coupled units to the same place, where boarding anywhere is fine).
+    final splitBanner = (isLeg && coach != null && coach.splits)
         ? splitTrainBanner(context, coach,
             targetDestination: widget.legDestinationName)
         : null;

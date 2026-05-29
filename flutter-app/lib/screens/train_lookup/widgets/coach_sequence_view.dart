@@ -98,7 +98,7 @@ class _CoachSequenceViewState extends State<CoachSequenceView> {
 
             // Wing-train guidance (standalone train view only — in a connection
             // leg it's hoisted up under the boarding stop). Shown even collapsed.
-            if (widget.showSplitBanner && sequence.groups.length > 1)
+            if (widget.showSplitBanner && sequence.splits)
               splitTrainBanner(context, sequence,
                   targetDestination: widget.targetDestination),
 
@@ -180,8 +180,9 @@ class _CoachSequenceViewState extends State<CoachSequenceView> {
               ],
             ),
 
-            // Groups info (multiple train portions)
-            if (sequence.groups.length > 1) ...[
+            // Portion breakdown — only when the train actually splits (distinct
+            // destinations); identical destinations would just dupe the line.
+            if (sequence.splits) ...[
               const SizedBox(height: 8),
               const Divider(),
               const SizedBox(height: 4),
@@ -505,7 +506,8 @@ class _NosePainter extends CustomPainter {
 // ---------------------------------------------------------------------------
 
 /// Banner that tells the rider which portion of a splitting train to board.
-/// Caller must guarantee `sequence.groups.length > 1`.
+/// Caller must guarantee `sequence.splits` (a real split to distinct
+/// destinations) — not merely `groups.length > 1`.
 Widget splitTrainBanner(BuildContext context, CoachSequence sequence,
     {String? targetDestination}) {
   final theme = Theme.of(context);
