@@ -99,17 +99,30 @@ class _StopTimelineState extends State<StopTimeline> {
     final collapseMiddle = isLeg && middleCount > 0;
 
     if (collapseMiddle) {
+      // Leg duration (board departure → alight arrival), shown on the spine of
+      // the collapsed middle so the gap still carries information.
+      final depT =
+          stops[board].departure ?? stops[board].plannedDeparture;
+      final arrT =
+          stops[alight].arrival ?? stops[alight].plannedArrival;
+      String? legDur;
+      if (depT != null && arrT != null) {
+        final d = arrT.difference(depT);
+        if (!d.isNegative) {
+          final h = d.inHours;
+          final m = d.inMinutes % 60;
+          legDur = h > 0 ? '${h}h ${m}min' : '${m}min';
+        }
+      }
       // board endpoint
       rows.add(_stopRow(board, board, alight,
           hasTop: beforeCount > 0 && _expandedBefore, hasBottom: true));
-      // collapsible middle
-      rows.add(_collapseHeader(
+      // collapsible middle — continuous spine line + duration
+      rows.add(_middleHeader(
         context,
         expanded: _expandedMiddle,
         count: middleCount,
-        label: _expandedMiddle
-            ? 'Zwischenhalte ausblenden'
-            : '$middleCount ${middleCount == 1 ? 'Zwischenhalt' : 'Zwischenhalte'} anzeigen',
+        duration: legDur,
         onTap: () => setState(() => _expandedMiddle = !_expandedMiddle),
       ));
       if (_expandedMiddle) {
@@ -231,6 +244,84 @@ class _StopTimelineState extends State<StopTimeline> {
             Icon(expanded ? Icons.expand_less : Icons.expand_more,
                 size: 18, color: theme.colorScheme.primary),
           ],
+        ),
+      ),
+    );
+  }
+
+  /// Collapsed middle of a leg: the spine line runs straight through (no break)
+  /// with the leg duration on the left, and the expander icon + label sit in
+  /// the content column — mirrors the DB Navigator look.
+  Widget _middleHeader(BuildContext context,
+      {required bool expanded,
+      required int count,
+      required String? duration,
+      required VoidCallback onTap}) {
+    final theme = Theme.of(context);
+    final primary = theme.colorScheme.primary;
+    final lineColor = primary.withAlpha(60);
+    return InkWell(
+      onTap: onTap,
+      child: IntrinsicHeight(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // spine: leg duration, vertically centred
+              SizedBox(
+                width: 52,
+                child: duration == null
+                    ? const SizedBox.shrink()
+                    : Align(
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          duration,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+              ),
+              const SizedBox(width: 12),
+              // continuous timeline line
+              SizedBox(
+                width: 20,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [Container(width: 2, color: lineColor)],
+                ),
+              ),
+              const SizedBox(width: 12),
+              // content: expander icon + label + chevron (pushed right)
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 11),
+                  child: Row(
+                    children: [
+                      Icon(expanded ? Icons.unfold_less : Icons.more_horiz,
+                          size: 18, color: primary),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          '$count ${count == 1 ? 'Zwischenhalt' : 'Zwischenhalte'}'
+                          '${expanded ? ' ausblenden' : ' anzeigen'}',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      Icon(expanded ? Icons.expand_less : Icons.expand_more,
+                          size: 18, color: primary),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
