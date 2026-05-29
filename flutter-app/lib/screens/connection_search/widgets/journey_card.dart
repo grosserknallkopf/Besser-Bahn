@@ -135,10 +135,10 @@ class JourneyCard extends ConsumerWidget {
 
               const SizedBox(height: 6),
 
-              // Unified leg bar: each train's width ∝ time on it, labelled with
-              // line name (+ % when multiple legs) and occupancy. Price sits at
-              // the end. One row instead of the old bar + duplicate chips row.
+              // Per-train length comparison (one row each) on the left; price
+              // pinned top-right with the rows free to extend below it.
               Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Expanded(child: _legLengthBar(context, transitLegs)),
                   if (journey.price != null) ...[
@@ -233,10 +233,10 @@ class JourneyCard extends ConsumerWidget {
     );
   }
 
-  /// Visual length comparison that stays readable for any number of legs: a
-  /// thin proportional colour bar (each train's width ∝ time on it) plus a
-  /// wrapping row of readable chips (line · % + occupancy). Labels never live
-  /// *inside* the segments, so 4 trains don't shrink the text into mush.
+  /// Length comparison as ONE row per train (no duplicated bar + chips): a
+  /// coloured line badge on the left, a proportional fill bar showing the share
+  /// of travel time, and the % on the right. Stacks vertically, so it reads
+  /// cleanly with 1, 2 or 4 trains and uses the width instead of crushing text.
   Widget _legLengthBar(BuildContext context, List<JourneyLeg> legs) {
     if (legs.isEmpty) return const SizedBox.shrink();
     int legMinutes(JourneyLeg l) {
@@ -253,80 +253,85 @@ class JourneyCard extends ConsumerWidget {
     final total = mins.fold<int>(0, (s, m) => s + m);
     if (total <= 0) return const SizedBox.shrink();
     final multi = legs.length > 1;
-    // Keep every leg visible: a leg never gets less than ~8% of the bar width.
-    final minFlex = (total * 0.08).round().clamp(1, total);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (multi) ...[
-          Row(
-            children: [
-              for (var i = 0; i < legs.length; i++) ...[
-                if (i > 0) const SizedBox(width: 2),
-                Expanded(
-                  flex: mins[i] < minFlex ? minFlex : mins[i],
-                  child: Container(
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: _productColor(context, legs[i]),
-                      borderRadius: BorderRadius.circular(3),
-                    ),
-                  ),
-                ),
-              ],
-            ],
+        for (var i = 0; i < legs.length; i++) ...[
+          if (i > 0) const SizedBox(height: 4),
+          _legRow(
+            context,
+            legs[i].line?.displayName ?? '',
+            multi ? (mins[i] / total * 100).round() : null,
+            _productColor(context, legs[i]),
+            legs[i].occupancy?.level,
           ),
-          const SizedBox(height: 6),
         ],
-        // Readable, wrapping chips — never crushed however many trains there are.
-        Wrap(
-          spacing: 6,
-          runSpacing: 4,
-          children: [
-            for (var i = 0; i < legs.length; i++)
-              _legChip(
-                context,
-                legs[i].line?.displayName ?? '',
-                multi ? (mins[i] / total * 100).round() : null,
-                _productColor(context, legs[i]),
-                legs[i].occupancy?.level,
-              ),
-          ],
-        ),
       ],
     );
   }
 
-  Widget _legChip(BuildContext context, String label, int? percent, Color color,
+  Widget _legRow(BuildContext context, String label, int? percent, Color color,
       OccupancyLevel? occupancy) {
-    if (label.isEmpty && percent == null) return const SizedBox.shrink();
-    final text = percent != null && label.isNotEmpty
-        ? '$label · $percent%'
-        : (label.isNotEmpty ? label : '$percent%');
-    return Container(
+    final badge = Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
       decoration: BoxDecoration(
         color: color.withAlpha(28),
         border: Border.all(color: color.withAlpha(150)),
         borderRadius: BorderRadius.circular(6),
       ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(
-            text,
-            style: TextStyle(
-              fontSize: 12,
-              fontWeight: FontWeight.w700,
-              color: color,
+      child: Text(
+        label.isEmpty ? '–' : label,
+        style: TextStyle(
+            fontSize: 12, fontWeight: FontWeight.w700, color: color),
+      ),
+    );
+
+    return Row(
+      children: [
+        badge,
+        if (occupancy != null && occupancy != OccupancyLevel.unknown) ...[
+          const SizedBox(width: 6),
+          OccupancyIndicator(level: occupancy),
+        ],
+        // Proportional fill bar only when there's more than one train.
+        if (percent != null) ...[
+          const SizedBox(width: 8),
+          Expanded(child: _fillBar(context, percent, color)),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 32,
+            child: Text(
+              '$percent%',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                  fontSize: 11, fontWeight: FontWeight.w600, color: color),
             ),
           ),
-          if (occupancy != null && occupancy != OccupancyLevel.unknown) ...[
-            const SizedBox(width: 4),
-            OccupancyIndicator(level: occupancy),
-          ],
         ],
+      ],
+    );
+  }
+
+  /// Horizontal track filled to [percent]% in [color] (rounded ends).
+  Widget _fillBar(BuildContext context, int percent, Color color) {
+    final fill = percent.clamp(1, 100);
+    final rest = 100 - fill;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(4),
+      child: SizedBox(
+        height: 8,
+        child: Row(
+          children: [
+            Expanded(flex: fill, child: Container(color: color)),
+            if (rest > 0)
+              Expanded(
+                flex: rest,
+                child: Container(
+                    color: Theme.of(context).colorScheme.surfaceContainerHighest),
+              ),
+          ],
+        ),
       ),
     );
   }
