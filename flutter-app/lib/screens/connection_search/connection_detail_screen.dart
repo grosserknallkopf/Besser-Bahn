@@ -16,6 +16,7 @@ import '../../providers/service_providers.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/split_ticket_provider.dart';
 import '../../providers/station_map_provider.dart';
+import '../../providers/train_lookup_provider.dart';
 import '../../services/db_api_service.dart';
 import '../../widgets/prediction_badge.dart';
 import '../train_lookup/widgets/train_detail_view.dart';
@@ -42,7 +43,27 @@ class ConnectionDetailScreen extends ConsumerStatefulWidget {
 
 class _ConnectionDetailScreenState
     extends ConsumerState<ConnectionDetailScreen> {
-  Journey get journey => widget.journey;
+  // The working itinerary. Starts as the passed journey; swapping a leg via
+  // "Weitere Abfahrten" rebuilds it (and drops the price/recon, which no longer
+  // match the custom combination).
+  late Journey _journey = widget.journey;
+  Journey get journey => _journey;
+
+  /// Swap leg [index] for [newLeg] picked from "Weitere Abfahrten".
+  void _replaceLeg(int index, JourneyLeg newLeg) {
+    final legs = List<JourneyLeg>.of(_journey.legs);
+    if (index < 0 || index >= legs.length) return;
+    legs[index] = newLeg;
+    setState(() {
+      _journey = Journey(legs: legs); // price/refreshToken intentionally dropped
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        duration: Duration(seconds: 3),
+        content: Text('Fahrt ersetzt · Preis ggf. neu suchen'),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -104,11 +125,13 @@ class _ConnectionDetailScreenState
             else
               _LegSection(
                 leg: legs[i],
+                index: i,
                 // A fresh trip fetch carries live delays → recompute the
                 // transfer windows above so a shrunk gap shows immediately.
                 onTripUpdated: () {
                   if (mounted) setState(() {});
                 },
+                onReplaceLeg: _replaceLeg,
               ),
           ],
         ],
@@ -554,10 +577,25 @@ class _ConnectionDetailScreenState
 class _LegSection extends ConsumerStatefulWidget {
   final JourneyLeg leg;
 
+  /// This leg's position in the journey — passed back to [onReplaceLeg] when
+  /// the user swaps in a different departure.
+  final int index;
+
   /// Fired after a fresh trip lands (carries live delays) so the parent can
   /// recompute the transfer windows shown above/below this leg.
   final VoidCallback? onTripUpdated;
-  const _LegSection({required this.leg, this.onTripUpdated});
+
+  /// Swap this leg for the [newLeg] picked from "Weitere Abfahrten". Null on
+  /// the last/only leg combos where replacing makes no sense → button hides
+  /// the replace action.
+  final void Function(int index, JourneyLeg newLeg)? onReplaceLeg;
+
+  const _LegSection({
+    required this.leg,
+    required this.index,
+    this.onTripUpdated,
+    this.onReplaceLeg,
+  });
 
   @override
   ConsumerState<_LegSection> createState() => _LegSectionState();
@@ -578,6 +616,20 @@ class _LegSectionState extends ConsumerState<_LegSection>
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void didUpdateWidget(_LegSection old) {
+    super.didUpdateWidget(old);
+    // The leg was swapped for a different departure → reload its train detail.
+    if (widget.leg.tripId != old.leg.tripId) {
+      setState(() {
+        _trip = null;
+        _coach = null;
+        _loading = true;
+      });
+      _load();
+    }
   }
 
   Future<void> _load() async {
@@ -629,6 +681,49 @@ class _LegSectionState extends ConsumerState<_LegSection>
     }
   }
 
+  /// Open the "Weitere Abfahrten" sheet for this leg. Replace is offered only
+  /// when the parent wired a swap callback.
+  void _openAlternatives() {
+    showWeitereAbfahrtenSheet(
+      context,
+      leg: widget.leg,
+      onOpenDetails: _openAltDetails,
+      onReplace: widget.onReplaceLeg == null
+          ? null
+          : (alt) {
+              final newLeg = alt.legs.firstOrNull;
+              if (newLeg != null) {
+                widget.onReplaceLeg!(widget.index, newLeg);
+              }
+            },
+    );
+  }
+
+  /// Open a tapped alternative's full Zugdetails — directly by its tripId
+  /// (never a by-number search, which would re-prompt for info we already have).
+  void _openAltDetails(Journey alt) {
+    final l = alt.legs.firstOrNull;
+    if (l == null) return;
+    final tripId = l.tripId;
+    if (tripId != null && tripId.isNotEmpty) {
+      ref.read(trainLookupProvider.notifier).lookupByTripId(
+            tripId,
+            lineLabel: l.line?.displayName,
+          );
+      context.push('/train-run');
+      return;
+    }
+    final number = (l.line?.fahrtNr.isNotEmpty ?? false)
+        ? l.line!.fahrtNr
+        : l.line?.displayName ?? '';
+    if (number.isEmpty) return;
+    ref.read(trainLookupProvider.notifier).lookupTrain(
+          number,
+          fromStationId: l.origin.id.isNotEmpty ? l.origin.id : null,
+        );
+    context.push('/train-run');
+  }
+
   void _openStopMap(Stopover stop) {
     if (stop.stop.name.isEmpty) return;
     ref.read(stationMapProvider.notifier).loadForStation(
@@ -649,22 +744,18 @@ class _LegSectionState extends ConsumerState<_LegSection>
     final trip = _trip;
     if (trip != null) {
       final leg = widget.leg;
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          TrainDetailView(
-            trip: trip,
-            coach: _coach,
-            onStopTap: _openStopMap,
-            boardingId:
-                leg.origin.id.isNotEmpty ? leg.origin.id : leg.origin.name,
-            alightingId: leg.destination.id.isNotEmpty
-                ? leg.destination.id
-                : leg.destination.name,
-          ),
-          if (!leg.isWalking && leg.line != null)
-            LegAlternatives(leg: leg),
-        ],
+      return TrainDetailView(
+        trip: trip,
+        coach: _coach,
+        onStopTap: _openStopMap,
+        boardingId:
+            leg.origin.id.isNotEmpty ? leg.origin.id : leg.origin.name,
+        alightingId: leg.destination.id.isNotEmpty
+            ? leg.destination.id
+            : leg.destination.name,
+        headerAction: (!leg.isWalking && leg.line != null)
+            ? WeitereAbfahrtenButton(onTap: _openAlternatives)
+            : null,
       );
     }
     // Loading / fallback: still show the leg summary so the user sees the train.

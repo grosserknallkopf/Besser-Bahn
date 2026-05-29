@@ -1,36 +1,88 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
 import '../../../core/extensions.dart';
 import '../../../models/journey.dart';
 import '../../../providers/service_providers.dart';
-import '../../../providers/train_lookup_provider.dart';
 import '../../../services/vendo_service.dart';
 import '../../../widgets/occupancy_indicator.dart';
 
-/// "Weitere Abfahrten" expander for one journey leg: lazily fetches the
-/// alternative trains of the same product group running this exact segment
-/// (arriving by the leg's arrival), lists them DB-Navigator style, and opens a
-/// tapped train's full Zugdetails. "Mehr anzeigen" pages further out.
-class LegAlternatives extends ConsumerStatefulWidget {
-  final JourneyLeg leg;
-  const LegAlternatives({super.key, required this.leg});
-
-  @override
-  ConsumerState<LegAlternatives> createState() => _LegAlternativesState();
+/// Opens the "Weitere Abfahrten" bottom sheet for one journey [leg]: the
+/// alternative trains of the same product group running this exact segment.
+///
+/// Tapping a result offers two actions — replace this leg in the journey
+/// ([onReplace], hidden when null) or open its full Zugdetails ([onOpenDetails]).
+/// Lives in a sheet (not inline) so the connection view stays compact.
+Future<void> showWeitereAbfahrtenSheet(
+  BuildContext context, {
+  required JourneyLeg leg,
+  required void Function(Journey alternative) onOpenDetails,
+  void Function(Journey alternative)? onReplace,
+}) {
+  return showModalBottomSheet(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (_) => _WeitereAbfahrtenSheet(
+      leg: leg,
+      onOpenDetails: onOpenDetails,
+      onReplace: onReplace,
+    ),
+  );
 }
 
-class _LegAlternativesState extends ConsumerState<LegAlternatives> {
-  bool _expanded = false;
+/// Compact header button that opens the "Weitere Abfahrten" sheet.
+class WeitereAbfahrtenButton extends StatelessWidget {
+  final VoidCallback onTap;
+  const WeitereAbfahrtenButton({super.key, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return TextButton.icon(
+      onPressed: onTap,
+      icon: const Icon(Icons.swap_horiz, size: 18),
+      label: const Text('Weitere Abfahrten'),
+      style: TextButton.styleFrom(
+        foregroundColor: theme.colorScheme.primary,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        minimumSize: Size.zero,
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        textStyle: theme.textTheme.labelLarge?.copyWith(
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+    );
+  }
+}
+
+class _WeitereAbfahrtenSheet extends ConsumerStatefulWidget {
+  final JourneyLeg leg;
+  final void Function(Journey alternative) onOpenDetails;
+  final void Function(Journey alternative)? onReplace;
+
+  const _WeitereAbfahrtenSheet({
+    required this.leg,
+    required this.onOpenDetails,
+    this.onReplace,
+  });
+
+  @override
+  ConsumerState<_WeitereAbfahrtenSheet> createState() =>
+      _WeitereAbfahrtenSheetState();
+}
+
+class _WeitereAbfahrtenSheetState
+    extends ConsumerState<_WeitereAbfahrtenSheet> {
   bool _loading = false;
   String? _error;
   String? _laterRef;
   final List<Journey> _alts = [];
 
-  Future<void> _toggle() async {
-    setState(() => _expanded = !_expanded);
-    if (_expanded && _alts.isEmpty && !_loading) await _fetch();
+  @override
+  void initState() {
+    super.initState();
+    _fetch();
   }
 
   Future<void> _fetch({String? context}) async {
@@ -75,127 +127,140 @@ class _LegAlternativesState extends ConsumerState<LegAlternatives> {
     }
   }
 
-  /// Open the tapped alternative's full Zugdetails (same view as the train tab).
-  ///
-  /// The alternative already carries its `tripId`, so we open it directly —
-  /// never via a by-number search, which (when scoped to a station) always
-  /// pops the "pick a departure" list and would make the user re-enter info we
-  /// already have.
-  void _open(Journey alt) {
-    final l = alt.legs.firstOrNull;
-    if (l == null) return;
-    final tripId = l.tripId;
-    if (tripId != null && tripId.isNotEmpty) {
-      ref.read(trainLookupProvider.notifier).lookupByTripId(
-            tripId,
-            lineLabel: l.line?.displayName,
-          );
-      context.push('/train-run');
-      return;
+  /// Tap on an alternative → pick "Fahrt ersetzen" or "Zugdetails öffnen".
+  /// The chosen action runs in the caller's (page) context, so the list sheet
+  /// is closed first and navigation/state changes happen on a live context.
+  Future<void> _chooseAction(Journey alt) async {
+    final canReplace = widget.onReplace != null;
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetCtx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (canReplace)
+              ListTile(
+                leading: const Icon(Icons.swap_horiz),
+                title: const Text('Fahrt ersetzen'),
+                subtitle: const Text('Diese Abfahrt in die Reise übernehmen'),
+                onTap: () => Navigator.pop(sheetCtx, 'replace'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.info_outline),
+              title: const Text('Zugdetails öffnen'),
+              subtitle: const Text('Fahrtverlauf, Karte, Wagenreihung'),
+              onTap: () => Navigator.pop(sheetCtx, 'details'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || choice == null) return;
+    // Close the alternatives list sheet, then run the action on the page.
+    Navigator.of(context).pop();
+    if (choice == 'replace') {
+      widget.onReplace?.call(alt);
+    } else {
+      widget.onOpenDetails(alt);
     }
-    // No tripId (shouldn't happen for a real departure) → fall back to the
-    // by-number lookup so the train is still reachable.
-    final number = (l.line?.fahrtNr.isNotEmpty ?? false)
-        ? l.line!.fahrtNr
-        : l.line?.displayName ?? '';
-    if (number.isEmpty) return;
-    ref.read(trainLookupProvider.notifier).lookupTrain(
-          number,
-          fromStationId: l.origin.id.isNotEmpty ? l.origin.id : null,
-        );
-    context.push('/train-run');
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final primary = theme.colorScheme.primary;
-    return Card(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          InkWell(
-            onTap: _toggle,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+    return SafeArea(
+      top: false,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.75,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 16, 8),
               child: Row(
                 children: [
-                  Icon(Icons.departure_board, size: 18, color: primary),
+                  Icon(Icons.departure_board,
+                      size: 20, color: theme.colorScheme.primary),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: Text(
-                      'Weitere Abfahrten',
-                      style: theme.textTheme.titleSmall
-                          ?.copyWith(fontWeight: FontWeight.bold),
-                    ),
+                    child: Text('Weitere Abfahrten',
+                        style: theme.textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.bold)),
                   ),
-                  Icon(_expanded ? Icons.expand_less : Icons.expand_more,
-                      size: 20, color: primary),
                 ],
               ),
             ),
-          ),
-          if (_expanded) ...[
             const Divider(height: 1),
-            if (_loading && _alts.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 20),
-                child: Center(
-                  child: SizedBox(
-                      width: 22,
-                      height: 22,
-                      child: CircularProgressIndicator(strokeWidth: 2)),
-                ),
-              )
-            else if (_error != null && _alts.isEmpty)
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Text(_error!,
-                    style: TextStyle(color: theme.colorScheme.error)),
-              )
-            else if (_alts.isEmpty)
-              const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text('Keine weiteren Abfahrten.'),
-              )
-            else
-              ...List.generate(_alts.length, (i) {
-                return Column(
-                  children: [
-                    if (i != 0) const Divider(height: 1, indent: 16),
-                    _altRow(context, _alts[i]),
-                  ],
-                );
-              }),
-            if (_laterRef != null && _alts.isNotEmpty)
-              InkWell(
-                onTap:
-                    _loading ? null : () => _fetch(context: _laterRef),
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      if (_loading)
-                        const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2))
-                      else
-                        Icon(Icons.expand_more, size: 18, color: primary),
-                      const SizedBox(width: 8),
-                      Text('Mehr anzeigen',
-                          style: theme.textTheme.bodyMedium?.copyWith(
-                              color: primary, fontWeight: FontWeight.w600)),
-                    ],
-                  ),
-                ),
-              ),
+            Flexible(child: _body(theme)),
           ],
-        ],
+        ),
       ),
+    );
+  }
+
+  Widget _body(ThemeData theme) {
+    if (_loading && _alts.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 32),
+        child: Center(
+          child: SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(strokeWidth: 2)),
+        ),
+      );
+    }
+    if (_error != null && _alts.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.all(24),
+        child: Center(
+          child: Text(_error!, style: TextStyle(color: theme.colorScheme.error)),
+        ),
+      );
+    }
+    if (_alts.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.all(24),
+        child: Center(child: Text('Keine weiteren Abfahrten.')),
+      );
+    }
+    return ListView.separated(
+      shrinkWrap: true,
+      padding: const EdgeInsets.only(bottom: 8),
+      itemCount: _alts.length + (_laterRef != null ? 1 : 0),
+      separatorBuilder: (_, _) => const Divider(height: 1, indent: 16),
+      itemBuilder: (context, i) {
+        if (i >= _alts.length) {
+          return InkWell(
+            onTap: _loading ? null : () => _fetch(context: _laterRef),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (_loading)
+                    const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                  else
+                    Icon(Icons.expand_more,
+                        size: 18, color: theme.colorScheme.primary),
+                  const SizedBox(width: 8),
+                  Text('Mehr anzeigen',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.primary,
+                          fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+          );
+        }
+        return _altRow(context, _alts[i]);
+      },
     );
   }
 
@@ -212,9 +277,9 @@ class _LegAlternativesState extends ConsumerState<LegAlternatives> {
     final name = leg.line?.titleWithNumber ?? leg.line?.displayName ?? '';
 
     return InkWell(
-      onTap: () => _open(alt),
+      onTap: () => _chooseAction(alt),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -248,8 +313,7 @@ class _LegAlternativesState extends ConsumerState<LegAlternatives> {
                           ),
                           child: Text(name,
                               style: const TextStyle(
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600)),
+                                  fontSize: 11, fontWeight: FontWeight.w600)),
                         ),
                       if (leg.occupancy != null) ...[
                         const SizedBox(width: 6),

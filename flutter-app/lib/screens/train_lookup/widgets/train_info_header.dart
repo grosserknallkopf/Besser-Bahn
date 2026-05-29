@@ -7,7 +7,12 @@ import '../../../widgets/occupancy_indicator.dart';
 class TrainInfoHeader extends StatelessWidget {
   final Trip trip;
 
-  const TrainInfoHeader({super.key, required this.trip});
+  /// Optional action shown to the right of the train name (e.g. the connection
+  /// view's compact "Weitere Abfahrten" button). Null on the standalone train
+  /// screen, where there's no journey to swap a leg in.
+  final Widget? action;
+
+  const TrainInfoHeader({super.key, required this.trip, this.action});
 
   @override
   Widget build(BuildContext context) {
@@ -34,6 +39,10 @@ class TrainInfoHeader extends StatelessWidget {
                         ?.copyWith(fontWeight: FontWeight.bold),
                   ),
                 ),
+                if (action != null) ...[
+                  const SizedBox(width: 8),
+                  action!,
+                ],
               ],
             ),
             const SizedBox(height: 4),

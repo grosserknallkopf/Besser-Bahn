@@ -31,6 +31,10 @@ class TrainDetailView extends ConsumerStatefulWidget {
   final String? boardingId;
   final String? alightingId;
 
+  /// Optional action rendered in the header next to the train name (the
+  /// connection view passes its compact "Weitere Abfahrten" button here).
+  final Widget? headerAction;
+
   const TrainDetailView({
     super.key,
     required this.trip,
@@ -38,6 +42,7 @@ class TrainDetailView extends ConsumerStatefulWidget {
     this.onStopTap,
     this.boardingId,
     this.alightingId,
+    this.headerAction,
   });
 
   @override
@@ -88,7 +93,7 @@ class _TrainDetailViewState extends ConsumerState<TrainDetailView> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        TrainInfoHeader(trip: trip),
+        TrainInfoHeader(trip: trip, action: widget.headerAction),
         TrainMapView(trip: trip),
         if (widget.coach != null)
           CoachSequenceView(
