@@ -34,13 +34,13 @@ class JourneyCard extends ConsumerWidget {
         // exact connection — no need to open the detail screen first.
         onLongPress: () => _share(context, ref),
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(10),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               // Prediction strip (Anschluss / Pünktlichkeit) on the left.
               PredictionBadge(journey: journey),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Expanded(
                 child: Column(
             children: [
@@ -74,7 +74,7 @@ class JourneyCard extends ConsumerWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 4),
 
               // Time row
               Row(
@@ -133,35 +133,23 @@ class JourneyCard extends ConsumerWidget {
                 ],
               ),
 
-              // Proportional leg-length bar: each train's width ∝ time spent on
-              // it, so you see at a glance which leg dominates the trip.
-              if (transitLegs.length > 1) ...[
-                const SizedBox(height: 8),
-                _legLengthBar(context, transitLegs),
-              ],
+              const SizedBox(height: 6),
 
-              const SizedBox(height: 8),
-
-              // Product chips + occupancy
+              // Unified leg bar: each train's width ∝ time on it, labelled with
+              // line name (+ % when multiple legs) and occupancy. Price sits at
+              // the end. One row instead of the old bar + duplicate chips row.
               Row(
                 children: [
-                  Expanded(
-                    child: Wrap(
-                      spacing: 4,
-                      runSpacing: 4,
-                      children: [
-                        for (final leg in transitLegs)
-                          _productChip(context, leg),
-                      ],
-                    ),
-                  ),
-                  if (journey.price != null)
+                  Expanded(child: _legLengthBar(context, transitLegs)),
+                  if (journey.price != null) ...[
+                    const SizedBox(width: 8),
                     Text(
                       journey.price!.formatted,
                       style: theme.textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.bold,
                           color: theme.colorScheme.primary),
                     ),
+                  ],
                 ],
               ),
             ],
@@ -248,6 +236,7 @@ class JourneyCard extends ConsumerWidget {
   /// Horizontal bar split proportionally to each leg's travel time, labelled
   /// with the line name and the % of the trip spent on it.
   Widget _legLengthBar(BuildContext context, List<JourneyLeg> legs) {
+    if (legs.isEmpty) return const SizedBox.shrink();
     int legMinutes(JourneyLeg l) {
       final d = l.departure ?? l.plannedDeparture;
       final a = l.arrival ?? l.plannedArrival;
@@ -261,6 +250,8 @@ class JourneyCard extends ConsumerWidget {
     final mins = legs.map(legMinutes).toList();
     final total = mins.fold<int>(0, (s, m) => s + m);
     if (total <= 0) return const SizedBox.shrink();
+    // Percent only makes sense across multiple legs; a single leg is the trip.
+    final showPercent = legs.length > 1;
     // Keep every leg visible: a leg never gets less than ~10% of the bar width.
     final minFlex = (total * 0.10).round().clamp(1, total);
 
@@ -273,8 +264,9 @@ class JourneyCard extends ConsumerWidget {
             child: _legSegment(
               context,
               legs[i].line?.displayName ?? '',
-              (mins[i] / total * 100).round(),
+              showPercent ? (mins[i] / total * 100).round() : null,
               _productColor(context, legs[i]),
+              legs[i].occupancy?.level,
             ),
           ),
         ],
@@ -282,10 +274,13 @@ class JourneyCard extends ConsumerWidget {
     );
   }
 
-  Widget _legSegment(
-      BuildContext context, String label, int percent, Color color) {
+  Widget _legSegment(BuildContext context, String label, int? percent,
+      Color color, OccupancyLevel? occupancy) {
+    final text = label.isEmpty
+        ? (percent != null ? '$percent%' : '')
+        : (percent != null ? '$label · $percent%' : label);
     return Container(
-      height: 24,
+      height: 22,
       alignment: Alignment.center,
       decoration: BoxDecoration(
         color: color.withAlpha(40),
@@ -295,15 +290,26 @@ class JourneyCard extends ConsumerWidget {
       child: FittedBox(
         fit: BoxFit.scaleDown,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Text(
-            label.isEmpty ? '$percent%' : '$label · $percent%',
-            maxLines: 1,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              color: color,
-            ),
+          padding: const EdgeInsets.symmetric(horizontal: 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (text.isNotEmpty)
+                Text(
+                  text,
+                  maxLines: 1,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: color,
+                  ),
+                ),
+              if (occupancy != null &&
+                  occupancy != OccupancyLevel.unknown) ...[
+                if (text.isNotEmpty) const SizedBox(width: 4),
+                OccupancyIndicator(level: occupancy),
+              ],
+            ],
           ),
         ),
       ),
@@ -321,27 +327,4 @@ class JourneyCard extends ConsumerWidget {
     return Theme.of(context).colorScheme.primary;
   }
 
-  Widget _productChip(BuildContext context, JourneyLeg leg) {
-    final name = leg.line?.displayName ?? '';
-    if (name.isEmpty) return const SizedBox.shrink();
-
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(4),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Text(name, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600)),
-          if (leg.occupancy != null) ...[
-            const SizedBox(width: 4),
-            OccupancyIndicator(level: leg.occupancy!.level),
-          ],
-        ],
-      ),
-    );
-  }
 }
