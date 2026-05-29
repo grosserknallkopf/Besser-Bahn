@@ -12,6 +12,7 @@ import '../../services/location_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/bay_departures_sheet.dart';
 import '../../widgets/app_menu_button.dart';
+import '../../widgets/embedded_action_bar.dart';
 import '../../widgets/station_search_field.dart';
 
 /// Highlight colour for a journey role: Einstieg green, Ausstieg red, Umstieg
@@ -47,7 +48,11 @@ class StationMapScreen extends ConsumerStatefulWidget {
   /// just this station's map, not a place to browse other stations or settings.
   final bool dedicated;
 
-  const StationMapScreen({super.key, this.dedicated = false});
+  /// When embedded in the combined "Bahnhof" screen, drop our own AppBar (the
+  /// parent provides one + the tab bar) and surface the centre action inline.
+  final bool embedded;
+
+  const StationMapScreen({super.key, this.dedicated = false, this.embedded = false});
 
   @override
   ConsumerState<StationMapScreen> createState() => _StationMapScreenState();
@@ -158,25 +163,33 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
       }
     });
 
+    final actions = <Widget>[
+      if (map != null)
+        IconButton(
+          tooltip: 'Auf Karte zentrieren',
+          // A framing/centre glyph — distinct from the "Mein Standort" GPS
+          // crosshair so the two buttons no longer look identical.
+          icon: const Icon(Icons.center_focus_strong),
+          onPressed: () => _recenter(map),
+        ),
+    ];
+
     return Scaffold(
-      appBar: AppBar(
-        title: Text(state.station?.name ?? 'Bahnhofskarte'),
-        actions: [
-          // Browse mode (Karte tab) keeps the app overflow menu; the dedicated
-          // per-journey map drops it — no settings/split-ticket/debug here.
-          if (!widget.dedicated) const AppMenuButton(),
-          if (map != null)
-            IconButton(
-              tooltip: 'Auf Karte zentrieren',
-              // A framing/centre glyph — distinct from the "Mein Standort" GPS
-              // crosshair so the two buttons no longer look identical.
-              icon: const Icon(Icons.center_focus_strong),
-              onPressed: () => _recenter(map),
+      appBar: widget.embedded
+          ? null
+          : AppBar(
+              title: Text(state.station?.name ?? 'Bahnhofskarte'),
+              actions: [
+                // Browse mode (Karte tab) keeps the app overflow menu; the
+                // dedicated per-journey map drops it.
+                if (!widget.dedicated) const AppMenuButton(),
+                ...actions,
+              ],
             ),
-        ],
-      ),
       body: Column(
         children: [
+          if (widget.embedded && actions.isNotEmpty)
+            EmbeddedActionBar(actions: actions),
           // Station search only in browse mode. The dedicated map already knows
           // its station (shown in the AppBar title) — a search box there is
           // misleading, it isn't for picking a different station.

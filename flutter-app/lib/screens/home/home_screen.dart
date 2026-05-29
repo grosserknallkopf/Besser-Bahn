@@ -10,9 +10,7 @@ class HomeScreen extends StatelessWidget {
     final location = GoRouterState.of(context).uri.path;
     if (location.startsWith('/search')) return 0;
     if (location.startsWith('/journeys')) return 1;
-    if (location.startsWith('/train')) return 2;
-    if (location.startsWith('/departures')) return 3;
-    if (location.startsWith('/map')) return 4;
+    if (location.startsWith('/nearby')) return 2;
     return 0;
   }
 
@@ -32,11 +30,7 @@ class HomeScreen extends StatelessWidget {
             case 1:
               context.go('/journeys');
             case 2:
-              context.go('/train');
-            case 3:
-              context.go('/departures');
-            case 4:
-              context.go('/map');
+              context.go('/nearby');
           }
         },
         destinations: const [
@@ -53,17 +47,7 @@ class HomeScreen extends StatelessWidget {
           NavigationDestination(
             icon: Icon(Icons.train_outlined),
             selectedIcon: Icon(Icons.train),
-            label: 'Zug',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.departure_board_outlined),
-            selectedIcon: Icon(Icons.departure_board),
-            label: 'Abfahrten',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.map_outlined),
-            selectedIcon: Icon(Icons.map),
-            label: 'Karte',
+            label: 'Bahnhof',
           ),
         ],
       ),

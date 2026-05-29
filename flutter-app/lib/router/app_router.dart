@@ -3,9 +3,9 @@ import 'package:go_router/go_router.dart';
 
 import '../screens/home/home_screen.dart';
 import '../screens/journeys/journeys_screen.dart';
+import '../screens/nearby/nearby_screen.dart';
 import '../screens/train_lookup/train_lookup_screen.dart';
 import '../screens/connection_search/connection_search_screen.dart';
-import '../screens/departure_board/departure_board_screen.dart';
 import '../screens/station_map/station_map_screen.dart';
 import '../screens/connection_search/connection_detail_screen.dart';
 import '../models/journey.dart';
@@ -29,12 +29,6 @@ final appRouter = GoRouter(
       builder: (context, state, child) => HomeScreen(child: child),
       routes: [
         GoRoute(
-          path: '/train',
-          pageBuilder: (context, state) => const NoTransitionPage(
-            child: TrainLookupScreen(),
-          ),
-        ),
-        GoRoute(
           path: '/search',
           pageBuilder: (context, state) => const NoTransitionPage(
             child: ConnectionSearchScreen(),
@@ -46,16 +40,11 @@ final appRouter = GoRouter(
             child: JourneysScreen(),
           ),
         ),
+        // Combined Zug + Abfahrten + Karte screen (internal tab bar).
         GoRoute(
-          path: '/departures',
+          path: '/nearby',
           pageBuilder: (context, state) => const NoTransitionPage(
-            child: DepartureBoardScreen(),
-          ),
-        ),
-        GoRoute(
-          path: '/map',
-          pageBuilder: (context, state) => const NoTransitionPage(
-            child: StationMapScreen(),
+            child: NearbyScreen(),
           ),
         ),
       ],

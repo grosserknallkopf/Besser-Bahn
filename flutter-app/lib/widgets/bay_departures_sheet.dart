@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../core/extensions.dart';
 import '../models/departure.dart';
 import '../models/station_map.dart';
+import '../providers/nearby_tab_provider.dart';
 import '../providers/service_providers.dart';
 import '../providers/train_lookup_provider.dart';
 import 'delay_badge.dart';
@@ -206,7 +207,8 @@ class _BayDeparturesSheetState extends ConsumerState<BayDeparturesSheet> {
         .read(trainLookupProvider.notifier)
         .lookupByTripId(d.tripId, lineLabel: d.line.name);
     Navigator.of(context).pop();
-    context.go('/train');
+    ref.read(nearbyTabProvider.notifier).select(nearbyTabTrain);
+    context.go('/nearby');
   }
 
   @override

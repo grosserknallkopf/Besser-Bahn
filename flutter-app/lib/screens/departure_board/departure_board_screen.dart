@@ -4,17 +4,23 @@ import 'package:go_router/go_router.dart';
 
 import '../../models/departure.dart';
 import '../../providers/departure_board_provider.dart';
+import '../../providers/nearby_tab_provider.dart';
 import '../../providers/train_lookup_provider.dart';
 import '../../widgets/station_search_field.dart';
 import '../../widgets/delay_badge.dart';
 import '../../widgets/platform_badge.dart';
 import '../../widgets/app_menu_button.dart';
+import '../../widgets/embedded_action_bar.dart';
 import '../../core/extensions.dart';
 import '../../core/auto_refresh.dart';
 import 'departure_map_view.dart';
 
 class DepartureBoardScreen extends ConsumerStatefulWidget {
-  const DepartureBoardScreen({super.key});
+  /// When embedded in the combined "Bahnhof" screen, drop our own AppBar and
+  /// surface its actions as a slim row at the top of the body.
+  final bool embedded;
+
+  const DepartureBoardScreen({super.key, this.embedded = false});
 
   @override
   ConsumerState<DepartureBoardScreen> createState() =>
@@ -33,34 +39,38 @@ class _DepartureBoardScreenState extends ConsumerState<DepartureBoardScreen>
     final notifier = ref.read(departureBoardProvider.notifier);
     final theme = Theme.of(context);
 
+    final actions = <Widget>[
+      if (state.station != null)
+        IconButton(
+          tooltip: state.view == BoardView.map ? 'Liste' : 'Karte',
+          icon: Icon(state.view == BoardView.map
+              ? Icons.format_list_bulleted
+              : Icons.map_outlined),
+          onPressed: () => notifier.setView(
+            state.view == BoardView.map ? BoardView.list : BoardView.map,
+          ),
+        ),
+      if (state.station != null)
+        IconButton(
+          icon: const Icon(Icons.refresh),
+          onPressed: notifier.load,
+        ),
+    ];
+
     return Scaffold(
       // Station search dropdown is an overlay; don't resize the body when the
       // keyboard opens (avoids the list jumping under the search field).
       resizeToAvoidBottomInset: false,
-      appBar: AppBar(
-        title: Text(state.station?.name ?? 'Abfahrtstafel'),
-        actions: [
-          const AppMenuButton(),
-          if (state.station != null)
-            IconButton(
-              tooltip:
-                  state.view == BoardView.map ? 'Liste' : 'Karte',
-              icon: Icon(state.view == BoardView.map
-                  ? Icons.format_list_bulleted
-                  : Icons.map_outlined),
-              onPressed: () => notifier.setView(
-                state.view == BoardView.map ? BoardView.list : BoardView.map,
-              ),
+      appBar: widget.embedded
+          ? null
+          : AppBar(
+              title: Text(state.station?.name ?? 'Abfahrtstafel'),
+              actions: [const AppMenuButton(), ...actions],
             ),
-          if (state.station != null)
-            IconButton(
-              icon: const Icon(Icons.refresh),
-              onPressed: notifier.load,
-            ),
-        ],
-      ),
       body: Column(
         children: [
+          if (widget.embedded && actions.isNotEmpty)
+            EmbeddedActionBar(actions: actions),
           // Station search
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -195,7 +205,8 @@ class _DepartureBoardScreenState extends ConsumerState<DepartureBoardScreen>
                     departures[index].tripId,
                     lineLabel: departures[index].line.name,
                   );
-              context.go('/train');
+              ref.read(nearbyTabProvider.notifier).select(nearbyTabTrain);
+              context.go('/nearby');
             },
           );
         },

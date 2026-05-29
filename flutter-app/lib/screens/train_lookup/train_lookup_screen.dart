@@ -11,11 +11,17 @@ import '../../services/hafas_service.dart';
 import '../../core/extensions.dart';
 import '../../core/auto_refresh.dart';
 import '../../widgets/app_menu_button.dart';
+import '../../widgets/embedded_action_bar.dart';
 import '../../widgets/station_search_field.dart';
 import 'widgets/train_detail_view.dart';
 
 class TrainLookupScreen extends ConsumerStatefulWidget {
-  const TrainLookupScreen({super.key});
+  /// When embedded inside the combined "Bahnhof" screen, drop our own AppBar
+  /// (the parent provides one + the tab bar) and surface the AppBar actions as
+  /// a slim row at the top of the body instead.
+  final bool embedded;
+
+  const TrainLookupScreen({super.key, this.embedded = false});
 
   @override
   ConsumerState<TrainLookupScreen> createState() => _TrainLookupScreenState();
@@ -76,41 +82,45 @@ class _TrainLookupScreenState extends ConsumerState<TrainLookupScreen>
     final state = ref.watch(trainLookupProvider);
     final theme = Theme.of(context);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Zugnummer'),
-        actions: [
-          const AppMenuButton(),
-          if (state.trip != null)
-            Builder(builder: (context) {
-              final train = _savedTrainFor(state);
-              final saved = ref.watch(libraryProvider).hasTrain(train.key);
-              return IconButton(
-                icon: Icon(saved ? Icons.star : Icons.star_border,
-                    color: saved ? Colors.amber.shade700 : null),
-                tooltip: saved ? 'Zug entfernen' : 'Zug speichern',
-                onPressed: () {
-                  ref.read(libraryProvider.notifier).toggleTrain(train);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      duration: const Duration(seconds: 2),
-                      content:
-                          Text(saved ? 'Zug entfernt' : 'Zug gespeichert'),
-                    ),
-                  );
-                },
+    // AppBar actions, reused inline when embedded in the combined screen.
+    final actions = <Widget>[
+      if (state.trip != null)
+        Builder(builder: (context) {
+          final train = _savedTrainFor(state);
+          final saved = ref.watch(libraryProvider).hasTrain(train.key);
+          return IconButton(
+            icon: Icon(saved ? Icons.star : Icons.star_border,
+                color: saved ? Colors.amber.shade700 : null),
+            tooltip: saved ? 'Zug entfernen' : 'Zug speichern',
+            onPressed: () {
+              ref.read(libraryProvider.notifier).toggleTrain(train);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  duration: const Duration(seconds: 2),
+                  content: Text(saved ? 'Zug entfernt' : 'Zug gespeichert'),
+                ),
               );
-            }),
-          if (state.trip != null)
-            IconButton(
-              icon: const Icon(Icons.refresh),
-              onPressed: () =>
-                  ref.read(trainLookupProvider.notifier).refresh(),
+            },
+          );
+        }),
+      if (state.trip != null)
+        IconButton(
+          icon: const Icon(Icons.refresh),
+          onPressed: () => ref.read(trainLookupProvider.notifier).refresh(),
+        ),
+    ];
+
+    return Scaffold(
+      appBar: widget.embedded
+          ? null
+          : AppBar(
+              title: const Text('Zugnummer'),
+              actions: [const AppMenuButton(), ...actions],
             ),
-        ],
-      ),
       body: Column(
         children: [
+          if (widget.embedded && actions.isNotEmpty)
+            EmbeddedActionBar(actions: actions),
           // Search bar
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
