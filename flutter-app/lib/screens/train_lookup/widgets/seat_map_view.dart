@@ -8,16 +8,17 @@ import '../../../models/trip.dart';
 import '../../../services/seat_map_service.dart';
 import '../../../theme/app_colors.dart';
 
-/// The free-seat panel, rendered *inside* the Wagenreihung card (no separate
-/// section or expand button). Shows, for the coach the user picked on the
-/// train above ([hasExternalSelector]), which seats are free (status 0). When
-/// there's no Wagenreihung, it draws its own DB-style train strip as picker.
+/// The free-seat panel, rendered *inside* the Wagenreihung card. Collapsed by
+/// default — the tappable header expands it. The class of each seat is implied
+/// by the coach (shown in the Wagenreihung colours), so there's no class
+/// toggle: tapping a coach above shows that coach's seats. When there's no
+/// Wagenreihung, the panel draws its own DB-style train strip as picker.
 class SeatPlanBody extends StatelessWidget {
   final Trip trip;
-  final bool firstClass;
-  final ValueChanged<bool> onFirstClass;
+  final bool expanded;
+  final VoidCallback onToggle;
 
-  /// Result of `seatMapProvider`.
+  /// Result of `seatMapProvider`; null while collapsed (not yet watched).
   final AsyncValue<SeatMap?>? seatAsync;
 
   /// The wagon currently selected (already resolved to a sensible default by
@@ -32,8 +33,8 @@ class SeatPlanBody extends StatelessWidget {
   const SeatPlanBody({
     super.key,
     required this.trip,
-    required this.firstClass,
-    required this.onFirstClass,
+    required this.expanded,
+    required this.onToggle,
     required this.seatAsync,
     required this.selectedWagon,
     required this.onSelectWagon,
@@ -54,50 +55,44 @@ class SeatPlanBody extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Title + class toggle.
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-          child: Row(
-            children: [
-              const Icon(Icons.event_seat, size: 20, color: AppColors.onTime),
-              const SizedBox(width: 8),
-              Text('Freie Sitzplätze',
-                  style: theme.textTheme.titleSmall
-                      ?.copyWith(fontWeight: FontWeight.bold)),
-              const Spacer(),
-              SegmentedButton<bool>(
-                style: const ButtonStyle(visualDensity: VisualDensity.compact),
-                segments: const [
-                  ButtonSegment(value: false, label: Text('2. Kl.')),
-                  ButtonSegment(value: true, label: Text('1. Kl.')),
-                ],
-                selected: {firstClass},
-                onSelectionChanged: (s) => onFirstClass(s.first),
-              ),
-            ],
+        // Tappable collapse header.
+        InkWell(
+          onTap: onToggle,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            child: Row(
+              children: [
+                const Icon(Icons.event_seat, size: 20, color: AppColors.onTime),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text('Freie Sitzplätze',
+                      style: theme.textTheme.titleSmall
+                          ?.copyWith(fontWeight: FontWeight.bold)),
+                ),
+                Icon(expanded ? Icons.expand_less : Icons.expand_more),
+              ],
+            ),
           ),
         ),
-        if (async == null)
-          const SizedBox(height: 16)
-        else
-          async.when(
-            loading: () => const Padding(
-              padding: EdgeInsets.all(32),
-              child: Center(child: CircularProgressIndicator()),
+        if (expanded)
+          if (async == null)
+            const SizedBox(height: 8)
+          else
+            async.when(
+              loading: () => const Padding(
+                padding: EdgeInsets.all(32),
+                child: Center(child: CircularProgressIndicator()),
+              ),
+              error: (e, _) =>
+                  _info(theme, 'Sitzplan konnte nicht geladen werden.'),
+              data: (map) {
+                if (map == null || map.isEmpty) {
+                  return _info(
+                      theme, 'Für diesen Zug ist kein Sitzplan verfügbar.');
+                }
+                return _content(theme, map);
+              },
             ),
-            error: (e, _) =>
-                _info(theme, 'Sitzplan konnte nicht geladen werden.'),
-            data: (map) {
-              if (map == null || map.isEmpty) {
-                return _info(
-                    theme,
-                    firstClass
-                        ? 'Keine 1.-Klasse-Reservierungsdaten für diesen Zug.'
-                        : 'Für diesen Zug ist kein Sitzplan verfügbar.');
-              }
-              return _content(theme, map);
-            },
-          ),
       ],
     );
   }

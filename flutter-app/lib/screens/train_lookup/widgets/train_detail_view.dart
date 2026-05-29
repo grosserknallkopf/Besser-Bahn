@@ -45,7 +45,7 @@ class TrainDetailView extends ConsumerStatefulWidget {
 }
 
 class _TrainDetailViewState extends ConsumerState<TrainDetailView> {
-  bool _firstClass = false;
+  bool _seatsExpanded = false; // free-seat panel starts collapsed
   int? _selectedWagon; // explicit user pick; null → auto (first free)
 
   @override
@@ -53,8 +53,9 @@ class _TrainDetailViewState extends ConsumerState<TrainDetailView> {
     final trip = widget.trip;
     final reservable = SeatPlanBody.isAvailableFor(trip);
 
-    final req = reservable
-        ? SeatMapRequest.fromTrip(trip, firstClass: _firstClass)
+    // Only fetch the seat map once the panel is opened.
+    final req = (reservable && _seatsExpanded)
+        ? SeatMapRequest.fromTrip(trip)
         : null;
     final seatAsync = req != null ? ref.watch(seatMapProvider(req)) : null;
     final SeatMap? seatMap =
@@ -75,11 +76,8 @@ class _TrainDetailViewState extends ConsumerState<TrainDetailView> {
     final seatPlan = reservable
         ? SeatPlanBody(
             trip: trip,
-            firstClass: _firstClass,
-            onFirstClass: (v) => setState(() {
-              _firstClass = v;
-              _selectedWagon = null;
-            }),
+            expanded: _seatsExpanded,
+            onToggle: () => setState(() => _seatsExpanded = !_seatsExpanded),
             seatAsync: seatAsync,
             selectedWagon: effectiveWagon,
             onSelectWagon: (nr) => setState(() => _selectedWagon = nr),
@@ -95,7 +93,7 @@ class _TrainDetailViewState extends ConsumerState<TrainDetailView> {
         if (widget.coach != null)
           CoachSequenceView(
             sequence: widget.coach!,
-            selectable: reservable,
+            selectable: reservable && _seatsExpanded,
             freeByWagon: freeByWagon,
             selectedWagon: effectiveWagon,
             onCoachTap: (c) => setState(() => _selectedWagon = c.wagonNumber),

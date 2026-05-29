@@ -109,25 +109,23 @@ class CoachSequenceView extends StatelessWidget {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
+                  // Streamlined ICE nose at the very front of the train.
+                  const _NoseCap(front: true),
                   for (var i = 0; i < coaches.length; i++) ...[
-                    if (coaches[i].isLocomotive &&
-                        (i == 0 || i == coaches.length - 1))
-                      _HeadCar(front: i == 0)
-                    else
-                      _Car(
-                        coach: coaches[i],
-                        isFront: i == 0,
-                        isRear: i == coaches.length - 1,
-                        selectable: selectable,
-                        freeCount: freeByWagon[coaches[i].wagonNumber],
-                        isSelected: selectedWagon != null &&
-                            coaches[i].wagonNumber == selectedWagon,
-                        onTap: onCoachTap == null
-                            ? null
-                            : () => onCoachTap!(coaches[i]),
-                      ),
+                    _Car(
+                      coach: coaches[i],
+                      selectable: selectable,
+                      freeCount: freeByWagon[coaches[i].wagonNumber],
+                      isSelected: selectedWagon != null &&
+                          coaches[i].wagonNumber == selectedWagon,
+                      onTap: onCoachTap == null
+                          ? null
+                          : () => onCoachTap!(coaches[i]),
+                    ),
                     if (i < coaches.length - 1) const _Coupler(),
                   ],
+                  // …and at the rear.
+                  const _NoseCap(front: false),
                 ],
               ),
             ),
@@ -214,8 +212,6 @@ class _Coupler extends StatelessWidget {
 /// ICE-like nose; passenger cars get a class stripe + window band.
 class _Car extends StatelessWidget {
   final Coach coach;
-  final bool isFront;
-  final bool isRear;
   final bool selectable;
   final int? freeCount;
   final bool isSelected;
@@ -223,8 +219,6 @@ class _Car extends StatelessWidget {
 
   const _Car({
     required this.coach,
-    required this.isFront,
-    required this.isRear,
     this.selectable = false,
     this.freeCount,
     this.isSelected = false,
@@ -246,33 +240,24 @@ class _Car extends StatelessWidget {
     final theme = Theme.of(context);
     final open = coach.isOpen;
     final accent = open ? _classColor : AppColors.closedCoach;
-    final isHead = coach.isLocomotive && (isFront || isRear);
-    final canSelect = selectable && !coach.isLocomotive && coach.wagonNumber > 0;
+    final isLoco = coach.isLocomotive;
+    final canSelect = selectable && !isLoco && coach.wagonNumber > 0;
     final borderColor = isSelected ? AppColors.onTime : accent;
 
-    // ICE nose: strong rounding on the outer end of an end power car.
-    final noseSide = isHead
-        ? (isFront
-            ? const BorderRadius.horizontal(
-                left: Radius.circular(20), right: Radius.circular(5))
-            : const BorderRadius.horizontal(
-                left: Radius.circular(5), right: Radius.circular(20)))
-        : BorderRadius.circular(5);
-
     final car = Container(
-      width: isHead ? 46 : 54,
+      width: isLoco ? 40 : 54,
       height: 46,
       decoration: BoxDecoration(
         color: isSelected
             ? AppColors.onTime.withValues(alpha: 0.16)
-            : isHead
+            : isLoco
                 ? AppColors.locomotive
                 : theme.colorScheme.surfaceContainerHighest,
-        borderRadius: noseSide,
+        borderRadius: BorderRadius.circular(5),
         border: Border.all(color: borderColor, width: isSelected ? 3 : 2),
       ),
       clipBehavior: Clip.antiAlias,
-      child: isHead
+      child: isLoco
           ? const Center(
               child: Icon(Icons.train, color: Colors.white, size: 20))
           : Column(
@@ -358,21 +343,19 @@ class _Car extends StatelessWidget {
   }
 }
 
-/// An end power car (Triebkopf) drawn as a streamlined ICE nose, not a plain
-/// rounded box. The nose tapers to a soft point at the train's outer end; a
-/// dark windscreen band sits near the tip. [front] = nose points left.
-class _HeadCar extends StatelessWidget {
+/// The streamlined ICE nose cap drawn at each end of the train. Tapers to a
+/// soft point at the outer end with a dark windscreen near the tip.
+/// [front] = nose points left (head of the train); false mirrors it for the
+/// rear. Sits flush against the first/last car so the train reads as an ICE.
+class _NoseCap extends StatelessWidget {
   final bool front;
-  const _HeadCar({required this.front});
+  const _NoseCap({required this.front});
 
   @override
   Widget build(BuildContext context) {
-    return Tooltip(
-      message: 'Triebkopf',
-      child: CustomPaint(
-        size: const Size(58, 46),
-        painter: _NosePainter(front: front),
-      ),
+    return CustomPaint(
+      size: const Size(34, 46),
+      painter: _NosePainter(front: front),
     );
   }
 }
