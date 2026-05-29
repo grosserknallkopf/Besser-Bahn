@@ -143,6 +143,41 @@ def check_bahn_train_run() -> str:
     return f"{len(halte)} stops on the train run"
 
 
+def check_bahn_occupancy() -> str:
+    """fahrt halte carry `auslastungsmeldungen` (per-stop 2nd-class load).
+
+    Powers the "Geringe Auslastung erwartet" line on the train timeline. Soft:
+    not every train/stop reports a load, so absence is a warning, not a failure.
+    """
+    now = datetime.now()
+    dep = requests.get(
+        "https://www.bahn.de/web/api/reiseloesung/abfahrten",
+        params={"datum": now.strftime("%Y-%m-%d"),
+                "zeit": now.strftime("%H:%M:00"),
+                "ortExtId": KOELN_HBF, "mitVias": "false"},
+        headers=_browser_headers(), timeout=TIMEOUT,
+    )
+    dep.raise_for_status()
+    entries = dep.json().get("entries", [])
+    if not entries:
+        raise CheckError("no departures to derive a journeyId")
+    # ICE/IC are likeliest to report a load — scan a few departures.
+    for entry in entries[:8]:
+        r = requests.get(
+            "https://www.bahn.de/web/api/reiseloesung/fahrt",
+            params={"journeyId": entry["journeyId"]},
+            headers=_browser_headers(), timeout=TIMEOUT,
+        )
+        if r.status_code != 200:
+            continue
+        for halt in r.json().get("halte", []):
+            for m in halt.get("auslastungsmeldungen", []) or []:
+                if "klasse" in m and isinstance(m.get("stufe"), int):
+                    return (f"load reported: {m['klasse']} stufe {m['stufe']} "
+                            f"@ {halt.get('name', '?')}")
+    raise CheckError("no auslastungsmeldungen with klasse/stufe in any sampled run")
+
+
 def check_vendo_location() -> str:
     media = "application/x.db.vendo.mob.location.v3+json"
     r = requests.post(
@@ -454,6 +489,7 @@ CHECKS = [
     ("bahn.de autocomplete (orte)", check_bahn_autocomplete, False),
     ("bahn.de departures (abfahrten)", check_bahn_departures, False),
     ("bahn.de train run (fahrt)", check_bahn_train_run, False),
+    ("bahn.de occupancy (auslastung)", check_bahn_occupancy, True),
     ("vendo location search", check_vendo_location, False),
     ("vendo journey + prices (v9)", check_vendo_journey, False),
     ("vendo journey pagination (context)", check_vendo_journey_pagination, False),

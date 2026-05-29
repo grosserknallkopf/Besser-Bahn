@@ -264,7 +264,13 @@ class _LegSectionState extends ConsumerState<_LegSection>
   Future<void> _fetchFresh(String id, {required bool silent}) async {
     final leg = widget.leg;
     try {
-      final trip = await ref.read(hafasServiceProvider).getTrip(id);
+      var trip = await ref.read(hafasServiceProvider).getTrip(id);
+      // The `fahrt` API drops the line label ("RE7"); the journey leg still has
+      // it, so carry it in → header shows "RE 7 (11281)", not the bare number.
+      final label = leg.line?.name.trim() ?? '';
+      if (label.isNotEmpty) {
+        trip = trip.copyWith(line: trip.line.withName(label));
+      }
       _tripCache[id] = trip;
       if (mounted) setState(() => _trip = trip);
       try {
