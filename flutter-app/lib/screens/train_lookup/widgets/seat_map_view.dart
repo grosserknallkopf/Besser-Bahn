@@ -1,10 +1,10 @@
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../models/seat_map.dart';
 import '../../../models/trip.dart';
-import '../../../providers/seat_map_provider.dart';
 import '../../../services/seat_map_service.dart';
 import '../../../theme/app_colors.dart';
 

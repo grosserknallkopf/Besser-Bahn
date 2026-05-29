@@ -5,7 +5,23 @@ import '../../../theme/app_colors.dart';
 class CoachSequenceView extends StatelessWidget {
   final CoachSequence sequence;
 
-  const CoachSequenceView({super.key, required this.sequence});
+  /// When true the train doubles as a seat-plan picker: passenger cars become
+  /// tappable, show their free-seat count and highlight the selected one.
+  final bool selectable;
+
+  /// Free-seat count per wagon number (from the seat map), shown on each car.
+  final Map<int, int> freeByWagon;
+  final int? selectedWagon;
+  final void Function(Coach coach)? onCoachTap;
+
+  const CoachSequenceView({
+    super.key,
+    required this.sequence,
+    this.selectable = false,
+    this.freeByWagon = const {},
+    this.selectedWagon,
+    this.onCoachTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -89,6 +105,13 @@ class CoachSequenceView extends StatelessWidget {
                       coach: coaches[i],
                       isFront: i == 0,
                       isRear: i == coaches.length - 1,
+                      selectable: selectable,
+                      freeCount: freeByWagon[coaches[i].wagonNumber],
+                      isSelected: selectedWagon != null &&
+                          coaches[i].wagonNumber == selectedWagon,
+                      onTap: onCoachTap == null
+                          ? null
+                          : () => onCoachTap!(coaches[i]),
                     ),
                     if (i < coaches.length - 1) const _Coupler(),
                   ],
@@ -174,9 +197,20 @@ class _Car extends StatelessWidget {
   final Coach coach;
   final bool isFront;
   final bool isRear;
+  final bool selectable;
+  final int? freeCount;
+  final bool isSelected;
+  final VoidCallback? onTap;
 
-  const _Car(
-      {required this.coach, required this.isFront, required this.isRear});
+  const _Car({
+    required this.coach,
+    required this.isFront,
+    required this.isRear,
+    this.selectable = false,
+    this.freeCount,
+    this.isSelected = false,
+    this.onTap,
+  });
 
   Color get _classColor => coach.isLocomotive
       ? AppColors.locomotive
@@ -194,6 +228,8 @@ class _Car extends StatelessWidget {
     final open = coach.isOpen;
     final accent = open ? _classColor : AppColors.closedCoach;
     final isHead = coach.isLocomotive && (isFront || isRear);
+    final canSelect = selectable && !coach.isLocomotive && coach.wagonNumber > 0;
+    final borderColor = isSelected ? AppColors.onTime : accent;
 
     // ICE nose: strong rounding on the outer end of an end power car.
     final noseSide = isHead
@@ -204,61 +240,82 @@ class _Car extends StatelessWidget {
                 left: Radius.circular(5), right: Radius.circular(20)))
         : BorderRadius.circular(5);
 
-    return Tooltip(
-      message: _tooltipText(),
-      child: Container(
-        width: isHead ? 46 : 54,
-        height: 44,
-        decoration: BoxDecoration(
-          color: isHead
-              ? AppColors.locomotive
-              : theme.colorScheme.surfaceContainerHighest,
-          borderRadius: noseSide,
-          border: Border.all(color: accent, width: 2),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: isHead
-            ? const Center(
-                child: Icon(Icons.train, color: Colors.white, size: 20))
-            : Column(
-                children: [
-                  // class stripe
-                  Container(height: 5, color: accent),
-                  // window band
-                  Expanded(
-                    child: Center(
-                      child: Text(
-                        coach.wagonNumber > 0 ? '${coach.wagonNumber}' : '–',
-                        style: TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                          color: open ? null : Colors.grey,
-                        ),
+    final car = Container(
+      width: isHead ? 46 : 54,
+      height: 46,
+      decoration: BoxDecoration(
+        color: isSelected
+            ? AppColors.onTime.withValues(alpha: 0.16)
+            : isHead
+                ? AppColors.locomotive
+                : theme.colorScheme.surfaceContainerHighest,
+        borderRadius: noseSide,
+        border: Border.all(color: borderColor, width: isSelected ? 3 : 2),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: isHead
+          ? const Center(
+              child: Icon(Icons.train, color: Colors.white, size: 20))
+          : Column(
+              children: [
+                // class stripe
+                Container(height: 5, color: accent),
+                // window band
+                Expanded(
+                  child: Center(
+                    child: Text(
+                      coach.wagonNumber > 0 ? '${coach.wagonNumber}' : '–',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: open ? null : Colors.grey,
                       ),
                     ),
                   ),
-                  // amenity icons
-                  SizedBox(
-                    height: 14,
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        if (coach.hasBikeSpace)
-                          const Icon(Icons.pedal_bike, size: 11),
-                        if (coach.hasQuietZone)
-                          const Icon(Icons.volume_off, size: 11),
-                        if (coach.hasFamilyZone)
-                          const Icon(Icons.family_restroom, size: 11),
-                        if (coach.hasWheelchairSpace)
-                          const Icon(Icons.accessible, size: 11),
-                        if (coach.isRestaurant)
-                          const Icon(Icons.restaurant, size: 11),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-      ),
+                ),
+                // free-seat count when selecting; amenity icons otherwise.
+                SizedBox(
+                  height: 15,
+                  child: freeCount != null
+                      ? Center(
+                          child: Text('$freeCount frei',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w700,
+                                color: freeCount! > 0
+                                    ? AppColors.onTime
+                                    : AppColors.closedCoach,
+                              )),
+                        )
+                      : Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            if (coach.hasBikeSpace)
+                              const Icon(Icons.pedal_bike, size: 11),
+                            if (coach.hasQuietZone)
+                              const Icon(Icons.volume_off, size: 11),
+                            if (coach.hasFamilyZone)
+                              const Icon(Icons.family_restroom, size: 11),
+                            if (coach.hasWheelchairSpace)
+                              const Icon(Icons.accessible, size: 11),
+                            if (coach.isRestaurant)
+                              const Icon(Icons.restaurant, size: 11),
+                          ],
+                        ),
+                ),
+              ],
+            ),
+    );
+
+    return Tooltip(
+      message: _tooltipText(),
+      child: canSelect
+          ? InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(8),
+              child: car,
+            )
+          : car,
     );
   }
 
