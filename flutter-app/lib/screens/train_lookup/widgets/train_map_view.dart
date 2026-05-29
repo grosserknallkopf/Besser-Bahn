@@ -127,7 +127,10 @@ class TrainMap extends StatelessWidget {
         const RichAttributionWidget(
           alignment: AttributionAlignment.bottomLeft,
           showFlutterMapAttribution: false,
-          attributions: [TextSourceAttribution('© BKG (GeoBasis-DE)')],
+          attributions: [
+            TextSourceAttribution('© OpenStreetMap'),
+            TextSourceAttribution('© CARTO'),
+          ],
         ),
         PolylineLayer(
           polylines: [

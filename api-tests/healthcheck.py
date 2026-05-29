@@ -822,17 +822,16 @@ def check_wagenreihung_split() -> str:
 
 
 def check_basemap_tiles() -> str:
-    """Outdoor base-map tiles: BKG TopPlus-Open (grey) — the German, neutral,
-    no-API-key basemap the app draws under every outdoor map. Assert it still
-    serves a real PNG. Soft: tile loss degrades to a blank backdrop, the app and
-    its data still work."""
-    url = ("https://sgx.geodatenzentrum.de/wmts_topplus_open/tile/1.0.0/"
-           "web_grau/default/WEBMERCATOR/7/44/68.png")
+    """Outdoor base-map tiles: CARTO Positron (light_all) — the minimal, no-key
+    basemap the app draws under every outdoor map. Assert it still serves a real
+    PNG. Soft: tile loss degrades to a blank backdrop, the app and its data still
+    work."""
+    url = "https://a.basemaps.cartocdn.com/light_all/7/68/44.png"
     r = requests.get(url, headers={"User-Agent": DBNAV_UA}, timeout=TIMEOUT)
     r.raise_for_status()
     if not r.content.startswith(b"\x89PNG"):
         raise CheckError(f"not a PNG (ct={r.headers.get('Content-Type')})")
-    return f"TopPlus grey tile ok ({len(r.content)} bytes)"
+    return f"CARTO light_all tile ok ({len(r.content)} bytes)"
 
 
 def check_traewelling_api() -> str:
@@ -866,7 +865,7 @@ CHECKS = [
     ("vendo train polyline (zuglauf)", check_vendo_train_polyline, False),
     ("vendo seat map (gsd free seats)", check_vendo_seat_map, False),
     ("wagenreihung wing-train split (RE)", check_wagenreihung_split, True),
-    ("basemap tiles (BKG TopPlus grey)", check_basemap_tiles, True),
+    ("basemap tiles (CARTO light_all)", check_basemap_tiles, True),
     ("bahnhof.de station map (karte)", check_bahnhof_map, False),
     ("map bay ↔ departures link", check_bay_departure_link, True),
     ("map Gleis ↔ departures (normalised)", check_gleis_departure_link, False),

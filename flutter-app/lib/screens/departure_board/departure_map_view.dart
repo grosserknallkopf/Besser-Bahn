@@ -109,7 +109,8 @@ class _DepartureMapViewState extends ConsumerState<DepartureMapView> {
               alignment: AttributionAlignment.bottomLeft,
               showFlutterMapAttribution: false,
               attributions: [
-                TextSourceAttribution('© BKG (GeoBasis-DE)'),
+                TextSourceAttribution('© OpenStreetMap'),
+                TextSourceAttribution('© CARTO'),
                 TextSourceAttribution('Bahnhofsplan © DB InfraGO'),
               ],
             ),

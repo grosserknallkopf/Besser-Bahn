@@ -447,7 +447,8 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
               // bundled → it spams "Unable to load AssetManifest.bin". Disable.
               showFlutterMapAttribution: false,
               attributions: [
-                TextSourceAttribution('© BKG (GeoBasis-DE)'),
+                TextSourceAttribution('© OpenStreetMap'),
+                TextSourceAttribution('© CARTO'),
                 TextSourceAttribution('Bahnhofsplan © DB InfraGO'),
               ],
             ),
@@ -1479,7 +1480,8 @@ class _FallbackLocationMapState extends ConsumerState<_FallbackLocationMap> {
               alignment: AttributionAlignment.bottomLeft,
               showFlutterMapAttribution: false,
               attributions: [
-                TextSourceAttribution('© BKG (GeoBasis-DE)'),
+                TextSourceAttribution('© OpenStreetMap'),
+                TextSourceAttribution('© CARTO'),
               ],
             ),
           ],
