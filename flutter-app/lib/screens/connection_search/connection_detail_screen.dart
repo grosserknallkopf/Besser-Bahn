@@ -177,10 +177,9 @@ class ConnectionDetailScreen extends ConsumerWidget {
   /// the walk itself is shown as the secondary detail.
   Widget _walkLeg(BuildContext context, WidgetRef ref, JourneyLeg leg,
       JourneyLeg? prev, JourneyLeg? next) {
-    final walkMins = (leg.arrival != null && leg.departure != null)
-        ? leg.arrival!.difference(leg.departure!).inMinutes
-        : null;
     // Available transfer time: from the train's arrival to the next departure.
+    // DB gives NO walk duration — only (sometimes) a distance — so we never
+    // present minutes as how long the walk takes.
     final arr = prev?.arrival ?? leg.departure;
     final dep = next?.departure ?? leg.arrival;
     final avail = (arr != null && dep != null)
@@ -196,23 +195,21 @@ class ConnectionDetailScreen extends ConsumerWidget {
       departure: dep,
       fromLine: prev?.line?.displayName,
       toLine: next?.line?.displayName,
-      walkMinutes: walkMins,
       walkDistance: leg.walkingDistance,
       toStation: leg.destination,
     );
 
-    final head = avail != null ? '$avail min zum Umsteigen' : 'Fußweg';
-    final walkDetail = [
-      if (walkMins != null) 'Fußweg ca. $walkMins min',
-      if (leg.walkingDistance != null) '${leg.walkingDistance} m',
-    ].join(' · ');
+    final head = avail != null ? '$avail min zum Umsteigen' : 'Umstieg';
+    final detail = leg.walkingDistance != null
+        ? 'mit Fußweg · ${leg.walkingDistance} m'
+        : 'mit Fußweg';
 
     return _transferTile(
       context,
       icon: Icons.directions_walk,
       head: head,
       headColor: color,
-      detail: walkDetail.isEmpty ? null : walkDetail,
+      detail: detail,
       warn: warn,
       onTap: () => context.push('/transfer', extra: info),
     );

@@ -17,8 +17,7 @@ class TransferInfo {
   final DateTime? departure; // when the next train leaves
   final String? fromLine; // arriving train
   final String? toLine; // departing train
-  final int? walkMinutes; // scheduled foot-transfer duration (FUSSWEG leg)
-  final int? walkDistance; // metres
+  final int? walkDistance; // metres (DB gives distance, NOT a walk duration)
   final Station? toStation; // Einstieg station, if the walk crosses stations
 
   const TransferInfo({
@@ -29,7 +28,6 @@ class TransferInfo {
     this.departure,
     this.fromLine,
     this.toLine,
-    this.walkMinutes,
     this.walkDistance,
     this.toStation,
   });
@@ -109,7 +107,7 @@ class TransferScreen extends ConsumerWidget {
             time: info.arrival,
             station: info.station.name,
           ),
-          if (info.walkMinutes != null || info.walkDistance != null)
+          if (info.crossStation || info.walkDistance != null)
             Padding(
               padding: const EdgeInsets.fromLTRB(8, 4, 8, 4),
               child: Row(
@@ -118,11 +116,9 @@ class TransferScreen extends ConsumerWidget {
                       size: 18, color: theme.colorScheme.onSurfaceVariant),
                   const SizedBox(width: 8),
                   Text(
-                    [
-                      if (info.walkMinutes != null)
-                        'Fußweg ca. ${info.walkMinutes} min',
-                      if (info.walkDistance != null) '${info.walkDistance} m',
-                    ].join(' · '),
+                    info.walkDistance != null
+                        ? 'Fußweg · ${info.walkDistance} m'
+                        : 'Fußweg',
                     style: theme.textTheme.bodyMedium
                         ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
                   ),
