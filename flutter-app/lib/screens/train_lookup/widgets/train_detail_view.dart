@@ -113,6 +113,7 @@ class _TrainDetailViewState extends ConsumerState<TrainDetailView> {
           onStopTap: widget.onStopTap,
           boardingId: widget.boardingId,
           alightingId: widget.alightingId,
+          legAmenities: _legAmenities(widget.coach),
         ),
       ],
     );

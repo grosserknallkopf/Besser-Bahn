@@ -75,8 +75,12 @@ class SplitTicketNotifier extends Notifier<SplitTicketState> {
     required String date,
     required double directPrice,
     String? routeLabel,
+    String? jobKey,
   }) async {
-    final sig = '${stops.map((s) => s['id']).join('|')}@$date';
+    // Prefer a STABLE key tied to the connection (origin/dest/departure). The
+    // stop list is sampled from a cache that fills over time, so keying on it
+    // would make re-tapping the same connection look like a new job → restart.
+    final sig = jobKey ?? '${stops.map((s) => s['id']).join('|')}@$date';
     // Already running this exact analysis? Leave it running — re-entering the
     // screen must not restart it from zero. (A different route DOES supersede,
     // via the generation bump below.)

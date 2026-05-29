@@ -371,7 +371,10 @@ class VendoService {
   // -- parsing ---------------------------------------------------------------
 
   Journey _parseConnection(Map<String, dynamic> c) {
-    final vb = c['verbindung'] as Map<String, dynamic>? ?? {};
+    // /angebote/fahrplan wraps the connection in `verbindung`; the
+    // /trip/weitereabfahrten response puts the same fields directly on the
+    // connection object — fall back to `c` so both shapes parse.
+    final vb = c['verbindung'] as Map<String, dynamic>? ?? c;
     final abschnitte = vb['verbindungsAbschnitte'] as List<dynamic>? ?? [];
     final legs = abschnitte
         .whereType<Map<String, dynamic>>()

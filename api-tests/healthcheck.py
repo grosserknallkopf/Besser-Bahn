@@ -46,6 +46,8 @@ KIEL_LOC = ("A=1@O=Kiel Hbf@X=10131976@Y=54314982@U=80@L=8000199@"
             "p=1779908603@i=U×008001304@")
 BERLIN_LOC = ("A=1@O=Berlin Hbf@X=13369549@Y=52525589@U=80@L=8011160@"
               "p=1779908603@i=U×008065969@")
+HAMBURG_LOC = ("A=1@O=Hamburg Hbf@X=10006909@Y=53552733@U=80@L=8002549@"
+               "i=U×008001071@")
 
 
 def _corr_id() -> str:
@@ -370,6 +372,45 @@ def check_vendo_journey_pagination() -> str:
         raise CheckError(f"earlier ctx did not return earlier trains "
                          f"(base={b0}, earlier={e0})")
     return f"pagination ok (base {b0[11:16]} -> earlier {e0[11:16]})"
+
+
+def check_vendo_weitere_abfahrten() -> str:
+    """
+    "Weitere Abfahrten": alternative trains of one product group on a direct
+    segment, anchored on arrival. POST /mob/trip/weitereabfahrten. NB the
+    response puts verbindungsAbschnitte DIRECTLY on each connection (no
+    `verbindung` wrapper, unlike /angebote/fahrplan) — the app relies on that.
+    """
+    media = "application/x.db.vendo.mob.verbindungssuche.v9+json"
+    # anchor a few hours out so regional trains certainly exist
+    ankunft = (datetime.now().astimezone() + timedelta(hours=4)).isoformat()
+    body = {"wunsch": {
+        "abgangsLocationId": KIEL_LOC,
+        "alternativeHalteBerechnung": True,
+        "fahrradmitnahme": False,
+        "produktGattungen": "RB",
+        "zeitWunsch": {"reiseDatum": ankunft, "zeitPunktArt": "ANKUNFT"},
+        "zielLocationId": HAMBURG_LOC,
+    }}
+    r = requests.post(
+        "https://app.services-bahn.de/mob/trip/weitereabfahrten",
+        headers=_vendo_headers(media), data=json.dumps(body), timeout=TIMEOUT,
+    )
+    r.raise_for_status()
+    conns = r.json().get("verbindungen", [])
+    if not conns:
+        raise CheckError("no verbindungen returned")
+    c = conns[0]
+    # the un-wrapped shape the app's _parseConnection now falls back to
+    legs = c.get("verbindungsAbschnitte")
+    if not legs:
+        raise CheckError("connection has no verbindungsAbschnitte "
+                         "(response shape changed)")
+    halte = legs[0].get("halte", [])
+    if len(halte) < 2:
+        raise CheckError("first leg has no halte")
+    dep = halte[0].get("abgangsDatum", "")
+    return f"{len(conns)} alt departures, first {dep[11:16]} ({len(halte)} halte)"
 
 
 def check_vendo_train_polyline() -> str:

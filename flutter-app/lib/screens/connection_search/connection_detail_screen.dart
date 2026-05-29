@@ -249,6 +249,10 @@ class ConnectionDetailScreen extends ConsumerWidget {
           directPrice: journey.price?.amount ?? 0,
           routeLabel:
               '${journey.origin?.name ?? ''} → ${journey.destination?.name ?? ''}',
+          // Stable per-connection key so re-opening the same connection resumes
+          // the running analysis instead of restarting it.
+          jobKey: '${journey.origin?.id}-${journey.destination?.id}-'
+              '${(journey.plannedDeparture ?? journey.departure)?.toIso8601String()}',
         );
     context.push('/split-ticket', extra: journey);
   }

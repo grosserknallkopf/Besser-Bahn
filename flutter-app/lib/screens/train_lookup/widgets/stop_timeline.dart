@@ -266,6 +266,7 @@ class _StopTimelineState extends State<StopTimeline> {
     final theme = Theme.of(context);
     final primary = theme.colorScheme.primary;
     final lineColor = primary.withAlpha(60);
+    final amenities = widget.legAmenities;
     return InkWell(
       onTap: onTap,
       child: IntrinsicHeight(
@@ -274,15 +275,15 @@ class _StopTimelineState extends State<StopTimeline> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // spine: leg duration, vertically centred
+              // spine: leg duration, centred between the two stop times
               SizedBox(
                 width: 52,
                 child: duration == null
                     ? const SizedBox.shrink()
-                    : Align(
-                        alignment: Alignment.centerRight,
+                    : Center(
                         child: Text(
                           duration,
+                          textAlign: TextAlign.center,
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: theme.colorScheme.onSurfaceVariant,
                             fontWeight: FontWeight.w600,
@@ -301,27 +302,57 @@ class _StopTimelineState extends State<StopTimeline> {
                 ),
               ),
               const SizedBox(width: 12),
-              // content: expander icon + label + chevron (pushed right)
+              // content: expander row + (optional) leg-wide amenities below
               Expanded(
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 11),
-                  child: Row(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(expanded ? Icons.unfold_less : Icons.more_horiz,
-                          size: 18, color: primary),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          '$count ${count == 1 ? 'Zwischenhalt' : 'Zwischenhalte'}'
-                          '${expanded ? ' ausblenden' : ' anzeigen'}',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: primary,
-                            fontWeight: FontWeight.w600,
+                      Row(
+                        children: [
+                          Icon(expanded ? Icons.unfold_less : Icons.more_horiz,
+                              size: 18, color: primary),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '$count ${count == 1 ? 'Zwischenhalt' : 'Zwischenhalte'}'
+                              '${expanded ? ' ausblenden' : ' anzeigen'}',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: primary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                           ),
-                        ),
+                          Icon(expanded ? Icons.expand_less : Icons.expand_more,
+                              size: 18, color: primary),
+                        ],
                       ),
-                      Icon(expanded ? Icons.expand_less : Icons.expand_more,
-                          size: 18, color: primary),
+                      if (amenities.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 14,
+                          runSpacing: 6,
+                          children: [
+                            for (final a in amenities)
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(a.icon,
+                                      size: 15,
+                                      color: theme.colorScheme.onSurfaceVariant),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    a.label,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                        color:
+                                            theme.colorScheme.onSurfaceVariant),
+                                  ),
+                                ],
+                              ),
+                          ],
+                        ),
+                      ],
                     ],
                   ),
                 ),
@@ -393,51 +424,51 @@ class _StopRow extends StatelessWidget {
 
             const SizedBox(width: 12),
 
-            // Timeline line
-            SizedBox(
-              width: 20,
-              child: Column(
-                children: [
-                  if (hasTop)
-                    Container(
-                      width: 2,
-                      height: 8,
-                      color: isPast || muted
-                          ? theme.colorScheme.outlineVariant
-                          : theme.colorScheme.primary.withAlpha(60),
-                    ),
-                  Container(
-                    width: emphasize ? 14 : 10,
-                    height: emphasize ? 14 : 10,
-                    decoration: BoxDecoration(
-                      color: dotColor,
-                      shape: BoxShape.circle,
-                      border: emphasize
-                          ? Border.all(
-                              color: theme.colorScheme.primary.withAlpha(100),
-                              width: 2)
+            // Timeline line. The dot is pushed down by `topGap` so its centre
+            // lines up with the first line of the station name beside it,
+            // instead of floating above it.
+            Builder(builder: (context) {
+              final lineColor = isPast || muted
+                  ? theme.colorScheme.outlineVariant
+                  : theme.colorScheme.primary.withAlpha(60);
+              final dotSize = emphasize ? 14.0 : 10.0;
+              final topGap = 9.0 - dotSize / 2; // first-line centre − radius
+              return SizedBox(
+                width: 20,
+                child: Column(
+                  children: [
+                    SizedBox(
+                      height: topGap,
+                      child: hasTop
+                          ? Container(width: 2, color: lineColor)
                           : null,
                     ),
-                  ),
-                  if (hasBottom)
-                    Expanded(
-                      child: Container(
-                        width: 2,
-                        color: isPast || muted
-                            ? theme.colorScheme.outlineVariant
-                            : theme.colorScheme.primary.withAlpha(60),
+                    Container(
+                      width: dotSize,
+                      height: dotSize,
+                      decoration: BoxDecoration(
+                        color: dotColor,
+                        shape: BoxShape.circle,
+                        border: emphasize
+                            ? Border.all(
+                                color: theme.colorScheme.primary.withAlpha(100),
+                                width: 2)
+                            : null,
                       ),
                     ),
-                ],
-              ),
-            ),
+                    if (hasBottom)
+                      Expanded(child: Container(width: 2, color: lineColor)),
+                  ],
+                ),
+              );
+            }),
 
             const SizedBox(width: 12),
 
             // Station info
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.only(bottom: 16),
+                padding: const EdgeInsets.only(bottom: 22),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
