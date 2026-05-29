@@ -65,12 +65,14 @@ class _LazyMountState extends State<LazyMount> {
 
   bool _isVisible() {
     final box = context.findRenderObject() as RenderBox?;
-    if (box == null || !box.attached) return false;
+    // `hasSize` guards the post-frame/scroll callback firing before this box
+    // has been laid out — reading `.size` then asserts (RenderBox NEEDS-LAYOUT).
+    if (box == null || !box.attached || !box.hasSize) return false;
     final myRect = box.localToGlobal(Offset.zero) & box.size;
 
     final scrollable = Scrollable.maybeOf(context);
     final vpBox = scrollable?.context.findRenderObject() as RenderBox?;
-    final vpRect = vpBox != null && vpBox.attached
+    final vpRect = vpBox != null && vpBox.attached && vpBox.hasSize
         ? (vpBox.localToGlobal(Offset.zero) & vpBox.size)
         : (Offset.zero & MediaQuery.of(context).size);
 

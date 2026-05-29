@@ -7,10 +7,14 @@ import '../../models/journey.dart';
 import '../../models/library_models.dart';
 import '../../models/station.dart';
 import '../../models/trip.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 import '../../providers/library_provider.dart';
 import '../../providers/service_providers.dart';
+import '../../providers/settings_provider.dart';
 import '../../providers/split_ticket_provider.dart';
 import '../../providers/station_map_provider.dart';
+import '../../services/db_api_service.dart';
 import '../../widgets/prediction_badge.dart';
 import '../train_lookup/widgets/train_detail_view.dart';
 
@@ -39,6 +43,11 @@ class ConnectionDetailScreen extends ConsumerWidget {
           overflow: TextOverflow.ellipsis,
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.open_in_new),
+            tooltip: 'Auf bahn.de öffnen / buchen',
+            onPressed: () => _openOnBahn(context, ref),
+          ),
           IconButton(
             icon: const Icon(Icons.call_split),
             tooltip: 'Split-Ticket suchen',
@@ -83,31 +92,97 @@ class ConnectionDetailScreen extends ConsumerWidget {
     );
   }
 
+  /// Open this connection on bahn.de (pre-filled with date + the user's
+  /// BahnCard / Deutschland-Ticket) so the price matches and the user can book.
+  void _openOnBahn(BuildContext context, WidgetRef ref) {
+    final o = journey.origin, d = journey.destination;
+    final dep = journey.plannedDeparture ?? journey.departure;
+    if (o == null || d == null || dep == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Verbindung nicht verfügbar.')),
+      );
+      return;
+    }
+    final s = ref.read(settingsProvider);
+    final url = DbApiService.generateJourneyLink(
+      fromName: o.name,
+      toName: d.name,
+      fromId: o.id,
+      toId: d.id,
+      departureIso: dep.toIso8601String(),
+      bahnCard: s.bahnCard,
+      deutschlandTicket: s.hasDeutschlandTicket,
+    );
+    launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  }
+
   /// Build the ordered station list (split points) from the journey's legs and
   /// kick off a split-ticket analysis, then jump to the Split tab — so the user
   /// goes from "found a connection" to "is it cheaper split?" in one tap, no
   /// copy-pasting a bahn.de link.
   void _openSplitTicket(BuildContext context, WidgetRef ref) {
     final stops = <Map<String, dynamic>>[];
-    void add(String id, String name, DateTime? dep) {
+    // `boundary` = a leg endpoint (start, terminus or transfer) — always kept
+    // when we cap the candidate list, since those are the real rebook points.
+    void add(String id, String name, DateTime? dep, bool boundary) {
       if (id.isEmpty) return;
       if (stops.isNotEmpty && stops.last['id'] == id) {
-        // Same station as a transfer point → prefer the onward departure time.
         if (dep != null) stops.last['departure_iso'] = dep.toIso8601String();
+        if (boundary) stops.last['_boundary'] = true;
         return;
       }
       stops.add({
         'name': name,
         'id': id,
         'departure_iso': dep?.toIso8601String() ?? '',
+        '_boundary': boundary,
       });
     }
 
+    // Cover the WHOLE route: use each leg's full stop list (richest source
+    // first — the already-fetched trip in the cache, else the leg's stopovers,
+    // else just its endpoints) so the split can break at intermediate stations,
+    // not only at transfers.
     for (final leg in journey.legs) {
       if (leg.isWalking) continue;
-      add(leg.origin.id, leg.origin.name,
-          leg.plannedDeparture ?? leg.departure);
-      add(leg.destination.id, leg.destination.name, null);
+      final cached = leg.tripId != null ? _tripCache[leg.tripId] : null;
+      if (cached != null && cached.stopovers.isNotEmpty) {
+        final n = cached.stopovers.length;
+        for (var i = 0; i < n; i++) {
+          final so = cached.stopovers[i];
+          add(so.stop.id, so.stop.name,
+              so.departure ?? so.plannedDeparture, i == 0 || i == n - 1);
+        }
+      } else if (leg.stopovers.isNotEmpty) {
+        final n = leg.stopovers.length;
+        for (var i = 0; i < n; i++) {
+          final so = leg.stopovers[i];
+          add(so.stop.id, so.stop.name, so.departure, i == 0 || i == n - 1);
+        }
+      } else {
+        add(leg.origin.id, leg.origin.name,
+            leg.plannedDeparture ?? leg.departure, true);
+        add(leg.destination.id, leg.destination.name, leg.arrival, true);
+      }
+    }
+
+    // Cap the candidates so the pairwise price scan stays quick: keep every
+    // boundary (rebook) stop and evenly sample the intermediate ones. The
+    // number of price queries grows with the square of the stop count.
+    const cap = 12;
+    if (stops.length > cap) {
+      final boundaries = stops.where((s) => s['_boundary'] == true).toList();
+      final inner = stops.where((s) => s['_boundary'] != true).toList();
+      final slots = (cap - boundaries.length).clamp(0, inner.length);
+      final keep = <Map<String, dynamic>>{...boundaries};
+      if (slots > 0) {
+        final step = inner.length / slots;
+        for (var k = 0; k < slots; k++) {
+          keep.add(inner[(k * step).floor()]);
+        }
+      }
+      stops
+        ..removeWhere((s) => !keep.contains(s));
     }
 
     if (stops.length < 2) {
