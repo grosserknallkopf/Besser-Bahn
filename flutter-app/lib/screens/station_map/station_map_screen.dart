@@ -99,6 +99,18 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
     final s = ref.read(stationMapProvider);
     final hl = s.highlightPoi;
     final section = s.highlightSectionLine;
+    // Transfer: frame both the Ausstieg and Einstieg Gleise together.
+    final sec = s.secondaryHighlightPoi;
+    if (hl != null && sec != null) {
+      _mapController.fitCamera(
+        CameraFit.bounds(
+          bounds: LatLngBounds.fromPoints([hl.latLng, sec.latLng]),
+          padding: const EdgeInsets.all(72),
+          maxZoom: 18.5,
+        ),
+      );
+      return;
+    }
     // Boarding section known → frame the whole section range on the platform.
     if (section.isNotEmpty) {
       final pts = [
@@ -402,7 +414,7 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
 
   List<Marker> _markers(
       BuildContext context, List<MapPoi> pois, Station? station) {
-    final highlight = ref.read(stationMapProvider).highlightGleis;
+    final mapState = ref.read(stationMapProvider);
     // Phones get smaller markers — the desktop sizes crowd a small screen.
     final compact = MediaQuery.of(context).size.shortestSide < 600;
     return [
@@ -426,9 +438,7 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
               poi: poi,
               compact: compact,
               selected: identical(poi, _selectedPoi),
-              boarding: poi.isPlatform &&
-                  highlight != null &&
-                  normalizeGleis(poi.name) == highlight,
+              highlightRole: mapState.roleForPoi(poi),
             ),
           ),
         ),
@@ -578,24 +588,33 @@ class _PoiMarker extends StatelessWidget {
   /// Phone-sized rendering (smaller glyphs/labels).
   final bool compact;
 
-  /// The boarding Gleis for the journey the user came from — emphasised.
-  final bool boarding;
+  /// How this Gleis is highlighted for the journey: Einstieg (green), Ausstieg
+  /// (red), Umstieg (amber), or none.
+  final GleisRole highlightRole;
 
   const _PoiMarker(
       {required this.poi,
       this.compact = false,
       this.selected = false,
-      this.boarding = false});
+      this.highlightRole = GleisRole.none});
+
+  /// Highlight colour per role — null when this POI isn't highlighted.
+  Color? get _hlColor => switch (highlightRole) {
+        GleisRole.board => const Color(0xFF2E9E5B), // Einstieg – green
+        GleisRole.alight => Colors.red, // Ausstieg – red
+        GleisRole.transfer => Colors.amber.shade700, // Umstieg
+        GleisRole.none => null,
+      };
+
+  bool get _hl => _hlColor != null;
 
   Border get _border => Border.all(
-        color: boarding
-            ? Colors.amber
-            : (selected ? Colors.amberAccent : Colors.white),
-        width: boarding ? 3 : (selected ? 2.5 : 1.5),
+        color: _hlColor ?? (selected ? Colors.amberAccent : Colors.white),
+        width: _hl ? 3 : (selected ? 2.5 : 1.5),
       );
 
-  List<BoxShadow>? get _glow => boarding
-      ? [const BoxShadow(color: Colors.amber, blurRadius: 12, spreadRadius: 2)]
+  List<BoxShadow>? get _glow => _hl
+      ? [BoxShadow(color: _hlColor!, blurRadius: 12, spreadRadius: 2)]
       : null;
 
   @override
@@ -631,7 +650,7 @@ class _PoiMarker extends StatelessWidget {
         height: compact ? 18 : 22,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: boarding ? Colors.amber.shade700 : Colors.black54,
+          color: _hl ? _hlColor! : Colors.black54,
           shape: BoxShape.circle,
           border: _border,
           boxShadow: _glow,

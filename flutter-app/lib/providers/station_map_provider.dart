@@ -110,6 +110,12 @@ class StationMapState {
   /// [GleisRole.board] so a plain boarding highlight reads "Einstieg".
   final GleisRole highlightRole;
 
+  /// A SECOND highlighted Gleis on the same map — used for a transfer, where
+  /// the primary is the Einstieg (next train) and this is the Ausstieg
+  /// (arriving train), drawn in a distinct colour. Null when not a transfer.
+  final String? secondaryGleis;
+  final GleisRole secondaryRole;
+
   final bool isLoading;
   final String? error;
 
@@ -122,6 +128,8 @@ class StationMapState {
     this.highlightSection,
     this.transferNote,
     this.highlightRole = GleisRole.board,
+    this.secondaryGleis,
+    this.secondaryRole = GleisRole.none,
     this.isLoading = false,
     this.error,
   });
@@ -135,9 +143,12 @@ class StationMapState {
     ({String start, String end})? highlightSection,
     String? transferNote,
     GleisRole? highlightRole,
+    String? secondaryGleis,
+    GleisRole? secondaryRole,
     bool clearHighlight = false,
     bool clearSection = false,
     bool clearTransferNote = false,
+    bool clearSecondary = false,
     bool? isLoading,
     String? error,
     bool clearError = false,
@@ -157,20 +168,39 @@ class StationMapState {
       highlightRole: clearHighlight
           ? GleisRole.none
           : (highlightRole ?? this.highlightRole),
+      secondaryGleis: (clearHighlight || clearSecondary)
+          ? null
+          : (secondaryGleis ?? this.secondaryGleis),
+      secondaryRole: (clearHighlight || clearSecondary)
+          ? GleisRole.none
+          : (secondaryRole ?? this.secondaryRole),
       isLoading: isLoading ?? this.isLoading,
       error: clearError ? null : (error ?? this.error),
     );
   }
 
   /// The POI for the highlighted boarding Gleis, if present on the current map.
-  MapPoi? get highlightPoi {
-    final g = highlightGleis;
+  MapPoi? get highlightPoi => _poiForGleis(highlightGleis);
+
+  /// The POI for the secondary (Ausstieg) Gleis on a transfer map.
+  MapPoi? get secondaryHighlightPoi => _poiForGleis(secondaryGleis);
+
+  MapPoi? _poiForGleis(String? g) {
     final m = map;
     if (g == null || m == null) return null;
     for (final p in m.platforms) {
       if (normalizeGleis(p.name) == g) return p;
     }
     return null;
+  }
+
+  /// Role to highlight [poi] as on the map: primary, secondary, or none.
+  GleisRole roleForPoi(MapPoi poi) {
+    if (!poi.isPlatform) return GleisRole.none;
+    final n = normalizeGleis(poi.name);
+    if (highlightGleis != null && n == highlightGleis) return highlightRole;
+    if (secondaryGleis != null && n == secondaryGleis) return secondaryRole;
+    return GleisRole.none;
   }
 
   /// The real sector cubes (A–I) of the boarding section range, in letter
@@ -391,21 +421,28 @@ class StationMapNotifier extends Notifier<StationMapState> {
   Future<void> loadForStation(Station station,
       {String? highlightGleis,
       String? transferNote,
-      GleisRole role = GleisRole.board}) async {
+      GleisRole role = GleisRole.board,
+      String? secondaryGleis,
+      GleisRole secondaryRole = GleisRole.none}) async {
     final raw = highlightGleis?.trim() ?? '';
     final hl = raw.isNotEmpty ? normalizeGleis(raw) : null;
     final section = raw.isNotEmpty ? parseGleisSection(raw) : null;
+    final sraw = secondaryGleis?.trim() ?? '';
+    final sec = sraw.isNotEmpty ? normalizeGleis(sraw) : null;
     state = state.copyWith(
       station: station,
       highlightGleis: hl,
       highlightSection: section,
       transferNote: transferNote,
       highlightRole: hl == null ? GleisRole.none : role,
+      secondaryGleis: sec,
+      secondaryRole: sec == null ? GleisRole.none : secondaryRole,
       clearHighlight: hl == null,
       // Without an explicit section, drop any stale one from a previous train
       // (else every train would keep showing the first train's "G–I").
       clearSection: section == null,
       clearTransferNote: transferNote == null,
+      clearSecondary: sec == null,
     );
     await _load(() => _service.fetchByStationName(station.name));
   }

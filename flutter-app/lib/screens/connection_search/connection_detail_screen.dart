@@ -12,6 +12,7 @@ import '../../providers/split_ticket_provider.dart';
 import '../../providers/station_map_provider.dart';
 import '../../widgets/prediction_badge.dart';
 import '../train_lookup/widgets/train_detail_view.dart';
+import 'transfer_screen.dart';
 
 /// In-memory cache (app session) so a leg's train data is fetched once and
 /// reused — scrolling away and back never re-downloads or rebuilds from
@@ -71,7 +72,9 @@ class ConnectionDetailScreen extends ConsumerWidget {
           for (var i = 0; i < legs.length; i++) ...[
             if (i > 0) _transfer(context, ref, legs[i - 1], legs[i]),
             if (legs[i].isWalking)
-              _walkLeg(context, legs[i])
+              _walkLeg(context, ref, legs[i],
+                  i > 0 ? legs[i - 1] : null,
+                  i + 1 < legs.length ? legs[i + 1] : null)
             else
               _LegSection(leg: legs[i]),
           ],
@@ -157,32 +160,67 @@ class ConnectionDetailScreen extends ConsumerWidget {
     );
   }
 
-  Widget _walkLeg(BuildContext context, JourneyLeg leg) {
-    final mins = (leg.arrival != null && leg.departure != null)
+  /// Tone for an available transfer time: red ≤2 min (Anschluss gefährdet),
+  /// amber ≤5, else null (normal). Returns (textColor, warningText).
+  (Color?, String?) _transferTone(BuildContext context, int? mins) {
+    if (mins == null) return (null, null);
+    if (mins <= 2) {
+      return (Theme.of(context).colorScheme.error,
+          'Anschluss evtl. nicht erreichbar');
+    }
+    if (mins <= 5) return (const Color(0xFFCC8800), null);
+    return (null, null);
+  }
+
+  /// A FUSSWEG leg between two trains. The headline number is the *time you
+  /// have* to change (arrival → next departure), NOT how long the walk takes;
+  /// the walk itself is shown as the secondary detail.
+  Widget _walkLeg(BuildContext context, WidgetRef ref, JourneyLeg leg,
+      JourneyLeg? prev, JourneyLeg? next) {
+    final walkMins = (leg.arrival != null && leg.departure != null)
         ? leg.arrival!.difference(leg.departure!).inMinutes
         : null;
-    final dist = leg.walkingDistance;
-    final detail = [
-      if (mins != null) 'ca. $mins min',
-      if (dist != null) '$dist m',
+    // Available transfer time: from the train's arrival to the next departure.
+    final arr = prev?.arrival ?? leg.departure;
+    final dep = next?.departure ?? leg.arrival;
+    final avail = (arr != null && dep != null)
+        ? dep.difference(arr).inMinutes
+        : null;
+    final (color, warn) = _transferTone(context, avail);
+
+    final info = TransferInfo(
+      station: leg.origin,
+      arrGleis: prev?.arrivalPlatform,
+      depGleis: next?.departurePlatform,
+      arrival: arr,
+      departure: dep,
+      fromLine: prev?.line?.displayName,
+      toLine: next?.line?.displayName,
+      walkMinutes: walkMins,
+      walkDistance: leg.walkingDistance,
+      toStation: leg.destination,
+    );
+
+    final head = avail != null ? '$avail min zum Umsteigen' : 'Fußweg';
+    final walkDetail = [
+      if (walkMins != null) 'Fußweg ca. $walkMins min',
+      if (leg.walkingDistance != null) '${leg.walkingDistance} m',
     ].join(' · ');
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 16),
-      child: Row(
-        children: [
-          const Icon(Icons.directions_walk, size: 18),
-          const SizedBox(width: 8),
-          Text(detail.isEmpty ? 'Fußweg' : 'Fußweg · $detail',
-              style: Theme.of(context).textTheme.bodySmall),
-        ],
-      ),
+
+    return _transferTile(
+      context,
+      icon: Icons.directions_walk,
+      head: head,
+      headColor: color,
+      detail: walkDetail.isEmpty ? null : walkDetail,
+      warn: warn,
+      onTap: () => context.push('/transfer', extra: info),
     );
   }
 
   Widget _transfer(
       BuildContext context, WidgetRef ref, JourneyLeg prev, JourneyLeg next) {
     if (prev.isWalking || next.isWalking) return const SizedBox(height: 8);
-    final theme = Theme.of(context);
     // Time you actually have to change trains (arrival → next departure).
     final gap = (next.departure != null && prev.arrival != null)
         ? next.departure!.difference(prev.arrival!).inMinutes
@@ -191,34 +229,48 @@ class ConnectionDetailScreen extends ConsumerWidget {
     final arrGleis = prev.arrivalPlatform;
     final depGleis = next.departurePlatform;
     final station = prev.destination;
-    final canMap = station.name.isNotEmpty;
-
-    // A short, unambiguous label: it's the *available* transfer time, not a
-    // walk duration.
-    final timeText = gap != null
-        ? '$gap min zum Umsteigen'
-        : 'Umstieg';
-    final tight = gap != null && gap <= 5;
+    final (color, warn) = _transferTone(context, gap);
 
     final gleisText = (arrGleis != null || depGleis != null)
         ? 'Gleis ${arrGleis ?? '?'} → Gleis ${depGleis ?? '?'}'
         : null;
 
-    void openMap() {
-      final note = (arrGleis != null && depGleis != null)
-          ? 'Ankunft Gleis $arrGleis · Weiter ab Gleis $depGleis'
-          : depGleis != null
-              ? 'Weiter ab Gleis $depGleis'
-              : 'Umstieg in ${station.name}';
-      ref.read(stationMapProvider.notifier).loadForStation(
-            station,
-            highlightGleis: depGleis ?? arrGleis,
-            transferNote: note,
-            role: GleisRole.transfer,
-          );
-      context.push('/station-map');
-    }
+    final info = TransferInfo(
+      station: station,
+      arrGleis: arrGleis,
+      depGleis: depGleis,
+      arrival: prev.arrival,
+      departure: next.departure,
+      fromLine: prev.line?.displayName,
+      toLine: next.line?.displayName,
+    );
 
+    return _transferTile(
+      context,
+      icon: Icons.swap_calls,
+      head: gap != null
+          ? '$gap min zum Umsteigen in ${station.name}'
+          : 'Umstieg in ${station.name}',
+      headColor: color,
+      detail: gleisText,
+      warn: warn,
+      onTap: station.name.isEmpty
+          ? null
+          : () => context.push('/transfer', extra: info),
+    );
+  }
+
+  /// Shared tappable transfer/walk row.
+  Widget _transferTile(
+    BuildContext context, {
+    required IconData icon,
+    required String head,
+    Color? headColor,
+    String? detail,
+    String? warn,
+    VoidCallback? onTap,
+  }) {
+    final theme = Theme.of(context);
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
       decoration: BoxDecoration(
@@ -227,38 +279,53 @@ class ConnectionDetailScreen extends ConsumerWidget {
       ),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: canMap ? openMap : null,
+        onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
           child: Row(
             children: [
-              Icon(Icons.swap_calls,
-                  size: 18, color: theme.colorScheme.onSurfaceVariant),
+              Icon(icon,
+                  size: 18, color: headColor ?? theme.colorScheme.onSurfaceVariant),
               const SizedBox(width: 8),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Umstieg in ${station.name} · $timeText',
+                      head,
                       style: theme.textTheme.bodyMedium?.copyWith(
                         fontWeight: FontWeight.w600,
-                        color: tight ? theme.colorScheme.error : null,
+                        color: headColor,
                       ),
                     ),
-                    if (gleisText != null)
+                    if (detail != null)
                       Padding(
                         padding: const EdgeInsets.only(top: 2),
-                        child: Text(
-                          gleisText,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant),
+                        child: Text(detail,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.onSurfaceVariant)),
+                      ),
+                    if (warn != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Row(
+                          children: [
+                            Icon(Icons.warning_amber_rounded,
+                                size: 14, color: theme.colorScheme.error),
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(warn,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                      color: theme.colorScheme.error,
+                                      fontWeight: FontWeight.w600)),
+                            ),
+                          ],
                         ),
                       ),
                   ],
                 ),
               ),
-              if (canMap) ...[
+              if (onTap != null) ...[
                 const SizedBox(width: 8),
                 Icon(Icons.map_outlined,
                     size: 18, color: theme.colorScheme.primary),
