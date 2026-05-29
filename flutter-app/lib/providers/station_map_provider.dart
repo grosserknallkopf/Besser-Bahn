@@ -11,10 +11,11 @@ import 'service_providers.dart';
 /// wording: where you get on (Einstieg), off (Ausstieg) or change (Umstieg).
 enum GleisRole { board, alight, transfer, none }
 
-/// The default-shown POI category: just the Gleise. Everything else
+/// The default-shown POI categories: the Gleise and their section letters
+/// (A–I), so the rider always sees which Abschnitt to stand at. Everything else
 /// (lifts, stairs, lockers, exits, bus/tram stops …) starts hidden and is
 /// re-enabled per-category from the legend, so the map opens uncluttered.
-const kDefaultPrimaryTypes = {'PLATFORM'};
+const kDefaultPrimaryTypes = {'PLATFORM', 'PLATFORM_SECTOR_CUBE'};
 
 /// Which POI category is the *relevant* one to show by default for a leg of
 /// this transport [product] — Gleise for a train/S-Bahn, bus stops for a bus,
