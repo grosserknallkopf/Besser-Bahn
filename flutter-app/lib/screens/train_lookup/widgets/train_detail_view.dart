@@ -92,7 +92,20 @@ class _TrainDetailViewState extends ConsumerState<TrainDetailView> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        TrainInfoHeader(trip: trip, action: widget.headerAction),
+        // One block: train name/info folded into the same card as the Halte
+        // timeline (the duplicate origin→destination times are gone).
+        StopTimeline(
+          stopovers: trip.stopovers,
+          onStopTap: widget.onStopTap,
+          boardingId: widget.boardingId,
+          alightingId: widget.alightingId,
+          legAmenities: _legAmenities(trip, widget.coach),
+          header: TrainInfoHeader(
+            trip: trip,
+            action: widget.headerAction,
+            embedded: true,
+          ),
+        ),
         if (widget.coach != null)
           CoachSequenceView(
             sequence: widget.coach!,
@@ -111,13 +124,6 @@ class _TrainDetailViewState extends ConsumerState<TrainDetailView> {
               child: seatPlan,
             ),
           ),
-        StopTimeline(
-          stopovers: trip.stopovers,
-          onStopTap: widget.onStopTap,
-          boardingId: widget.boardingId,
-          alightingId: widget.alightingId,
-          legAmenities: _legAmenities(trip, widget.coach),
-        ),
       ],
     );
   }

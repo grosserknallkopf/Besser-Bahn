@@ -26,6 +26,14 @@ class StopTimeline extends StatefulWidget {
   /// single stop. Empty → nothing rendered.
   final List<({IconData icon, String label})> legAmenities;
 
+  /// Optional widget rendered at the top of the timeline card (above the "Halte"
+  /// title) — used to fold the train header into the same block.
+  final Widget? header;
+
+  /// When true, return content without the surrounding Card/margin so it can be
+  /// embedded in a shared card.
+  final bool embedded;
+
   const StopTimeline({
     super.key,
     required this.stopovers,
@@ -33,6 +41,8 @@ class StopTimeline extends StatefulWidget {
     this.boardingId,
     this.alightingId,
     this.legAmenities = const [],
+    this.header,
+    this.embedded = false,
   });
 
   @override
@@ -170,26 +180,38 @@ class _StopTimelineState extends State<StopTimeline> {
       ));
     }
 
+    final body = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (widget.header != null) ...[
+          widget.header!,
+          const Divider(height: 1),
+        ],
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+          child: Text(
+            'Halte',
+            style: Theme.of(context)
+                .textTheme
+                .titleSmall
+                ?.copyWith(fontWeight: FontWeight.bold),
+          ),
+        ),
+        ...rows,
+      ],
+    );
+
+    if (widget.embedded) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: body,
+      );
+    }
     return Card(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-              child: Text(
-                'Halte',
-                style: Theme.of(context)
-                    .textTheme
-                    .titleSmall
-                    ?.copyWith(fontWeight: FontWeight.bold),
-              ),
-            ),
-            ...rows,
-          ],
-        ),
+        child: body,
       ),
     );
   }

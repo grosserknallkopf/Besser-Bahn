@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../../models/journey.dart' show OccupancyLevel;
 import '../../../models/trip.dart';
-import '../../../core/extensions.dart';
 import '../../../widgets/occupancy_indicator.dart';
 import 'train_map_view.dart';
 
@@ -13,21 +12,42 @@ class TrainInfoHeader extends StatelessWidget {
   /// screen, where there's no journey to swap a leg in.
   final Widget? action;
 
-  const TrainInfoHeader({super.key, required this.trip, this.action});
+  /// When true, render just the content (no Card / outer margin) so it can be
+  /// stacked inside a shared card together with the stop timeline — the train
+  /// name and the Halte then read as one block.
+  final bool embedded;
+
+  const TrainInfoHeader({
+    super.key,
+    required this.trip,
+    this.action,
+    this.embedded = false,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final origin = trip.stopovers.firstOrNull;
-    final destination = trip.stopovers.lastOrNull;
-
+    final content = _content(context);
+    if (embedded) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+        child: content,
+      );
+    }
     return Card(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+        child: content,
+      ),
+    );
+  }
+
+  Widget _content(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
             // Train name and direction
             Row(
               children: [
@@ -70,64 +90,16 @@ class TrainInfoHeader extends StatelessWidget {
               ),
             ],
 
-            const Divider(height: 24),
+            // Endpoints/times are NOT repeated here — the Halte timeline below
+            // (same card) already shows origin, destination and their times.
 
-            // Origin -> Destination with times
-            Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(origin?.stop.name ?? '',
-                          style: theme.textTheme.bodyMedium
-                              ?.copyWith(fontWeight: FontWeight.w600)),
-                      if (origin?.plannedDeparture != null)
-                        _timeRow(
-                          context,
-                          origin!.plannedDeparture!.hhmm,
-                          origin.departureDelay,
-                        ),
-                    ],
-                  ),
-                ),
-                Icon(Icons.arrow_forward,
-                    color: theme.colorScheme.onSurfaceVariant),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(destination?.stop.name ?? '',
-                          style: theme.textTheme.bodyMedium
-                              ?.copyWith(fontWeight: FontWeight.w600),
-                          textAlign: TextAlign.end),
-                      if (destination?.plannedArrival != null)
-                        _timeRow(
-                          context,
-                          destination!.plannedArrival!.hhmm,
-                          destination.arrivalDelay,
-                          alignEnd: true,
-                        ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 8),
-
-            // Info chips
-            Wrap(
-              spacing: 6,
-              runSpacing: 4,
-              children: [
-                _infoChip(Icons.stop_circle_outlined,
-                    '${trip.stopovers.length} Halte'),
-                if (trip.currentStop != null)
-                  _infoChip(Icons.location_on,
-                      'Nächst: ${trip.currentStop!.stop.name}'),
-              ],
-            ),
+            // Live "next stop" — the one piece of run-level info the timeline
+            // doesn't surface at a glance.
+            if (trip.currentStop != null) ...[
+              const SizedBox(height: 8),
+              _infoChip(Icons.location_on,
+                  'Nächst: ${trip.currentStop!.stop.name}'),
+            ],
 
             // Expected 2nd-class occupancy for the run.
             if (trip.occupancy != OccupancyLevel.unknown) ...[
@@ -145,9 +117,7 @@ class TrainInfoHeader extends StatelessWidget {
                 ],
               ),
             ],
-          ],
-        ),
-      ),
+      ],
     );
   }
 
@@ -178,26 +148,6 @@ class TrainInfoHeader extends StatelessWidget {
           fontWeight: FontWeight.bold,
         ),
       ),
-    );
-  }
-
-  Widget _timeRow(BuildContext context, String time, int? delaySeconds,
-      {bool alignEnd = false}) {
-    final minutes = delaySeconds != null ? delaySeconds ~/ 60 : 0;
-    return Row(
-      mainAxisAlignment:
-          alignEnd ? MainAxisAlignment.end : MainAxisAlignment.start,
-      children: [
-        Text(time, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500)),
-        if (minutes > 0) ...[
-          const SizedBox(width: 4),
-          Text('+$minutes',
-              style: TextStyle(
-                  color: minutes <= 5 ? Colors.orange : Colors.red,
-                  fontSize: 14,
-                  fontWeight: FontWeight.bold)),
-        ],
-      ],
     );
   }
 
