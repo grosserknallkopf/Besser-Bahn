@@ -1,0 +1,148 @@
+{
+  "_source": "DB Navigator de.hafas.android.db 26.8.0 assets/stammdaten/stammdaten_v6.json (+ live-probed SBA matrix & alter field)",
+  "reisendenTypen": [
+    {
+      "key": "ERWACHSENER",
+      "label_de": "Person (27-64 Jahre)",
+      "altersabhaengig": true,
+      "standardAlter": 45,
+      "istRabattierbar": true,
+      "istFahrrad": false
+    },
+    {
+      "key": "SENIOR",
+      "label_de": "Person (ab 65 Jahre)",
+      "altersabhaengig": true,
+      "standardAlter": 65,
+      "istRabattierbar": true,
+      "istFahrrad": false
+    },
+    {
+      "key": "JUGENDLICHER",
+      "label_de": "Person (15-26 Jahre)",
+      "altersabhaengig": true,
+      "standardAlter": 20,
+      "istRabattierbar": true,
+      "istFahrrad": false
+    },
+    {
+      "key": "FAMILIENKIND",
+      "label_de": "Kind (6-14 Jahre)",
+      "altersabhaengig": true,
+      "standardAlter": 7,
+      "istRabattierbar": true,
+      "istFahrrad": false
+    },
+    {
+      "key": "KLEINKIND",
+      "label_de": "Kind (0-5 Jahre)",
+      "altersabhaengig": true,
+      "standardAlter": 3,
+      "istRabattierbar": false,
+      "istFahrrad": false
+    },
+    {
+      "key": "FAHRRAD",
+      "label_de": "Fahrrad",
+      "altersabhaengig": false,
+      "standardAlter": null,
+      "istRabattierbar": false,
+      "istFahrrad": true
+    },
+    {
+      "key": "HUND",
+      "label_de": "Hund",
+      "altersabhaengig": false,
+      "standardAlter": null,
+      "istRabattierbar": false,
+      "istFahrrad": false
+    }
+  ],
+  "ermaessigungen": [
+    {
+      "key": "KEINE_ERMAESSIGUNG KLASSENLOS",
+      "label_de": "keine Ermäßigung"
+    },
+    {
+      "key": "BAHNCARD25 KLASSE_2",
+      "label_de": "BahnCard 25, 2.Klasse"
+    },
+    {
+      "key": "BAHNCARD25 KLASSE_1",
+      "label_de": "BahnCard 25, 1.Klasse"
+    },
+    {
+      "key": "BAHNCARD50 KLASSE_2",
+      "label_de": "BahnCard 50, 2.Klasse"
+    },
+    {
+      "key": "BAHNCARD50 KLASSE_1",
+      "label_de": "BahnCard 50, 1.Klasse"
+    },
+    {
+      "key": "BAHNCARD100 KLASSE_2",
+      "label_de": "BahnCard 100, 2.Klasse"
+    },
+    {
+      "key": "BAHNCARD100 KLASSE_1",
+      "label_de": "BahnCard 100, 1.Klasse"
+    },
+    {
+      "key": "BAHNCARDBUSINESS25 KLASSE_2",
+      "label_de": "BahnCard Business 25, 2.Klasse"
+    },
+    {
+      "key": "BAHNCARDBUSINESS25 KLASSE_1",
+      "label_de": "BahnCard Business 25, 1.Klasse"
+    },
+    {
+      "key": "BAHNCARDBUSINESS50 KLASSE_2",
+      "label_de": "BahnCard Business 50, 2.Klasse"
+    },
+    {
+      "key": "BAHNCARDBUSINESS50 KLASSE_1",
+      "label_de": "BahnCard Business 50, 1.Klasse"
+    },
+    {
+      "key": "CH-GENERAL-ABONNEMENT KLASSE_2",
+      "label_de": "CH-General-Abonnement, 2.Klasse"
+    },
+    {
+      "key": "CH-GENERAL-ABONNEMENT KLASSE_1",
+      "label_de": "CH-General-Abonnement, 1.Klasse"
+    },
+    {
+      "key": "CH-HALBTAXABO_OHNE_RAILPLUS KLASSENLOS",
+      "label_de": "HalbtaxAbo"
+    },
+    {
+      "key": "A-VORTEILSCARD KLASSENLOS",
+      "label_de": "Vorteilscard Österreich"
+    },
+    {
+      "key": "NL-40_OHNE_RAILPLUS KLASSENLOS",
+      "label_de": "NL-40%"
+    },
+    {
+      "key": "KLIMATICKET_OE KLASSE_2",
+      "label_de": "KlimaTicket Österreich, 2.Klasse"
+    },
+    {
+      "key": "SBA_BEGLEITPERSON_KEIN_ROLLSTUHL KLASSENLOS",
+      "label_de": "SBA, B ohne Rollstuhlplatz"
+    }
+  ],
+  "sba_ermaessigungen_probed_200": [
+    "SBA_BEGLEITPERSON_KEIN_ROLLSTUHL KLASSENLOS",
+    "SBA_BEGLEITPERSON_MIT_ROLLSTUHL KLASSENLOS",
+    "SBA_BEEINTRAECHTIGUNGEN_KEIN_ROLLSTUHL KLASSENLOS",
+    "SBA_BEEINTRAECHTIGUNGEN_MIT_ROLLSTUHL KLASSENLOS"
+  ],
+  "notes": {
+    "reisende_entry": "{reisendenTyp, ermaessigungen:[<key>...], alter?:<int scalar>}",
+    "alter": "scalar int per traveler; array form -> HTTP 400 VALIDIERUNG. Only for altersabhaengig types.",
+    "ermaessigungen": "list; may combine e.g. one BahnCard + one SBA + one country card. KEINE_ERMAESSIGUNG KLASSENLOS = none.",
+    "fahrrad_hund": "FAHRRAD/HUND are reisendenTyp entries with ermaessigungen:[] and no alter.",
+    "klasse": "top-level KLASSE_1 / KLASSE_2 (whole party)."
+  }
+}

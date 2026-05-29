@@ -145,15 +145,15 @@ class JourneySearchNotifier extends Notifier<JourneySearchState> {
       // (chronically down) were removed — they never succeeded and only added a
       // multi-second hang before the real error surfaced.
       final vendo = ref.read(vendoServiceProvider);
-      final settings = ref.read(settingsProvider);
+      final party = ref.read(settingsProvider).searchParty;
       final result = await vendo.searchJourneys(
         fromLocationId: from.vendoLocationId,
         toLocationId: to.vendoLocationId,
         dateTime: state.dateTime ?? DateTime.now(),
         isArrival: state.useArrival,
-        firstClass: settings.bahnCard.isFirstClass,
-        ermaessigung: settings.bahnCard.vendoErmaessigung,
-        deutschlandTicket: settings.hasDeutschlandTicket,
+        firstClass: party.firstClass,
+        reisende: party.toReisendeJson(),
+        deutschlandTicket: party.deutschlandTicket,
       );
       AppLog.log('vendo result: ${result.journeys.length} journeys',
           tag: 'journey');
@@ -179,16 +179,16 @@ class JourneySearchNotifier extends Notifier<JourneySearchState> {
     state = state.copyWith(isLoading: true, error: null);
     try {
       final vendo = ref.read(vendoServiceProvider);
-      final settings = ref.read(settingsProvider);
+      final party = ref.read(settingsProvider).searchParty;
       final more = await vendo.searchJourneys(
         fromLocationId: state.from!.vendoLocationId,
         toLocationId: state.to!.vendoLocationId,
         dateTime: state.dateTime ?? DateTime.now(),
         isArrival: state.useArrival,
         context: token,
-        firstClass: settings.bahnCard.isFirstClass,
-        ermaessigung: settings.bahnCard.vendoErmaessigung,
-        deutschlandTicket: settings.hasDeutschlandTicket,
+        firstClass: party.firstClass,
+        reisende: party.toReisendeJson(),
+        deutschlandTicket: party.deutschlandTicket,
       );
 
       // Dedupe against what we already show (paged windows can overlap).

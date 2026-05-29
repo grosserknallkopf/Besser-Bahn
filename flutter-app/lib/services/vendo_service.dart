@@ -44,12 +44,21 @@ class VendoService {
     bool isArrival = false,
     bool firstClass = false,
     String? context,
-    // The traveller's reduction in DB's "<ART> <KLASSE>" form (e.g.
-    // "BAHNCARD25 KLASSE_2"); defaults to none. Whether a Deutschland-Ticket is
-    // held. Both come from Einstellungen so prices match what the user pays.
-    String ermaessigung = 'KEINE_ERMAESSIGUNG KLASSENLOS',
+    // The travellers in DB's `reisendenProfil.reisende` shape — each
+    // `{reisendenTyp, ermaessigungen:[...], alter?}`. Built from the
+    // SearchParty (passengers, ages, bike/dog, BahnCards, SBA) so prices match
+    // exactly what the user pays. Defaults to a single adult, no discount.
+    List<Map<String, dynamic>>? reisende,
     bool deutschlandTicket = false,
   }) async {
+    final reisendeJson = (reisende == null || reisende.isEmpty)
+        ? [
+            {
+              'ermaessigungen': ['KEINE_ERMAESSIGUNG KLASSENLOS'],
+              'reisendenTyp': 'ERWACHSENER',
+            }
+          ]
+        : reisende;
     final body = {
       'autonomeReservierung': false,
       'einstiegsTypList': ['STANDARD'],
@@ -75,12 +84,7 @@ class VendoService {
         },
       },
       'reisendenProfil': {
-        'reisende': [
-          {
-            'ermaessigungen': [ermaessigung],
-            'reisendenTyp': 'ERWACHSENER',
-          }
-        ],
+        'reisende': reisendeJson,
       },
       'reservierungsKontingenteVorhanden': false,
     };
@@ -108,7 +112,13 @@ class VendoService {
       final snippet = _snippet(res.bodyBytes);
       AppLog.log('fahrplan non-200 body: $snippet', tag: 'vendo');
       AppLog.log('fahrplan resp headers: ${res.headers}', tag: 'vendo');
-      throw VendoException('Vendo fahrplan HTTP ${res.statusCode}: $snippet');
+      // Business-rule rejections (e.g. a wheelchair-place SBA in 1st class,
+      // MDA-ERSTE-KLASSE-ROLLSTUHL) carry a ready-to-show German `anzeigeText`
+      // — prefer that over the raw JSON so the party sheet gets actionable
+      // feedback ("Bitte wählen Sie die 2. Klasse.").
+      final friendly = _dbAnzeigeText(res.bodyBytes);
+      throw VendoException(friendly ??
+          'Vendo fahrplan HTTP ${res.statusCode}: $snippet');
     }
     final data = json.decode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
     final conns = data['verbindungen'] as List<dynamic>? ?? [];
@@ -302,7 +312,12 @@ class VendoService {
         toLocationId: _loc(to),
         dateTime: dateTime,
         firstClass: firstClass,
-        ermaessigung: ermaessigung,
+        reisende: [
+          {
+            'reisendenTyp': 'ERWACHSENER',
+            'ermaessigungen': [ermaessigung],
+          }
+        ],
         deutschlandTicket: deutschlandTicket,
       );
       if (result.journeys.isEmpty) {
@@ -344,6 +359,23 @@ class VendoService {
   String _loc(String id) => id.contains('@') ? id : 'A=1@L=$id@';
 
   /// First ~300 chars of a response body, for error logging.
+  /// DB error bodies look like
+  /// `{"code":"FACHLICH","details":{"anzeigeText":"…"},"status":"ERROR"}`.
+  /// Pull out the user-facing `anzeigeText` if present.
+  String? _dbAnzeigeText(List<int> bytes) {
+    try {
+      final j = json.decode(utf8.decode(bytes));
+      if (j is Map<String, dynamic>) {
+        final details = j['details'];
+        if (details is Map<String, dynamic>) {
+          final text = details['anzeigeText'];
+          if (text is String && text.trim().isNotEmpty) return text.trim();
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
   String _snippet(List<int> bytes) {
     try {
       final s = utf8.decode(bytes).replaceAll(RegExp(r'\s+'), ' ').trim();

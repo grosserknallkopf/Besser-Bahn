@@ -298,6 +298,70 @@ def check_vendo_journey() -> str:
     return f"{len(conns)} journeys, first has {len(legs)} legs{price_txt}"
 
 
+def check_vendo_journey_party() -> str:
+    """Advanced "Reisende & Klasse" search: the app lets you build a party of
+    multiple passengers (with explicit ages), a bike and a dog, pick 1st class,
+    and attach BahnCards / a Schwerbehindertenausweis. Every key here comes from
+    the DB Navigator master data (api-tests/db_stammdaten_enums.json). Exercise a
+    representative payload — if DB renames a reisendenTyp/ermaessigung enum this
+    400s before users hit it.
+
+    Notes proven against the live endpoint: FAHRRAD/HUND are reisendenTyp
+    entries with empty ermaessigungen; `alter` is a scalar int per traveller (an
+    array → HTTP 400); BahnCard + SBA may be combined in one traveller's list.
+    """
+    media = "application/x.db.vendo.mob.verbindungssuche.v9+json"
+    body = {
+        "autonomeReservierung": False,
+        "einstiegsTypList": ["STANDARD"],
+        "fahrverguenstigungen": {
+            "deutschlandTicketVorhanden": False,
+            "nurDeutschlandTicketVerbindungen": False,
+        },
+        # 2nd class: a wheelchair-place SBA (…_MIT_ROLLSTUHL) is not bookable in
+        # 1st class — DB rejects that combo with MDA-ERSTE-KLASSE-ROLLSTUHL.
+        "klasse": "KLASSE_2",
+        "reiseHin": {"wunsch": {
+            "abgangsLocationId": KIEL_LOC,
+            "alternativeHalteBerechnung": True,
+            "verkehrsmittel": ["ALL"],
+            "zeitWunsch": {
+                "reiseDatum": datetime.now().astimezone().isoformat(),
+                "zeitPunktArt": "ABFAHRT",
+            },
+            "zielLocationId": BERLIN_LOC,
+        }},
+        "reisendenProfil": {"reisende": [
+            {  # adult with BahnCard 25 + Schwerbehindertenausweis (combined)
+                "reisendenTyp": "ERWACHSENER",
+                "ermaessigungen": [
+                    "BAHNCARD25 KLASSE_2",
+                    "SBA_BEEINTRAECHTIGUNGEN_MIT_ROLLSTUHL KLASSENLOS",
+                ],
+                "alter": 40,
+            },
+            {  # child with an explicit age
+                "reisendenTyp": "FAMILIENKIND",
+                "ermaessigungen": ["KEINE_ERMAESSIGUNG KLASSENLOS"],
+                "alter": 10,
+            },
+            {"reisendenTyp": "FAHRRAD", "ermaessigungen": []},
+            {"reisendenTyp": "HUND", "ermaessigungen": []},
+        ]},
+        "reservierungsKontingenteVorhanden": False,
+    }
+    r = requests.post(
+        "https://app.services-bahn.de/mob/angebote/fahrplan",
+        headers=_vendo_headers(media), data=json.dumps(body), timeout=TIMEOUT,
+    )
+    r.raise_for_status()
+    conns = r.json().get("verbindungen", [])
+    if not conns:
+        raise CheckError("party search returned no verbindungen")
+    return (f"party (2 pers, bike, dog, BC25+SBA) ok — "
+            f"{len(conns)} journeys")
+
+
 def check_vendo_share() -> str:
     """
     "Reise teilen": POST a connection's full HAFAS recon ctx (verbindung.kontext,
@@ -869,6 +933,7 @@ CHECKS = [
     ("bahn.de train attributes (zugattribute)", check_bahn_train_attributes, True),
     ("vendo location search", check_vendo_location, False),
     ("vendo journey + prices (v9)", check_vendo_journey, False),
+    ("vendo party search (pax/bike/dog/SBA)", check_vendo_journey_party, False),
     ("vendo journey pagination (context)", check_vendo_journey_pagination, False),
     ("vendo weitere abfahrten (segment)", check_vendo_weitere_abfahrten, False),
     ("vendo share journey (teilen vbid)", check_vendo_share, False),

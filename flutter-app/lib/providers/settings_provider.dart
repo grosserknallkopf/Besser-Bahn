@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../models/reisende.dart';
 import '../models/split_ticket.dart';
 
 class AppSettings {
@@ -7,6 +8,12 @@ class AppSettings {
   final bool hasDeutschlandTicket;
   final int age;
   final int apiDelayMs;
+
+  /// The "Reisende & Klasse" selection driving the connection search
+  /// (passengers, ages, bike/dog, class, BahnCards, Schwerbehindertenausweis).
+  /// Seeded from [bahnCard]/[hasDeutschlandTicket] on first run, then edited
+  /// per trip from the search form and persisted.
+  final SearchParty searchParty;
 
   /// When true, the in-train Träwelling check-in button checks in immediately
   /// (origin → destination, [trwlVisibility]) without the confirm sheet.
@@ -24,6 +31,7 @@ class AppSettings {
     this.apiDelayMs = 400,
     this.trwlAutoCheckin = false,
     this.trwlVisibility = 3,
+    this.searchParty = const SearchParty(),
   });
 
   AppSettings copyWith({
@@ -33,6 +41,7 @@ class AppSettings {
     int? apiDelayMs,
     bool? trwlAutoCheckin,
     int? trwlVisibility,
+    SearchParty? searchParty,
   }) {
     return AppSettings(
       bahnCard: bahnCard ?? this.bahnCard,
@@ -41,6 +50,7 @@ class AppSettings {
       apiDelayMs: apiDelayMs ?? this.apiDelayMs,
       trwlAutoCheckin: trwlAutoCheckin ?? this.trwlAutoCheckin,
       trwlVisibility: trwlVisibility ?? this.trwlVisibility,
+      searchParty: searchParty ?? this.searchParty,
     );
   }
 }
@@ -54,13 +64,19 @@ class SettingsNotifier extends Notifier<AppSettings> {
 
   Future<void> _load() async {
     final prefs = await SharedPreferences.getInstance();
+    final bahnCard = BahnCardType.values[prefs.getInt('bahnCard') ?? 0];
+    final dTicket = prefs.getBool('deutschlandTicket') ?? false;
     state = AppSettings(
-      bahnCard: BahnCardType.values[prefs.getInt('bahnCard') ?? 0],
-      hasDeutschlandTicket: prefs.getBool('deutschlandTicket') ?? false,
+      bahnCard: bahnCard,
+      hasDeutschlandTicket: dTicket,
       age: prefs.getInt('age') ?? 30,
       apiDelayMs: prefs.getInt('apiDelayMs') ?? 400,
       trwlAutoCheckin: prefs.getBool('trwlAutoCheckin') ?? false,
       trwlVisibility: prefs.getInt('trwlVisibility') ?? 3,
+      // First run (no stored party): seed from the single-card settings so the
+      // search behaves exactly as before until the user customises the party.
+      searchParty: SearchParty.tryDecode(prefs.getString('searchParty')) ??
+          SearchParty.fromSettings(bahnCard, dTicket),
     );
   }
 
@@ -72,15 +88,30 @@ class SettingsNotifier extends Notifier<AppSettings> {
     await prefs.setInt('apiDelayMs', state.apiDelayMs);
     await prefs.setBool('trwlAutoCheckin', state.trwlAutoCheckin);
     await prefs.setInt('trwlVisibility', state.trwlVisibility);
+    await prefs.setString('searchParty', state.searchParty.encode());
   }
 
   void setBahnCard(BahnCardType card) {
-    state = state.copyWith(bahnCard: card);
+    // Setting "my" card also re-seeds the search party to a single adult with
+    // that card — the simple settings path mirrors the old behaviour for users
+    // who never open the advanced "Reisende" sheet.
+    state = state.copyWith(
+      bahnCard: card,
+      searchParty: SearchParty.fromSettings(card, state.hasDeutschlandTicket),
+    );
     _save();
   }
 
   void setDeutschlandTicket(bool value) {
-    state = state.copyWith(hasDeutschlandTicket: value);
+    state = state.copyWith(
+      hasDeutschlandTicket: value,
+      searchParty: state.searchParty.copyWith(deutschlandTicket: value),
+    );
+    _save();
+  }
+
+  void setSearchParty(SearchParty party) {
+    state = state.copyWith(searchParty: party);
     _save();
   }
 

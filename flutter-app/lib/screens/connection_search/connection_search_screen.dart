@@ -5,9 +5,11 @@ import 'package:intl/intl.dart';
 import '../../models/library_models.dart';
 import '../../providers/journey_search_provider.dart';
 import '../../providers/library_provider.dart';
+import '../../providers/settings_provider.dart';
 import '../../widgets/station_search_field.dart';
 import '../../widgets/app_menu_button.dart';
 import 'widgets/journey_card.dart';
+import 'widgets/reisende_sheet.dart';
 
 class ConnectionSearchScreen extends ConsumerStatefulWidget {
   const ConnectionSearchScreen({super.key});
@@ -35,6 +37,15 @@ class _ConnectionSearchScreenState
       fromText: _fromController.text,
       toText: _toController.text,
     );
+  }
+
+  Future<void> _editParty() async {
+    final party = ref.read(settingsProvider).searchParty;
+    final updated = await showReisendeSheet(context, party);
+    if (updated == null || !mounted) return;
+    ref.read(settingsProvider.notifier).setSearchParty(updated);
+    // Re-run the search so prices reflect the new party immediately.
+    if (ref.read(journeySearchProvider).result != null) _search();
   }
 
   void _applyRoute(SavedRoute route) {
@@ -152,6 +163,37 @@ class _ConnectionSearchScreenState
                         },
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 6),
+                  // Reisende & Klasse — opens the party sheet (passengers,
+                  // ages, bike/dog, class, BahnCards, Schwerbehindertenausweis).
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                        alignment: Alignment.centerLeft,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                      icon: const Icon(Icons.people_outline, size: 20),
+                      label: Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              ref
+                                  .watch(settingsProvider
+                                      .select((s) => s.searchParty))
+                                  .summary,
+                              style: theme.textTheme.bodyMedium,
+                            ),
+                          ),
+                          const Icon(Icons.expand_more, size: 18),
+                        ],
+                      ),
+                      onPressed: _editParty,
+                    ),
                   ),
                   const SizedBox(height: 6),
                   // IntrinsicHeight + stretch: time field, Ab/An toggle and
