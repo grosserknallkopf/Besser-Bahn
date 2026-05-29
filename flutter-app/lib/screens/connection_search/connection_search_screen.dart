@@ -151,62 +151,72 @@ class _ConnectionSearchScreenState
                     ],
                   ),
                   const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: InkWell(
-                          onTap: () => _pickDateTime(context, ref),
-                          borderRadius: BorderRadius.circular(12),
-                          child: InputDecorator(
-                            decoration: const InputDecoration(
-                              isDense: true,
-                              prefixIcon: Icon(Icons.access_time, size: 18),
-                              prefixIconConstraints:
-                                  BoxConstraints(minWidth: 34, minHeight: 34),
-                              contentPadding: EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 8),
-                            ),
-                            child: Text(
-                              state.dateTime != null
-                                  ? DateFormat('dd.MM. HH:mm')
-                                      .format(state.dateTime!)
-                                  : 'Jetzt',
-                              style: theme.textTheme.bodyMedium,
+                  // IntrinsicHeight + stretch: time field, Ab/An toggle and
+                  // search button all render at one shared height (the buttons'
+                  // tap-target height) instead of each picking its own — mobile
+                  // showed them mismatched before.
+                  IntrinsicHeight(
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Expanded(
+                          child: InkWell(
+                            onTap: () => _pickDateTime(context, ref),
+                            borderRadius: BorderRadius.circular(12),
+                            child: InputDecorator(
+                              decoration: const InputDecoration(
+                                isDense: true,
+                                prefixIcon: Icon(Icons.access_time, size: 18),
+                                prefixIconConstraints: BoxConstraints(
+                                    minWidth: 34, minHeight: 34),
+                                contentPadding: EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 8),
+                              ),
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  state.dateTime != null
+                                      ? DateFormat('dd.MM. HH:mm')
+                                          .format(state.dateTime!)
+                                      : 'Jetzt',
+                                  style: theme.textTheme.bodyMedium,
+                                ),
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                      const SizedBox(width: 6),
-                      SegmentedButton<bool>(
-                        style: SegmentedButton.styleFrom(
-                          visualDensity: VisualDensity.compact,
-                          padding: const EdgeInsets.symmetric(horizontal: 10),
+                        const SizedBox(width: 6),
+                        SegmentedButton<bool>(
+                          style: SegmentedButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                          ),
+                          segments: const [
+                            ButtonSegment(value: false, label: Text('Ab')),
+                            ButtonSegment(value: true, label: Text('An')),
+                          ],
+                          selected: {state.isArrival},
+                          onSelectionChanged: (v) =>
+                              notifier.setIsArrival(v.first),
                         ),
-                        segments: const [
-                          ButtonSegment(value: false, label: Text('Ab')),
-                          ButtonSegment(value: true, label: Text('An')),
-                        ],
-                        selected: {state.isArrival},
-                        onSelectionChanged: (v) =>
-                            notifier.setIsArrival(v.first),
-                      ),
-                      const SizedBox(width: 6),
-                      FilledButton(
-                        style: FilledButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                          minimumSize: const Size(0, 40),
+                        const SizedBox(width: 6),
+                        FilledButton(
+                          style: FilledButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            minimumSize: const Size(0, 0),
+                          ),
+                          onPressed: state.isLoading ? null : _search,
+                          child: state.isLoading
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2, color: Colors.white),
+                                )
+                              : const Icon(Icons.search),
                         ),
-                        onPressed: state.isLoading ? null : _search,
-                        child: state.isLoading
-                            ? const SizedBox(
-                                width: 18,
-                                height: 18,
-                                child: CircularProgressIndicator(
-                                    strokeWidth: 2, color: Colors.white),
-                              )
-                            : const Icon(Icons.search),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ],
               ),

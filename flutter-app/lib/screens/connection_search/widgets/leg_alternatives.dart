@@ -39,19 +39,14 @@ class WeitereAbfahrtenButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return TextButton.icon(
+    // Icon-only: the label text overflowed on mobile next to the train name and
+    // map button. Pairs visually with the adjacent map IconButton.
+    return IconButton(
       onPressed: onTap,
-      icon: const Icon(Icons.swap_horiz, size: 18),
-      label: const Text('Weitere Abfahrten'),
-      style: TextButton.styleFrom(
-        foregroundColor: theme.colorScheme.primary,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        minimumSize: Size.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        textStyle: theme.textTheme.labelLarge?.copyWith(
-          fontWeight: FontWeight.w600,
-        ),
-      ),
+      icon: const Icon(Icons.swap_horiz),
+      tooltip: 'Weitere Abfahrten',
+      visualDensity: VisualDensity.compact,
+      color: theme.colorScheme.primary,
     );
   }
 }
