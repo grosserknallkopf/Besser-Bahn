@@ -256,7 +256,7 @@ class ConnectionDetailScreen extends ConsumerWidget {
     final theme = Theme.of(context);
     final t = journey.transfers;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -395,7 +395,7 @@ class ConnectionDetailScreen extends ConsumerWidget {
   }) {
     final theme = Theme.of(context);
     return Container(
-      margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(8),

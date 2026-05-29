@@ -159,12 +159,12 @@ class _StopTimelineState extends State<StopTimeline> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
               child: Text(
                 'Halte',
                 style: Theme.of(context)
                     .textTheme
-                    .titleMedium
+                    .titleSmall
                     ?.copyWith(fontWeight: FontWeight.bold),
               ),
             ),

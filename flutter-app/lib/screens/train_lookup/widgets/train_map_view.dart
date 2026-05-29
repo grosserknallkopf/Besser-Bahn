@@ -75,11 +75,24 @@ class _TrainMapViewState extends ConsumerState<TrainMapView> {
     return Card(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       clipBehavior: Clip.antiAlias,
-      child: SizedBox(
-        height: 240,
-        // Only mount the actual map (and fetch its tiles + geometry) once it
-        // scrolls into view — off-screen legs stay a cheap placeholder.
-        child: LazyMount(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+            child: Text(
+              'Streckenverlauf',
+              style: Theme.of(context)
+                  .textTheme
+                  .titleSmall
+                  ?.copyWith(fontWeight: FontWeight.bold),
+            ),
+          ),
+          SizedBox(
+            height: 240,
+            // Only mount the actual map (and fetch its tiles + geometry) once
+            // it scrolls into view — off-screen legs stay a cheap placeholder.
+            child: LazyMount(
           placeholder: _placeholder(context),
           builder: (context) {
             _ensurePolyline();
@@ -113,7 +126,9 @@ class _TrainMapViewState extends ConsumerState<TrainMapView> {
               ),
             );
           },
-        ),
+            ),
+          ),
+        ],
       ),
     );
   }
