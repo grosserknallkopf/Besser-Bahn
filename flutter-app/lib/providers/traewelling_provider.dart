@@ -113,6 +113,12 @@ final trwlDashboardProvider =
   return ref.watch(traewellingServiceProvider).dashboard();
 });
 
+/// Global feed — recent check-ins from everyone (Feed tab "Global").
+final trwlGlobalFeedProvider =
+    FutureProvider.autoDispose<List<TrwlStatus>>((ref) async {
+  return ref.watch(traewellingServiceProvider).globalDashboard();
+});
+
 final trwlFollowersProvider =
     FutureProvider.autoDispose<List<TrwlUser>>((ref) async {
   return ref.watch(traewellingServiceProvider).followers();

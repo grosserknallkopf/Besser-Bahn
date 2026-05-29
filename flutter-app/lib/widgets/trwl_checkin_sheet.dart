@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../models/journey.dart';
 import '../models/traewelling_models.dart';
 import '../models/trip.dart';
 import '../providers/service_providers.dart';
@@ -77,6 +78,59 @@ Future<void> startTrwlCheckin(
       alightingName: alightingName,
     ),
   );
+}
+
+/// When 'Automatisch einchecken' is on, saving a connection also checks each of
+/// its train legs into Träwelling (at the configured visibility). No-op when the
+/// setting is off or the user isn't connected — saving still works either way.
+/// Reports one summary SnackBar so the user sees the trip reached Träwelling.
+Future<void> autoCheckinSavedJourney(
+    BuildContext context, WidgetRef ref, Journey journey) async {
+  final settings = ref.read(settingsProvider);
+  if (!settings.trwlAutoCheckin) return;
+  if (!ref.read(traewellingAuthProvider).isLoggedIn) return;
+
+  final legs =
+      journey.legs.where((l) => !l.isWalking && l.line != null).toList();
+  if (legs.isEmpty) return;
+
+  final messenger = ScaffoldMessenger.of(context);
+  final service = ref.read(traewellingServiceProvider);
+  messenger.showSnackBar(const SnackBar(
+      duration: Duration(seconds: 2),
+      content: Text('Checke auf Träwelling ein…')));
+
+  var ok = 0;
+  String? lastErr;
+  for (final l in legs) {
+    final dep = l.plannedDeparture ?? l.departure;
+    if (dep == null) continue;
+    try {
+      await service.checkinFromTrip(
+        lineName: l.line!.displayName,
+        boardingName: l.origin.name,
+        boardingDeparture: dep,
+        alightingName: l.destination.name,
+        visibility: settings.trwlVisibility,
+      );
+      ok++;
+    } on CheckinCollisionException {
+      ok++; // already checked in for this leg → still counts as present
+    } on TraewellingException catch (e) {
+      lastErr = e.message;
+    } catch (e) {
+      lastErr = '$e';
+    }
+  }
+  ref.invalidate(trwlDashboardProvider);
+  await ref.read(traewellingAuthProvider.notifier).refreshUser();
+  if (!context.mounted) return;
+  messenger.showSnackBar(SnackBar(
+    content: Text(ok > 0
+        ? 'Auf Träwelling eingecheckt ($ok/${legs.length} Fahrten).'
+        : 'Träwelling-Einchecken fehlgeschlagen'
+            '${lastErr != null ? ': $lastErr' : ''}.'),
+  ));
 }
 
 /// Runs the actual check-in and reports the outcome via SnackBars. Handles the

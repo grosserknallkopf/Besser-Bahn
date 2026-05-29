@@ -323,6 +323,13 @@ class TraewellingService {
     return _statusList(_data(res));
   }
 
+  /// The public/global feed — recent check-ins from everyone, so the Feed tab
+  /// isn't empty when you follow no one yet.
+  Future<List<TrwlStatus>> globalDashboard({int page = 1}) async {
+    final res = await _send('GET', '/dashboard/global', query: {'page': '$page'});
+    return _statusList(_data(res));
+  }
+
   Future<void> like(int statusId) async =>
       _data(await _send('POST', '/status/$statusId/like'));
 

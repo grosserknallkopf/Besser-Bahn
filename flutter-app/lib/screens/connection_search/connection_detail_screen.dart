@@ -148,14 +148,20 @@ class _ConnectionDetailScreenState
               icon: Icon(saved ? Icons.bookmark : Icons.bookmark_border),
               tooltip: saved ? 'Reise entfernen' : 'Reise speichern',
               onPressed: () {
+                final wasSaved = saved;
                 ref.read(libraryProvider.notifier).toggleJourney(journey);
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     duration: const Duration(seconds: 2),
                     content:
-                        Text(saved ? 'Reise entfernt' : 'Reise gespeichert'),
+                        Text(wasSaved ? 'Reise entfernt' : 'Reise gespeichert'),
                   ),
                 );
+                // Saving + 'Automatisch einchecken' on → also push the trip's
+                // train legs to Träwelling. No-op when off / not connected.
+                if (!wasSaved) {
+                  autoCheckinSavedJourney(context, ref, journey);
+                }
               },
             );
           }),
