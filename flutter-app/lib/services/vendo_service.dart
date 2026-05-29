@@ -417,6 +417,26 @@ class VendoService {
         .map(_parseStopover)
         .toList();
 
+    // Disruption notes: HIM messages (construction, broken lifts, …) and
+    // realtime notes ("Reparatur an der Strecke"), from the leg and its stops.
+    // attributNotizen (amenities/reservation hints) are intentionally excluded.
+    final disruptions = <String>[];
+    void collect(dynamic list) {
+      if (list is! List) return;
+      for (final n in list.whereType<Map<String, dynamic>>()) {
+        final t = (n['text'] as String?)?.trim();
+        if (t != null && t.isNotEmpty && !disruptions.contains(t)) {
+          disruptions.add(t);
+        }
+      }
+    }
+
+    collect(a['himNotizen']);
+    collect(a['echtzeitNotizen']);
+    for (final h in halte.whereType<Map<String, dynamic>>()) {
+      collect(h['himNotizen']);
+    }
+
     String? depPlatform;
     String? arrPlatform;
     if (stopovers.isNotEmpty) {
@@ -451,6 +471,7 @@ class VendoService {
       isWalking: isWalking,
       stopovers: stopovers,
       occupancy: _occupancy(a['auslastungsInfos'] as List<dynamic>?),
+      disruptions: disruptions,
     );
   }
 

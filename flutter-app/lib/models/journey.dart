@@ -116,6 +116,12 @@ class JourneyLeg {
   final List<LegStopover> stopovers;
   final OccupancyInfo? occupancy;
 
+  /// Disruption notes for this leg — HIM messages (construction, broken
+  /// elevators, …) and realtime notes ("Reparatur an der Strecke"), collected
+  /// from the leg and its stops. Shown as a warning banner. Amenities and
+  /// reservation hints are deliberately NOT included here.
+  final List<String> disruptions;
+
   const JourneyLeg({
     this.tripId,
     required this.origin,
@@ -137,6 +143,7 @@ class JourneyLeg {
     this.cancelled = false,
     this.stopovers = const [],
     this.occupancy,
+    this.disruptions = const [],
   });
 
   bool get hasDeparturePlatformChange =>
@@ -211,6 +218,7 @@ class JourneyLeg {
         'cancelled': cancelled,
         'stopovers': stopovers.map((s) => s.toJson()).toList(),
         'occupancy': occupancy?.level.name,
+        'disruptions': disruptions,
       };
 
   factory JourneyLeg.fromJson(Map<String, dynamic> json) => JourneyLeg(
@@ -242,6 +250,9 @@ class JourneyLeg {
         occupancy: json['occupancy'] is String
             ? OccupancyInfo(level: _levelByName(json['occupancy'] as String))
             : null,
+        disruptions: (json['disruptions'] as List<dynamic>? ?? [])
+            .whereType<String>()
+            .toList(),
       );
 }
 

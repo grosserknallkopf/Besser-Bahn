@@ -285,6 +285,16 @@ def check_vendo_journey() -> str:
     price = (c.get("angebote", {}).get("preise", {})
              .get("gesamt", {}).get("ab", {}).get("betrag"))
     price_txt = f", ab {price} EUR" if price is not None else ", no price"
+    # Disruption-note containers the app reads (himNotizen / echtzeitNotizen,
+    # at leg and stop level) must still be lists when present — the leg
+    # disruption banner parses {text: ...} out of them.
+    for leg in legs:
+        for fld in ("himNotizen", "echtzeitNotizen"):
+            if fld in leg and not isinstance(leg[fld], list):
+                raise CheckError(f"leg {fld} is not a list")
+        for h in leg.get("halte", []):
+            if "himNotizen" in h and not isinstance(h["himNotizen"], list):
+                raise CheckError("halt himNotizen is not a list")
     return f"{len(conns)} journeys, first has {len(legs)} legs{price_txt}"
 
 

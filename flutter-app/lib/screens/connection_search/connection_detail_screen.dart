@@ -176,7 +176,9 @@ class _ConnectionDetailScreenState
               _walkLeg(context, ref, legs[i],
                   i > 0 ? legs[i - 1] : null,
                   i + 1 < legs.length ? legs[i + 1] : null)
-            else
+            else ...[
+              if (legs[i].disruptions.isNotEmpty)
+                _disruptionBanner(context, legs[i].disruptions),
               _LegSection(
                 key: ValueKey('leg-$i-${legs[i].tripId}-$_refreshTick'),
                 leg: legs[i],
@@ -189,6 +191,7 @@ class _ConnectionDetailScreenState
                 },
                 onReplaceLeg: _replaceLeg,
               ),
+            ],
           ],
         ],
         ),
@@ -469,6 +472,44 @@ class _ConnectionDetailScreenState
             ),
           ),
       ],
+    );
+  }
+
+  /// Warning banner above a leg listing its disruption notes (HIM messages,
+  /// realtime notes) — e.g. "Aufzug in Elmshorn außer Betrieb".
+  Widget _disruptionBanner(BuildContext context, List<String> notes) {
+    final theme = Theme.of(context);
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.errorContainer.withAlpha(110),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: theme.colorScheme.error.withAlpha(110)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final n in notes)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.warning_amber_rounded,
+                      size: 16, color: theme.colorScheme.error),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(n,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onErrorContainer,
+                            fontWeight: FontWeight.w500)),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 
