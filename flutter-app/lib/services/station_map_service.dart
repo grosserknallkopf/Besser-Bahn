@@ -67,9 +67,15 @@ class StationMapService {
       return hit;
     }
     final uri = Uri.parse('https://www.bahnhof.de/$slug/karte');
+    // Hard timeout: without it a stalled connection leaves the map spinner
+    // hanging forever (no response ever arrives). Surface it as a load error.
     final res = await AppLog.timed(
       'GET $uri',
-      () => _client.get(uri, headers: _headers),
+      () => _client.get(uri, headers: _headers).timeout(
+            const Duration(seconds: 12),
+            onTimeout: () => throw StationMapException(
+                'Zeitüberschreitung beim Laden der Karte für "$slug".'),
+          ),
       tag: 'map',
     );
     AppLog.log(
