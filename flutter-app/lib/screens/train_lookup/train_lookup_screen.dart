@@ -22,11 +22,18 @@ class TrainLookupScreen extends ConsumerStatefulWidget {
   ConsumerState<TrainLookupScreen> createState() => _TrainLookupScreenState();
 }
 
-class _TrainLookupScreenState extends ConsumerState<TrainLookupScreen> {
+class _TrainLookupScreenState extends ConsumerState<TrainLookupScreen>
+    with AutoRefreshMixin {
   final _controller = TextEditingController();
   final _focusNode = FocusNode();
   Station? _fromStation;
   bool _showStationField = false;
+
+  // Silently re-fetch the open train's live delays/platforms while the screen
+  // is visible; keeps the current trip if a fetch fails (offline).
+  @override
+  Future<void> onAutoRefresh() =>
+      ref.read(trainLookupProvider.notifier).refreshSilent();
 
   void _search() {
     final query = _controller.text.trim();
