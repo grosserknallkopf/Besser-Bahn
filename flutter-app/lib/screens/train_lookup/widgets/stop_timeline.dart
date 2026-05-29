@@ -3,6 +3,7 @@ import '../../../models/journey.dart' show OccupancyLevel;
 import '../../../models/trip.dart';
 import '../../../core/extensions.dart';
 import '../../../widgets/occupancy_indicator.dart';
+import '../../../widgets/platform_badge.dart' show TrackIcon;
 
 /// Stop list for a train. When [boardingId]/[alightingId] are given (i.e. the
 /// timeline is shown for one leg of a journey, not a standalone train lookup),
@@ -581,6 +582,14 @@ class _StopRow extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          TrackIcon(
+              size: 13,
+              color: changed
+                  ? Colors.red
+                  : (muted
+                      ? theme.colorScheme.onSurfaceVariant
+                      : color)),
+          const SizedBox(width: 3),
           if (changed && stopover.plannedPlatform != null) ...[
             Text(
               stopover.plannedPlatform!,
@@ -593,7 +602,7 @@ class _StopRow extends StatelessWidget {
             const SizedBox(width: 4),
           ],
           Text(
-            'Gl. $display',
+            display,
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w700,

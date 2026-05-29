@@ -225,8 +225,8 @@ class JourneyCard extends ConsumerWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.layers, size: 12, color: color),
-          const SizedBox(width: 2),
+          TrackIcon(size: 13, color: color),
+          const SizedBox(width: 3),
           if (changed && leg.plannedDeparturePlatform != null) ...[
             Text(leg.plannedDeparturePlatform!,
                 style: TextStyle(
@@ -235,9 +235,9 @@ class JourneyCard extends ConsumerWidget {
                     decoration: TextDecoration.lineThrough)),
             const SizedBox(width: 3),
           ],
-          Text('Gl. $display',
+          Text(display,
               style: TextStyle(
-                  fontSize: 12,
+                  fontSize: 13,
                   fontWeight: FontWeight.w600,
                   color: changed ? Colors.red : null)),
         ],
