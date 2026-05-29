@@ -41,14 +41,14 @@ class HomeScreen extends StatelessWidget {
         },
         destinations: const [
           NavigationDestination(
-            icon: Icon(Icons.train_outlined),
-            selectedIcon: Icon(Icons.train),
-            label: 'Zug',
-          ),
-          NavigationDestination(
             icon: Icon(Icons.search_outlined),
             selectedIcon: Icon(Icons.search),
             label: 'Suche',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.train_outlined),
+            selectedIcon: Icon(Icons.train),
+            label: 'Zug',
           ),
           NavigationDestination(
             icon: Icon(Icons.departure_board_outlined),

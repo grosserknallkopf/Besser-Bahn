@@ -11,13 +11,17 @@ import '../models/journey.dart';
 import '../screens/split_ticket/split_ticket_screen.dart';
 import '../screens/settings/settings_screen.dart';
 import '../screens/debug_log/debug_log_screen.dart';
+import '../screens/traewelling/traewelling_hub_screen.dart';
+import '../screens/traewelling/traewelling_feed_screen.dart';
+import '../screens/traewelling/traewelling_friends_screen.dart';
+import '../screens/traewelling/traewelling_checkin_screen.dart';
 
 final _rootNavigatorKey = GlobalKey<NavigatorState>();
 final _shellNavigatorKey = GlobalKey<NavigatorState>();
 
 final appRouter = GoRouter(
   navigatorKey: _rootNavigatorKey,
-  initialLocation: '/train',
+  initialLocation: '/search',
   routes: [
     ShellRoute(
       navigatorKey: _shellNavigatorKey,
@@ -88,6 +92,28 @@ final appRouter = GoRouter(
       path: '/train-run',
       parentNavigatorKey: _rootNavigatorKey,
       builder: (context, state) => const TrainLookupScreen(),
+    ),
+    // Träwelling check-in / social section, reached via the AppBar avatar.
+    // Full-screen routes on the root navigator (real back button).
+    GoRoute(
+      path: '/trawelling',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (context, state) => const TraewellingHubScreen(),
+    ),
+    GoRoute(
+      path: '/trawelling/feed',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (context, state) => const TraewellingFeedScreen(),
+    ),
+    GoRoute(
+      path: '/trawelling/friends',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (context, state) => const TraewellingFriendsScreen(),
+    ),
+    GoRoute(
+      path: '/trawelling/checkin',
+      parentNavigatorKey: _rootNavigatorKey,
+      builder: (context, state) => const TraewellingCheckinScreen(),
     ),
   ],
 );
