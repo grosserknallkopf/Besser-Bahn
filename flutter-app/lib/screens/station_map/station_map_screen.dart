@@ -342,7 +342,7 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
             // Clean, low-clutter light base map (CartoDB Positron): streets
             // and place labels only, no shop/restaurant POIs competing with
             // our station markers. Free, no API key.
-            TileCache.outdoorLayer(context),
+            TileCache.outdoorLayer(),
             // Real Deutsche Bahn indoor floor plan for the selected floor —
             // the actual building outline, platform halls and track geometry,
             // straight from the tile service bahnhof.de itself renders. The
@@ -448,7 +448,7 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
               showFlutterMapAttribution: false,
               attributions: [
                 TextSourceAttribution('© OpenStreetMap'),
-                TextSourceAttribution('© CARTO'),
+                TextSourceAttribution('© OpenMapTiles'),
                 TextSourceAttribution('Bahnhofsplan © DB InfraGO'),
               ],
             ),
@@ -1394,7 +1394,7 @@ class _FallbackLocationMapState extends ConsumerState<_FallbackLocationMap> {
             maxZoom: 19,
           ),
           children: [
-            TileCache.outdoorLayer(context),
+            TileCache.outdoorLayer(),
             if (_userFix != null) ...[
               PolylineLayer(
                 polylines: [
@@ -1481,7 +1481,7 @@ class _FallbackLocationMapState extends ConsumerState<_FallbackLocationMap> {
               showFlutterMapAttribution: false,
               attributions: [
                 TextSourceAttribution('© OpenStreetMap'),
-                TextSourceAttribution('© CARTO'),
+                TextSourceAttribution('© OpenMapTiles'),
               ],
             ),
           ],

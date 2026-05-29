@@ -123,13 +123,13 @@ class TrainMap extends StatelessWidget {
         ),
       ),
       children: [
-        TileCache.outdoorLayer(context),
+        TileCache.outdoorLayer(),
         const RichAttributionWidget(
           alignment: AttributionAlignment.bottomLeft,
           showFlutterMapAttribution: false,
           attributions: [
             TextSourceAttribution('© OpenStreetMap'),
-            TextSourceAttribution('© CARTO'),
+            TextSourceAttribution('© OpenMapTiles'),
           ],
         ),
         PolylineLayer(

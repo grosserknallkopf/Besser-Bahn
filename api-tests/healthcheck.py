@@ -822,16 +822,26 @@ def check_wagenreihung_split() -> str:
 
 
 def check_basemap_tiles() -> str:
-    """Outdoor base-map tiles: CARTO Positron (light_all) — the minimal, no-key
-    basemap the app draws under every outdoor map. Assert it still serves a real
-    PNG. Soft: tile loss degrades to a blank backdrop, the app and its data still
-    work."""
-    url = "https://a.basemaps.cartocdn.com/light_all/7/68/44.png"
-    r = requests.get(url, headers={"User-Agent": DBNAV_UA}, timeout=TIMEOUT)
-    r.raise_for_status()
-    if not r.content.startswith(b"\x89PNG"):
-        raise CheckError(f"not a PNG (ct={r.headers.get('Content-Type')})")
-    return f"CARTO light_all tile ok ({len(r.content)} bytes)"
+    """Outdoor base map: OpenFreeMap "Positron" VECTOR tiles — the German-labelled
+    (local names), keyless, light basemap the app renders under every outdoor map
+    via vector_map_tiles. Assert the style JSON resolves and a vector tile (.pbf)
+    serves. Soft: on loss the app falls back to the CARTO raster, data still works.
+    """
+    hdr = {"User-Agent": DBNAV_UA}
+    style = requests.get("https://tiles.openfreemap.org/styles/positron",
+                         headers=hdr, timeout=TIMEOUT)
+    style.raise_for_status()
+    src = style.json().get("sources", {}).get("openmaptiles", {})
+    src_url = src.get("url")
+    if not src_url and not src.get("tiles"):
+        raise CheckError("positron style lost its openmaptiles vector source")
+    # Resolve the source TileJSON → it must advertise pbf tile URLs.
+    tj = requests.get(src_url, headers=hdr, timeout=TIMEOUT)
+    tj.raise_for_status()
+    tiles = tj.json().get("tiles") or []
+    if not tiles or ".pbf" not in tiles[0]:
+        raise CheckError("openmaptiles TileJSON has no .pbf tile urls")
+    return f"OpenFreeMap Positron ok (vector tiles: {tiles[0].split('/data/')[-1]})"
 
 
 def check_traewelling_api() -> str:
@@ -865,7 +875,7 @@ CHECKS = [
     ("vendo train polyline (zuglauf)", check_vendo_train_polyline, False),
     ("vendo seat map (gsd free seats)", check_vendo_seat_map, False),
     ("wagenreihung wing-train split (RE)", check_wagenreihung_split, True),
-    ("basemap tiles (CARTO light_all)", check_basemap_tiles, True),
+    ("basemap (OpenFreeMap Positron vector)", check_basemap_tiles, True),
     ("bahnhof.de station map (karte)", check_bahnhof_map, False),
     ("map bay ↔ departures link", check_bay_departure_link, True),
     ("map Gleis ↔ departures (normalised)", check_gleis_departure_link, False),

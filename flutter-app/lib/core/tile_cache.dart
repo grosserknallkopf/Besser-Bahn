@@ -1,6 +1,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_tile_caching/flutter_map_tile_caching.dart';
+import 'package:vector_map_tiles/vector_map_tiles.dart';
 
 import 'app_log.dart';
 
@@ -60,21 +61,56 @@ class TileCache {
     return NetworkTileProvider(headers: headers ?? const {});
   }
 
-  /// CARTO "Positron" (light_all): a deliberately minimal light-grey basemap —
-  /// place + region names, roads, water, almost no POI clutter — an unobtrusive
-  /// backdrop for our route + markers. Labels are international (e.g. "Bavaria"),
-  /// but the user prefers this cleaner look over the German-labelled alternative.
-  /// No API key.
-  static const String outdoorTileUrl =
-      'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
+  /// OpenFreeMap "Positron" — the clean light-grey Positron look the user likes,
+  /// served as VECTOR tiles, which means labels use local names (German in
+  /// Germany: Bayern/München, not CARTO's "Bavaria"). Free, no API key, no usage
+  /// limit. Vector → rendered with vector_map_tiles.
+  static const String _styleUri =
+      'https://tiles.openfreemap.org/styles/positron';
 
-  /// The shared outdoor base layer, cached on disk. Used by every outdoor map
-  /// (route, departures, station fallback) so the style/source lives in one
-  /// place. [context] only drives retina (`{r}`) tile selection.
-  static TileLayer outdoorLayer(BuildContext context) => TileLayer(
-        urlTemplate: outdoorTileUrl,
+  /// CARTO Positron raster — fallback shown while the vector style loads on the
+  /// first map of a session, and if OpenFreeMap is unreachable. Keyless.
+  static const String _fallbackTileUrl =
+      'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png';
+
+  static Future<Style>? _styleFuture;
+  static Style? _style; // resolved style, cached so later maps skip the fetch
+
+  static Future<Style> _loadStyle() =>
+      _styleFuture ??= StyleReader(uri: _styleUri).read().then((s) {
+        _style = s;
+        AppLog.log('vector basemap style loaded ($_styleUri)', tag: 'map');
+        return s;
+      });
+
+  /// The shared outdoor base layer. Used by every outdoor map (route, departures,
+  /// station fallback) so the style/source lives in one place. Renders the
+  /// German OpenFreeMap Positron vector style; falls back to the CARTO raster
+  /// while the style loads and if it can't be fetched.
+  static Widget outdoorLayer() {
+    final ready = _style;
+    if (ready != null) return _vectorLayer(ready);
+    return FutureBuilder<Style>(
+      future: _loadStyle(),
+      builder: (context, snap) =>
+          snap.data != null ? _vectorLayer(snap.data!) : _rasterFallback(),
+    );
+  }
+
+  static Widget _vectorLayer(Style style) => VectorTileLayer(
+        theme: style.theme,
+        sprites: style.sprites,
+        tileProviders: style.providers,
+        fileCacheTtl: const Duration(days: 30),
+        maximumZoom: 20,
+        // Render tiles to images (vs. live canvas) — smoother and lighter, and
+        // works everywhere incl. desktop.
+        layerMode: VectorTileLayerMode.raster,
+      );
+
+  static TileLayer _rasterFallback() => TileLayer(
+        urlTemplate: _fallbackTileUrl,
         subdomains: const ['a', 'b', 'c', 'd'],
-        retinaMode: RetinaMode.isHighDensity(context),
         userAgentPackageName: 'de.chuk.besserebahn',
         tileProvider: provider(),
         maxZoom: 20,
