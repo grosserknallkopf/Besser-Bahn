@@ -90,6 +90,38 @@ class PredictionBadge extends ConsumerWidget {
       );
     }
 
+    return PredictionPill(icon: icon, label: label, score: score);
+  }
+
+  /// Green ≥ 80, amber ≥ 50, red below — reliability traffic light.
+  Color _scoreColor(BuildContext context, double score) =>
+      predictionScoreColor(context, score);
+}
+
+/// Green ≥ 80, amber ≥ 50, red below — reliability traffic light, shared by the
+/// connection-wide [PredictionBadge] and the per-leg [LegPredictionBadge].
+Color predictionScoreColor(BuildContext context, double score) {
+  if (score >= 80) return const Color(0xFF2E9E5B);
+  if (score >= 50) return const Color(0xFFCC8800);
+  return Theme.of(context).colorScheme.error;
+}
+
+/// A single horizontal reliability pill: "<icon> <label> <pct>%", colour-coded.
+class PredictionPill extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final double score;
+
+  const PredictionPill({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.score,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final color = predictionScoreColor(context, score);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
@@ -101,18 +133,50 @@ class PredictionBadge extends ConsumerWidget {
         children: [
           Icon(icon, size: 14, color: color),
           const SizedBox(width: 4),
-          Text('$label $pct',
+          Text('$label ${score.round()}%',
               style: TextStyle(
                   fontSize: 12, fontWeight: FontWeight.w600, color: color)),
         ],
       ),
     );
   }
+}
 
-  /// Green ≥ 80, amber ≥ 50, red below — reliability traffic light.
-  Color _scoreColor(BuildContext context, double score) {
-    if (score >= 80) return const Color(0xFF2E9E5B);
-    if (score >= 50) return const Color(0xFFCC8800);
-    return Theme.of(context).colorScheme.error;
+/// Per-train reliability for one journey [leg]: its own Pünktlichkeit (from a
+/// single-leg sub-journey) and — when a transit [nextLeg] follows — the
+/// Anschluss probability of catching it (from a two-leg sub-journey). Both reuse
+/// the cached [journeyPredictionProvider]; renders nothing until data lands.
+class LegPredictionBadge extends ConsumerWidget {
+  final JourneyLeg leg;
+  final JourneyLeg? nextLeg;
+
+  const LegPredictionBadge({super.key, required this.leg, this.nextLeg});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final self = ref
+        .watch(journeyPredictionProvider(PredictionRequest(Journey(legs: [leg]))))
+        .maybeWhen(data: (p) => p, orElse: () => null);
+    final pair = nextLeg == null
+        ? null
+        : ref
+            .watch(journeyPredictionProvider(
+                PredictionRequest(Journey(legs: [leg, nextLeg!]))))
+            .maybeWhen(data: (p) => p, orElse: () => null);
+
+    final pills = <Widget>[
+      if (pair?.verbindungsscore != null)
+        PredictionPill(
+            icon: Icons.alt_route,
+            label: 'Anschluss',
+            score: pair!.verbindungsscore!),
+      if (self?.puenktlichkeit != null)
+        PredictionPill(
+            icon: Icons.schedule,
+            label: 'Pünktlich',
+            score: self!.puenktlichkeit!),
+    ];
+    if (pills.isEmpty) return const SizedBox.shrink();
+    return Wrap(spacing: 8, runSpacing: 4, children: pills);
   }
 }

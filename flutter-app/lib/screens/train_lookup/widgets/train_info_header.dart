@@ -17,11 +17,23 @@ class TrainInfoHeader extends StatelessWidget {
   /// name and the Halte then read as one block.
   final bool embedded;
 
+  /// Overrides the [embedded] default padding. When the header is rendered
+  /// inline on the route spine (connection leg view) the spine column already
+  /// supplies the left inset, so the caller passes [EdgeInsets.zero].
+  final EdgeInsets? padding;
+
+  /// Per-train reliability strip (Anschluss/Pünktlichkeit for *this* leg),
+  /// rendered just below the direction line. Null on the standalone train
+  /// screen, where there's no journey context to score a single leg against.
+  final Widget? predictionStrip;
+
   const TrainInfoHeader({
     super.key,
     required this.trip,
     this.action,
     this.embedded = false,
+    this.padding,
+    this.predictionStrip,
   });
 
   @override
@@ -29,7 +41,7 @@ class TrainInfoHeader extends StatelessWidget {
     final content = _content(context);
     if (embedded) {
       return Padding(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+        padding: padding ?? const EdgeInsets.fromLTRB(16, 16, 16, 8),
         child: content,
       );
     }
@@ -80,6 +92,12 @@ class TrainInfoHeader extends StatelessWidget {
               style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant),
             ),
+
+            // Per-train reliability (Anschluss/Pünktlichkeit for this leg).
+            if (predictionStrip != null) ...[
+              const SizedBox(height: 8),
+              predictionStrip!,
+            ],
 
             if (trip.line.operatorName != null) ...[
               const SizedBox(height: 2),
