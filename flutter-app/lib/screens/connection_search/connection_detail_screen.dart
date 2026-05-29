@@ -30,13 +30,22 @@ final Map<String, CoachSequence> _coachCache = {};
 /// Full multi-leg connection as ONE screen: each train's complete detail
 /// (header, live map, coach sequence, stops) stacked vertically — scroll down
 /// to the next train. No intermediate "pick a leg" screen.
-class ConnectionDetailScreen extends ConsumerWidget {
+class ConnectionDetailScreen extends ConsumerStatefulWidget {
   final Journey journey;
 
   const ConnectionDetailScreen({super.key, required this.journey});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ConnectionDetailScreen> createState() =>
+      _ConnectionDetailScreenState();
+}
+
+class _ConnectionDetailScreenState
+    extends ConsumerState<ConnectionDetailScreen> {
+  Journey get journey => widget.journey;
+
+  @override
+  Widget build(BuildContext context) {
     final legs = journey.legs;
     return Scaffold(
       appBar: AppBar(
@@ -93,7 +102,14 @@ class ConnectionDetailScreen extends ConsumerWidget {
                   i > 0 ? legs[i - 1] : null,
                   i + 1 < legs.length ? legs[i + 1] : null)
             else
-              _LegSection(leg: legs[i]),
+              _LegSection(
+                leg: legs[i],
+                // A fresh trip fetch carries live delays → recompute the
+                // transfer windows above so a shrunk gap shows immediately.
+                onTripUpdated: () {
+                  if (mounted) setState(() {});
+                },
+              ),
           ],
         ],
       ),
@@ -300,6 +316,39 @@ class ConnectionDetailScreen extends ConsumerWidget {
     return (null, null);
   }
 
+  /// Minutes from [a] to [b], or null if either time is missing.
+  int? _gapMinutes(DateTime? a, DateTime? b) =>
+      (a != null && b != null) ? b.difference(a).inMinutes : null;
+
+  /// Stopover in [trip] for [station] — match by id, fall back to name.
+  Stopover? _stopFor(Trip trip, Station station) {
+    if (station.id.isNotEmpty) {
+      for (final so in trip.stopovers) {
+        if (so.stop.id == station.id) return so;
+      }
+    }
+    for (final so in trip.stopovers) {
+      if (station.name.isNotEmpty && so.stop.name == station.name) return so;
+    }
+    return null;
+  }
+
+  /// Freshest arrival of [leg] at its destination: the live time from the
+  /// background-refreshed trip when we have it, else the leg's search-time
+  /// value. This is what lets a delay shrink a transfer window after the fact.
+  DateTime? _liveArrivalOf(JourneyLeg leg) {
+    final trip = leg.tripId != null ? _tripCache[leg.tripId] : null;
+    final so = trip != null ? _stopFor(trip, leg.destination) : null;
+    return so?.arrival ?? leg.arrival;
+  }
+
+  /// Freshest departure of [leg] from its origin.
+  DateTime? _liveDepartureOf(JourneyLeg leg) {
+    final trip = leg.tripId != null ? _tripCache[leg.tripId] : null;
+    final so = trip != null ? _stopFor(trip, leg.origin) : null;
+    return so?.departure ?? leg.departure;
+  }
+
   /// A FUSSWEG leg between two trains. The headline number is the *time you
   /// have* to change (arrival → next departure), NOT how long the walk takes;
   /// the walk itself is shown as the secondary detail.
@@ -307,15 +356,25 @@ class ConnectionDetailScreen extends ConsumerWidget {
       JourneyLeg? prev, JourneyLeg? next) {
     // Available transfer time: from the train's arrival to the next departure.
     // DB gives NO walk duration — only (sometimes) a distance — so we never
-    // present minutes as how long the walk takes.
-    final arr = prev?.arrival ?? leg.departure;
-    final dep = next?.departure ?? leg.arrival;
-    final avail = (arr != null && dep != null)
-        ? dep.difference(arr).inMinutes
-        : null;
-    final (color, warn) = _transferTone(context, avail);
+    // present minutes as how long the walk takes. Use the freshest (live)
+    // times so a delay shrinks the window; strike the scheduled value when it
+    // no longer holds.
+    final liveArr = prev != null ? _liveArrivalOf(prev) : leg.departure;
+    final liveDep = next != null ? _liveDepartureOf(next) : leg.arrival;
+    final planArr = prev != null
+        ? (prev.plannedArrival ?? prev.arrival)
+        : (leg.plannedDeparture ?? leg.departure);
+    final planDep = next != null
+        ? (next.plannedDeparture ?? next.departure)
+        : (leg.plannedArrival ?? leg.arrival);
 
-    final head = avail != null ? '$avail min zum Umsteigen' : 'Umstieg';
+    final liveGap = _gapMinutes(liveArr, liveDep);
+    final planGap = _gapMinutes(planArr, planDep);
+    final shown = liveGap ?? planGap;
+    final changed = liveGap != null && planGap != null && liveGap != planGap;
+    final (color, warn) = _transferTone(context, shown);
+
+    final head = shown != null ? '$shown min zum Umsteigen' : 'Umstieg';
     final detail = leg.walkingDistance != null
         ? 'mit Fußweg · ${leg.walkingDistance} m'
         : 'mit Fußweg';
@@ -324,6 +383,7 @@ class ConnectionDetailScreen extends ConsumerWidget {
       context,
       icon: Icons.directions_walk,
       head: head,
+      strikeBefore: changed ? '$planGap min' : null,
       headColor: color,
       detail: detail,
       warn: warn,
@@ -359,15 +419,19 @@ class ConnectionDetailScreen extends ConsumerWidget {
   Widget _transfer(
       BuildContext context, WidgetRef ref, JourneyLeg prev, JourneyLeg next) {
     if (prev.isWalking || next.isWalking) return const SizedBox(height: 8);
-    // Time you actually have to change trains (arrival → next departure).
-    final gap = (next.departure != null && prev.arrival != null)
-        ? next.departure!.difference(prev.arrival!).inMinutes
-        : null;
+    // Time you actually have to change trains (arrival → next departure), from
+    // the freshest live data. When a delay has eaten into the scheduled gap we
+    // strike the old number and show what's really left.
+    final liveGap = _gapMinutes(_liveArrivalOf(prev), _liveDepartureOf(next));
+    final planGap = _gapMinutes(prev.plannedArrival ?? prev.arrival,
+        next.plannedDeparture ?? next.departure);
+    final shown = liveGap ?? planGap;
+    final changed = liveGap != null && planGap != null && liveGap != planGap;
 
     final arrGleis = prev.arrivalPlatform;
     final depGleis = next.departurePlatform;
     final station = prev.destination;
-    final (color, warn) = _transferTone(context, gap);
+    final (color, warn) = _transferTone(context, shown);
 
     final gleisText = (arrGleis != null || depGleis != null)
         ? 'Gleis ${arrGleis ?? '?'} → Gleis ${depGleis ?? '?'}'
@@ -376,9 +440,10 @@ class ConnectionDetailScreen extends ConsumerWidget {
     return _transferTile(
       context,
       icon: Icons.swap_calls,
-      head: gap != null
-          ? '$gap min zum Umsteigen in ${station.name}'
+      head: shown != null
+          ? '$shown min zum Umsteigen in ${station.name}'
           : 'Umstieg in ${station.name}',
+      strikeBefore: changed ? '$planGap min' : null,
       headColor: color,
       detail: gleisText,
       warn: warn,
@@ -393,6 +458,7 @@ class ConnectionDetailScreen extends ConsumerWidget {
     BuildContext context, {
     required IconData icon,
     required String head,
+    String? strikeBefore,
     Color? headColor,
     String? detail,
     String? warn,
@@ -419,12 +485,30 @@ class ConnectionDetailScreen extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      head,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                        color: headColor,
-                      ),
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
+                      children: [
+                        if (strikeBefore != null) ...[
+                          Text(
+                            strikeBefore,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              decoration: TextDecoration.lineThrough,
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                        ],
+                        Flexible(
+                          child: Text(
+                            head,
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: headColor,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     if (detail != null)
                       Padding(
@@ -469,7 +553,11 @@ class ConnectionDetailScreen extends ConsumerWidget {
 /// One leg = one train, shown with its full detail (fetched on demand).
 class _LegSection extends ConsumerStatefulWidget {
   final JourneyLeg leg;
-  const _LegSection({required this.leg});
+
+  /// Fired after a fresh trip lands (carries live delays) so the parent can
+  /// recompute the transfer windows shown above/below this leg.
+  final VoidCallback? onTripUpdated;
+  const _LegSection({required this.leg, this.onTripUpdated});
 
   @override
   ConsumerState<_LegSection> createState() => _LegSectionState();
@@ -520,6 +608,9 @@ class _LegSectionState extends ConsumerState<_LegSection>
       }
       _tripCache[id] = trip;
       if (mounted) setState(() => _trip = trip);
+      // Post-await (never during build) → safe to nudge the parent to recompute
+      // transfer windows from the live arrival/departure this fetch just added.
+      widget.onTripUpdated?.call();
       try {
         final cs = await ref
             .read(coachSequenceServiceProvider)
