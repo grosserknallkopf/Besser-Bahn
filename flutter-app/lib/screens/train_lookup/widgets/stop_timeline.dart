@@ -36,6 +36,7 @@ class StopTimeline extends StatefulWidget {
 class _StopTimelineState extends State<StopTimeline> {
   bool _expandedBefore = false;
   bool _expandedAfter = false;
+  bool _expandedMiddle = false;
 
   /// Index of [id] in the stop list (by EVA, then by name), or -1.
   int _indexOf(String? id) {
@@ -56,8 +57,14 @@ class _StopTimelineState extends State<StopTimeline> {
     if (stops.isEmpty) return const SizedBox.shrink();
 
     // Resolve the ridden segment [board, alight]. Fall back to whole trip.
-    var board = _indexOf(widget.boardingId);
-    var alight = _indexOf(widget.alightingId);
+    final rawBoard = _indexOf(widget.boardingId);
+    final rawAlight = _indexOf(widget.alightingId);
+    // This is a journey leg (vs. a standalone train lookup) only when at least
+    // one endpoint was actually resolved — then we also collapse the stops
+    // *between* the endpoints, since 99% just board and alight.
+    final isLeg = rawBoard >= 0 || rawAlight >= 0;
+    var board = rawBoard;
+    var alight = rawAlight;
     if (board < 0) board = 0;
     if (alight < 0 || alight < board) alight = stops.length - 1;
 

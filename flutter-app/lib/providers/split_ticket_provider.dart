@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/split_ticket.dart';
 import '../services/db_api_service.dart';
+import '../services/notification_service.dart';
 import 'service_providers.dart';
 import 'settings_provider.dart';
 
@@ -45,6 +46,12 @@ class SplitTicketNotifier extends Notifier<SplitTicketState> {
   @override
   SplitTicketState build() => const SplitTicketState();
 
+  // Each analyze() run takes a generation number. A newer run bumps it, so any
+  // older loop still in flight sees `_gen != myGen` and bails — repeated taps
+  // (or a re-launch from another connection) can't interleave two analyses on
+  // the same state. Fixes the double-search race.
+  int _gen = 0;
+
   void _log(String msg) {
     final logs = [...state.logs, msg];
     if (logs.length > 100) logs.removeRange(0, logs.length - 100);
@@ -52,14 +59,17 @@ class SplitTicketNotifier extends Notifier<SplitTicketState> {
   }
 
   void cancel() {
-    state = state.copyWith(isCancelled: true);
+    _gen++; // stop the in-flight loop as well
+    state = state.copyWith(isCancelled: true, isLoading: false);
   }
 
   Future<void> analyze({
     required List<Map<String, dynamic>> stops,
     required String date,
     required double directPrice,
+    String? routeLabel,
   }) async {
+    final myGen = ++_gen;
     final settings = ref.read(settingsProvider);
     final dbApi = ref.read(dbApiServiceProvider);
     final vendo = ref.read(vendoServiceProvider);
@@ -81,6 +91,7 @@ class SplitTicketNotifier extends Notifier<SplitTicketState> {
     try {
       for (int i = 0; i < n; i++) {
         for (int j = i + 1; j < n; j++) {
+          if (myGen != _gen) return; // superseded by a newer analyze()/cancel()
           if (state.isCancelled) {
             _log('Analyse abgebrochen.');
             state = state.copyWith(isLoading: false);
@@ -169,22 +180,32 @@ class SplitTicketNotifier extends Notifier<SplitTicketState> {
         current = prev;
       }
 
+      if (myGen != _gen) return; // superseded while computing
       stopwatch.stop();
       final splitPrice = dp[n - 1];
       _log(
           'Fertig! Direktpreis: ${directPrice.toStringAsFixed(2)}€, Split: ${splitPrice.toStringAsFixed(2)}€');
 
-      state = state.copyWith(
-        isLoading: false,
-        result: TicketAnalysisResult(
-          directPrice: directPrice,
-          splitPrice: splitPrice,
-          tickets: tickets,
-          combinationsChecked: totalCombinations,
-          elapsed: stopwatch.elapsed,
-        ),
+      final result = TicketAnalysisResult(
+        directPrice: directPrice,
+        splitPrice: splitPrice,
+        tickets: tickets,
+        combinationsChecked: totalCombinations,
+        elapsed: stopwatch.elapsed,
       );
+      state = state.copyWith(isLoading: false, result: result);
+
+      // Notify the user the background analysis is done — they may have left
+      // the screen while it ran.
+      final route = routeLabel ??
+          '${stops.first['name']} → ${stops.last['name']}';
+      final body = result.hasSavings
+          ? 'Split-Ticket ${result.savings.toStringAsFixed(2)} € günstiger '
+              '(${result.savingsPercent.toStringAsFixed(0)}%)'
+          : 'Kein günstigeres Split-Ticket – Direktpreis bleibt am besten.';
+      NotificationService.showSplitResult(title: route, body: body);
     } catch (e) {
+      if (myGen != _gen) return;
       state = state.copyWith(isLoading: false, error: 'Fehler: $e');
     }
   }

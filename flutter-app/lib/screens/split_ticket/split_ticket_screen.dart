@@ -1,9 +1,6 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/journey.dart';
@@ -11,12 +8,16 @@ import '../../models/split_ticket.dart';
 import '../../providers/split_ticket_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../services/db_api_service.dart';
-import '../../providers/service_providers.dart';
 import '../../widgets/traewelling_avatar_button.dart';
-import '../../core/constants.dart';
 import '../../theme/app_colors.dart';
 
-class SplitTicketScreen extends ConsumerStatefulWidget {
+/// Split-ticket analysis — purely a viewer of [splitTicketProvider]. The
+/// analysis is always launched from a connection (the Split button on the
+/// connection detail), which already carries the recon context for correct
+/// prices; there is no link to paste. The work runs on the app-scoped provider,
+/// so it keeps going in the background when this screen is popped, and a system
+/// notification fires when it finishes.
+class SplitTicketScreen extends ConsumerWidget {
   /// The connection this analysis was launched from, if any. When set, the
   /// result offers a way back to the actual trains of that route.
   final Journey? journey;
@@ -24,245 +25,7 @@ class SplitTicketScreen extends ConsumerStatefulWidget {
   const SplitTicketScreen({super.key, this.journey});
 
   @override
-  ConsumerState<SplitTicketScreen> createState() => _SplitTicketScreenState();
-}
-
-class _SplitTicketScreenState extends ConsumerState<SplitTicketScreen> {
-  final _urlController = TextEditingController();
-  bool _isResolving = false;
-  String? _resolveError;
-
-  @override
-  void dispose() {
-    _urlController.dispose();
-    super.dispose();
-  }
-
-  /// Extract bahn.de URL from text that may contain extra info
-  /// (e.g. "Verbindung am Sa. 04.04... https://www.bahn.de/buchung/start?vbid=...")
-  String _extractUrl(String text) {
-    final regex = RegExp(r'https://www\.bahn\.de/[^\s]+');
-    final match = regex.firstMatch(text);
-    return match?.group(0) ?? text.trim();
-  }
-
-  Future<void> _pasteAndAnalyze() async {
-    final clip = await Clipboard.getData(Clipboard.kTextPlain);
-    if (clip?.text != null && clip!.text!.isNotEmpty) {
-      _urlController.text = clip.text!;
-      setState(() {});
-      _analyze();
-    }
-  }
-
-  Future<void> _analyze() async {
-    final rawInput = _urlController.text.trim();
-    if (rawInput.isEmpty) return;
-
-    final url = _extractUrl(rawInput);
-    if (!url.contains('bahn.de')) {
-      _showError('Kein gültiger bahn.de Link gefunden.');
-      return;
-    }
-
-    setState(() {
-      _isResolving = true;
-      _resolveError = null;
-    });
-
-    try {
-      final settings = ref.read(settingsProvider);
-      final travellers = DbApiService.createTravellerPayload(
-        bahnCard: settings.bahnCard,
-      );
-
-      // Parse URL and resolve connection
-      Map<String, dynamic>? connectionData;
-      String dateStr = '';
-
-      if (url.contains('vbid=')) {
-        // Extract VBID from URL
-        final uri = Uri.parse(
-          url.contains('/buchung/start')
-              ? url
-              : url,
-        );
-        final vbid = uri.queryParameters['vbid'];
-        if (vbid == null || vbid.isEmpty) {
-          _showError('VBID konnte nicht aus dem Link extrahiert werden.');
-          return;
-        }
-
-        // Resolve VBID -> connection data
-        connectionData = await _resolveVbid(vbid, travellers,
-            deutschlandTicket: settings.hasDeutschlandTicket);
-
-        if (connectionData == null || connectionData.isEmpty) {
-          _showError('Verbindung konnte nicht aufgelöst werden.');
-          return;
-        }
-
-        // Extract date from first stop
-        final firstStop = connectionData['verbindungen']?[0]
-            ?['verbindungsAbschnitte']?[0]?['halte']?[0]?['abfahrtsZeitpunkt'];
-        if (firstStop != null) {
-          dateStr = (firstStop as String).split('T')[0];
-        }
-      } else if (url.contains('#')) {
-        // Long-form search URL with fragment parameters
-        final fragment = url.split('#').last;
-        final params = Uri.splitQueryString(fragment);
-        final fromId = params['soid'] ?? '';
-        final toId = params['zoid'] ?? '';
-        final dateTime = params['hd'] ?? '';
-
-        if (fromId.isEmpty || toId.isEmpty || dateTime.isEmpty) {
-          _showError('Link enthält nicht alle nötigen Parameter.');
-          return;
-        }
-
-        final dbApi = ref.read(dbApiServiceProvider);
-        connectionData = await dbApi.getConnectionDetails(
-          fromId: fromId,
-          toId: toId,
-          dateTime: dateTime,
-          travellers: travellers,
-          deutschlandTicket: settings.hasDeutschlandTicket,
-        );
-
-        dateStr = dateTime.split('T')[0];
-      } else {
-        _showError('Link-Format nicht erkannt. Bitte einen bahn.de Verbindungslink einfügen.');
-        return;
-      }
-
-      if (!connectionData.containsKey('verbindungen') ||
-          (connectionData['verbindungen'] as List).isEmpty) {
-        _showError('Keine Verbindungsdaten gefunden.');
-        return;
-      }
-
-      // Extract stops from connection
-      final connection = connectionData['verbindungen'][0];
-      final sections = connection['verbindungsAbschnitte'] as List<dynamic>? ?? [];
-      final stops = <Map<String, dynamic>>[];
-
-      for (final section in sections) {
-        final halte = section['halte'] as List<dynamic>? ?? [];
-        for (int i = 0; i < halte.length; i++) {
-          final halt = halte[i];
-          final name = halt['name'] as String? ?? '';
-          final id = halt['extId'] as String? ?? halt['id'] as String? ?? '';
-          final depTime = halt['abfahrtsZeitpunkt'] as String? ?? '';
-          final arrTime = halt['ankunftsZeitpunkt'] as String? ?? '';
-
-          // Avoid duplicates (transfer stations appear in multiple sections)
-          if (stops.isNotEmpty && stops.last['id'] == id) continue;
-
-          stops.add({
-            'name': name,
-            'id': id,
-            'departure_time': depTime.contains('T')
-                ? depTime.split('T')[1].substring(0, 5)
-                : '',
-            'arrival_time': arrTime.contains('T')
-                ? arrTime.split('T')[1].substring(0, 5)
-                : '',
-            'departure_iso': depTime,
-          });
-        }
-      }
-
-      if (stops.length < 2) {
-        _showError('Nicht genug Haltestellen gefunden.');
-        return;
-      }
-
-      // Get direct price
-      final directPrice =
-          (connection['angebotsPreis']?['betrag'] as num?)?.toDouble() ?? 0;
-
-      setState(() => _isResolving = false);
-
-      // Start split-ticket analysis
-      ref.read(splitTicketProvider.notifier).analyze(
-        stops: stops,
-        date: dateStr,
-        directPrice: directPrice,
-      );
-    } catch (e) {
-      _showError('Fehler: $e');
-    }
-  }
-
-  Future<Map<String, dynamic>?> _resolveVbid(
-      String vbid, List<Map<String, dynamic>> travellers,
-      {bool deutschlandTicket = false}) async {
-    final headers = {
-      'User-Agent': ApiConstants.userAgent,
-      'Accept': 'application/json',
-      'Content-Type': 'application/json; charset=UTF-8',
-    };
-
-    // Step 1: Get reconString from VBID
-    final vbidResponse = await http.get(
-      Uri.parse('${ApiConstants.dbWebApiBaseUrl}/angebote/verbindung/$vbid'),
-      headers: headers,
-    );
-
-    if (vbidResponse.statusCode != 200) return null;
-
-    final vbidData = json.decode(vbidResponse.body);
-    final reconString = vbidData['hinfahrtRecon'] as String?;
-    if (reconString == null) return null;
-
-    // Step 2: Resolve with recon
-    final reconPayload = {
-      'klasse': 'KLASSE_2',
-      'reisende': travellers,
-      'ctxRecon': reconString,
-      'deutschlandTicketVorhanden': deutschlandTicket,
-    };
-
-    final reconResponse = await http.post(
-      Uri.parse('${ApiConstants.dbWebApiBaseUrl}/angebote/recon'),
-      headers: headers,
-      body: json.encode(reconPayload),
-    );
-
-    if (reconResponse.statusCode == 200 || reconResponse.statusCode == 201) {
-      if (reconResponse.body.isNotEmpty) {
-        try {
-          return json.decode(reconResponse.body) as Map<String, dynamic>;
-        } catch (_) {
-          // Retry on 201
-          if (reconResponse.statusCode == 201) {
-            await Future.delayed(const Duration(seconds: 1));
-            final retry = await http.post(
-              Uri.parse('${ApiConstants.dbWebApiBaseUrl}/angebote/recon'),
-              headers: headers,
-              body: json.encode(reconPayload),
-            );
-            if (retry.statusCode == 200 && retry.body.isNotEmpty) {
-              return json.decode(retry.body) as Map<String, dynamic>;
-            }
-          }
-        }
-      }
-    }
-
-    return null;
-  }
-
-  void _showError(String msg) {
-    setState(() {
-      _isResolving = false;
-      _resolveError = msg;
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final state = ref.watch(splitTicketProvider);
     final theme = Theme.of(context);
 
@@ -283,15 +46,15 @@ class _SplitTicketScreenState extends ConsumerState<SplitTicketScreen> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.info_outline, size: 20,
-                      color: theme.colorScheme.error),
+                  Icon(Icons.info_outline,
+                      size: 20, color: theme.colorScheme.error),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'Split-Tickets haben kein Anschluss-Recht. '
                       'Das Risiko bei Verspätungen liegt beim Fahrgast.',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.error),
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: theme.colorScheme.error),
                     ),
                   ),
                 ],
@@ -299,81 +62,17 @@ class _SplitTicketScreenState extends ConsumerState<SplitTicketScreen> {
             ),
           ),
 
-          // URL input
-          Card(
-            margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text('DB-Verbindungslink oder geteilten Text einfügen',
-                      style: theme.textTheme.titleSmall),
-                  const SizedBox(height: 4),
-                  Text(
-                    'In der DB App: Verbindung → Teilen → "Infos kopieren" → hier einfügen',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: _urlController,
-                    decoration: InputDecoration(
-                      hintText: 'Link oder Text einfügen...',
-                      prefixIcon: const Icon(Icons.link),
-                      suffixIcon: IconButton(
-                        icon: const Icon(Icons.content_paste),
-                        onPressed: _pasteAndAnalyze,
-                        tooltip: 'Einfügen & Analysieren',
-                      ),
-                    ),
-                    maxLines: 3,
-                    minLines: 1,
-                    style: const TextStyle(fontSize: 13),
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: double.infinity,
-                    child: (_isResolving || state.isLoading)
-                        ? OutlinedButton.icon(
-                            onPressed: state.isLoading
-                                ? () => ref
-                                    .read(splitTicketProvider.notifier)
-                                    .cancel()
-                                : null,
-                            icon: const Icon(Icons.cancel),
-                            label: Text(
-                                _isResolving ? 'Verbindung wird aufgelöst...' : 'Abbrechen'),
-                          )
-                        : FilledButton.icon(
-                            onPressed: _analyze,
-                            icon: const Icon(Icons.call_split),
-                            label: const Text('Analyse starten'),
-                          ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-
-          // Resolve error
-          if (_resolveError != null)
-            Card(
-              margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-              color: theme.colorScheme.errorContainer,
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  children: [
-                    Icon(Icons.error_outline, size: 18,
-                        color: theme.colorScheme.onErrorContainer),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(_resolveError!,
-                          style: TextStyle(
-                              color: theme.colorScheme.onErrorContainer)),
-                    ),
-                  ],
+          // Cancel control while running.
+          if (state.isLoading)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () =>
+                      ref.read(splitTicketProvider.notifier).cancel(),
+                  icon: const Icon(Icons.cancel),
+                  label: const Text('Abbrechen'),
                 ),
               ),
             ),
@@ -390,22 +89,60 @@ class _SplitTicketScreenState extends ConsumerState<SplitTicketScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(12),
                 child: Text(state.error!,
-                    style: TextStyle(color: theme.colorScheme.onErrorContainer)),
+                    style:
+                        TextStyle(color: theme.colorScheme.onErrorContainer)),
               ),
             ),
 
           // Results
           if (state.result != null) ...[
-            _buildAssumptions(context),
+            _buildAssumptions(context, ref),
             _buildPriceComparison(context, state.result!),
             for (int i = 0; i < state.result!.tickets.length; i++)
-              _buildTicketCard(context, state.result!.tickets[i], i + 1),
-            if (widget.journey != null) _buildShowRoute(context),
+              _buildTicketCard(context, ref, state.result!.tickets[i], i + 1),
+            if (journey != null) _buildShowRoute(context),
           ],
 
+          // Empty state: nothing running, no result yet.
+          if (!state.isLoading && state.result == null && state.error == null)
+            _buildEmptyState(context),
+
           // Logs
-          if (state.logs.isNotEmpty)
-            _buildLogs(context, state.logs),
+          if (state.logs.isNotEmpty) _buildLogs(context, state.logs),
+        ],
+      ),
+    );
+  }
+
+  /// Shown when no analysis has run yet — points the user at the real entry
+  /// point (Verbindung → Split-Ticket), since there is no link to paste.
+  Widget _buildEmptyState(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(24, 48, 24, 0),
+      child: Column(
+        children: [
+          Icon(Icons.call_split,
+              size: 56, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(height: 16),
+          Text('Noch keine Analyse',
+              style: theme.textTheme.titleMedium,
+              textAlign: TextAlign.center),
+          const SizedBox(height: 8),
+          Text(
+            'Suche eine Verbindung und tippe in der Detailansicht auf '
+            '„Split-Ticket suchen“. Die Analyse läuft dann im Hintergrund und '
+            'meldet sich, sobald sie fertig ist.',
+            style: theme.textTheme.bodyMedium
+                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 20),
+          FilledButton.tonalIcon(
+            onPressed: () => context.go('/'),
+            icon: const Icon(Icons.search),
+            label: const Text('Zur Verbindungssuche'),
+          ),
         ],
       ),
     );
@@ -424,7 +161,8 @@ class _SplitTicketScreenState extends ConsumerState<SplitTicketScreen> {
             Row(
               children: [
                 const SizedBox(
-                  width: 20, height: 20,
+                  width: 20,
+                  height: 20,
                   child: CircularProgressIndicator(strokeWidth: 2),
                 ),
                 const SizedBox(width: 12),
@@ -442,8 +180,8 @@ class _SplitTicketScreenState extends ConsumerState<SplitTicketScreen> {
             if (progress.currentSegment.isNotEmpty) ...[
               const SizedBox(height: 4),
               Text(progress.currentSegment,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant)),
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
             ],
           ],
         ),
@@ -453,7 +191,7 @@ class _SplitTicketScreenState extends ConsumerState<SplitTicketScreen> {
 
   /// Show the search assumptions so the price is unambiguous: which BahnCard
   /// and whether a Deutschland-Ticket was applied (both from Einstellungen).
-  Widget _buildAssumptions(BuildContext context) {
+  Widget _buildAssumptions(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final s = ref.watch(settingsProvider);
     final hasBC = s.bahnCard != BahnCardType.none;
@@ -466,11 +204,10 @@ class _SplitTicketScreenState extends ConsumerState<SplitTicketScreen> {
           children: [
             Row(
               children: [
-                Icon(Icons.tune, size: 16,
-                    color: theme.colorScheme.onSurfaceVariant),
+                Icon(Icons.tune,
+                    size: 16, color: theme.colorScheme.onSurfaceVariant),
                 const SizedBox(width: 6),
-                Text('Preise gelten für',
-                    style: theme.textTheme.titleSmall),
+                Text('Preise gelten für', style: theme.textTheme.titleSmall),
               ],
             ),
             const SizedBox(height: 8),
@@ -479,7 +216,8 @@ class _SplitTicketScreenState extends ConsumerState<SplitTicketScreen> {
               runSpacing: 4,
               children: [
                 Chip(
-                  avatar: Icon(hasBC ? Icons.credit_card : Icons.credit_card_off,
+                  avatar: Icon(
+                      hasBC ? Icons.credit_card : Icons.credit_card_off,
                       size: 16),
                   label: Text(hasBC ? s.bahnCard.label : 'ohne BahnCard'),
                   materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -503,8 +241,8 @@ class _SplitTicketScreenState extends ConsumerState<SplitTicketScreen> {
             const SizedBox(height: 4),
             Text(
               'In den Einstellungen änderbar.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant),
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
           ],
         ),
@@ -520,7 +258,7 @@ class _SplitTicketScreenState extends ConsumerState<SplitTicketScreen> {
       child: SizedBox(
         width: double.infinity,
         child: OutlinedButton.icon(
-          onPressed: () => context.push('/connection', extra: widget.journey),
+          onPressed: () => context.push('/connection', extra: journey),
           icon: const Icon(Icons.alt_route),
           label: const Text('Züge dieser Verbindung anzeigen'),
         ),
@@ -593,8 +331,8 @@ class _SplitTicketScreenState extends ConsumerState<SplitTicketScreen> {
             Text(
               '${result.combinationsChecked} Kombinationen in '
               '${result.elapsed.inSeconds}s geprüft',
-              style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant),
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
             ),
           ],
         ),
@@ -603,7 +341,7 @@ class _SplitTicketScreenState extends ConsumerState<SplitTicketScreen> {
   }
 
   Widget _buildTicketCard(
-      BuildContext context, SplitTicket ticket, int index) {
+      BuildContext context, WidgetRef ref, SplitTicket ticket, int index) {
     final theme = Theme.of(context);
     final settings = ref.read(settingsProvider);
 
@@ -647,8 +385,8 @@ class _SplitTicketScreenState extends ConsumerState<SplitTicketScreen> {
                   if (ticket.coveredByDeutschlandTicket)
                     Row(
                       children: [
-                        Icon(Icons.check_circle, size: 14,
-                            color: AppColors.onTime),
+                        Icon(Icons.check_circle,
+                            size: 14, color: AppColors.onTime),
                         const SizedBox(width: 4),
                         Text('Mit Deutschland-Ticket abgedeckt',
                             style: TextStyle(
@@ -685,7 +423,8 @@ class _SplitTicketScreenState extends ConsumerState<SplitTicketScreen> {
                     style: TextButton.styleFrom(
                         padding: EdgeInsets.zero,
                         minimumSize: const Size(0, 30)),
-                    child: const Text('Buchen', style: TextStyle(fontSize: 12)),
+                    child:
+                        const Text('Buchen', style: TextStyle(fontSize: 12)),
                   ),
               ],
             ),

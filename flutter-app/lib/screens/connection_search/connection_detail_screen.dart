@@ -246,6 +246,8 @@ class ConnectionDetailScreen extends ConsumerWidget {
           stops: stops,
           date: date,
           directPrice: journey.price?.amount ?? 0,
+          routeLabel:
+              '${journey.origin?.name ?? ''} → ${journey.destination?.name ?? ''}',
         );
     context.push('/split-ticket', extra: journey);
   }
