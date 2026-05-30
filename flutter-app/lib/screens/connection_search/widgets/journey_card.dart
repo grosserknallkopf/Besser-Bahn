@@ -115,7 +115,7 @@ class JourneyCard extends ConsumerWidget {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(child: _legLengthBar(context, transitLegs)),
+                  Expanded(child: _LegLengthBar(legs: transitLegs)),
                   if (journey.price != null) ...[
                     const SizedBox(width: 8),
                     Text(
@@ -175,83 +175,157 @@ class JourneyCard extends ConsumerWidget {
     );
   }
 
-  /// Proportional length comparison: each train is a coloured segment whose
-  /// WIDTH ∝ time spent on it (RE70 longer than IC, etc.). The line name sits
-  /// inside the segment; the occupancy "Männchen" and the % sit underneath it.
-  /// No arrows, no separate legend — one aligned structure.
-  Widget _legLengthBar(BuildContext context, List<JourneyLeg> legs) {
-    if (legs.isEmpty) return const SizedBox.shrink();
-    int legMinutes(JourneyLeg l) {
-      final d = l.departure ?? l.plannedDeparture;
-      final a = l.arrival ?? l.plannedArrival;
-      if (d != null && a != null) {
-        final m = a.difference(d).inMinutes;
-        if (m > 0) return m;
-      }
-      return 1;
-    }
+}
 
-    final mins = legs.map(legMinutes).toList();
+/// Proportional length comparison: each train is a coloured segment whose
+/// WIDTH ∝ time spent on it (RE7 longer than IC, etc.). The line name sits
+/// inside the segment; the occupancy "Männchen" sits underneath it.
+///
+/// Each segment ALSO fills left→right with a darker shade of its own colour
+/// showing how far THAT leg has progressed (elapsed time on that train): the
+/// first leg fills up completely, then the next leg starts filling — so the
+/// coloured bars themselves are the live progress, no separate bar needed.
+///
+/// Self-ticks (20 s) only while the journey is under way, so a long saved-trips
+/// list stays idle otherwise.
+class _LegLengthBar extends StatefulWidget {
+  final List<JourneyLeg> legs;
+  const _LegLengthBar({required this.legs});
+
+  @override
+  State<_LegLengthBar> createState() => _LegLengthBarState();
+}
+
+class _LegLengthBarState extends State<_LegLengthBar> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncTimer();
+  }
+
+  @override
+  void didUpdateWidget(covariant _LegLengthBar old) {
+    super.didUpdateWidget(old);
+    _syncTimer();
+  }
+
+  /// Tick only while at least one leg is mid-ride (0 < progress < 1).
+  void _syncTimer() {
+    _timer?.cancel();
+    final live = widget.legs.any((l) {
+      final f = _legProgress(l);
+      return f > 0 && f < 1;
+    });
+    if (live) {
+      _timer = Timer.periodic(const Duration(seconds: 20), (_) {
+        if (mounted) setState(() {});
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  static int _legMinutes(JourneyLeg l) {
+    final d = l.departure ?? l.plannedDeparture;
+    final a = l.arrival ?? l.plannedArrival;
+    if (d != null && a != null) {
+      final m = a.difference(d).inMinutes;
+      if (m > 0) return m;
+    }
+    return 1;
+  }
+
+  /// How far this leg has been travelled, as a fraction [0,1] of its ride time.
+  static double _legProgress(JourneyLeg l) {
+    final d = l.departure ?? l.plannedDeparture;
+    final a = l.arrival ?? l.plannedArrival;
+    if (d == null || a == null) return 0;
+    final total = a.difference(d).inSeconds;
+    if (total <= 0) return DateTime.now().isBefore(a) ? 0 : 1;
+    return (DateTime.now().difference(d).inSeconds / total).clamp(0.0, 1.0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final legs = widget.legs;
+    if (legs.isEmpty) return const SizedBox.shrink();
+    final mins = legs.map(_legMinutes).toList();
     final total = mins.fold<int>(0, (s, m) => s + m);
     if (total <= 0) return const SizedBox.shrink();
     // Floor so even a short leg keeps enough width for its line label.
     final minFlex = (total * 0.16).round().clamp(1, total);
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (var i = 0; i < legs.length; i++) ...[
-              if (i > 0) const SizedBox(width: 4),
-              Expanded(
-                flex: mins[i] < minFlex ? minFlex : mins[i],
-                child: _legSegment(
-                  context,
-                  legs[i].line?.displayName ?? '–',
-                  _productColor(context, legs[i]),
-                  legs[i].occupancy?.level,
-                ),
-              ),
-            ],
-          ],
-        ),
-        // A second bar spanning the WHOLE width (across both legs) that fills
-        // left→right with how far the journey has progressed overall (elapsed
-        // time vs total) — independent of the per-leg width split above.
-        const SizedBox(height: 5),
-        _JourneyProgressBar(
-          start: journey.departure ?? journey.plannedDeparture,
-          end: journey.arrival ?? journey.plannedArrival,
-        ),
+        for (var i = 0; i < legs.length; i++) ...[
+          if (i > 0) const SizedBox(width: 4),
+          Expanded(
+            flex: mins[i] < minFlex ? minFlex : mins[i],
+            child: _legSegment(
+              context,
+              legs[i].line?.displayName ?? '–',
+              _productColor(context, legs[i]),
+              legs[i].occupancy?.level,
+              _legProgress(legs[i]),
+            ),
+          ),
+        ],
       ],
     );
   }
 
   Widget _legSegment(BuildContext context, String label, Color color,
-      OccupancyLevel? occupancy) {
+      OccupancyLevel? occupancy, double progress) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Proportional segment, transparent look: tinted fill + coloured border
-        // and coloured label (the earlier style).
-        Container(
-          height: 26,
-          alignment: Alignment.center,
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          decoration: BoxDecoration(
-            color: color.withAlpha(28),
-            border: Border.all(color: color.withAlpha(150)),
-            borderRadius: BorderRadius.circular(6),
-          ),
-          child: FittedBox(
-            fit: BoxFit.scaleDown,
-            child: Text(
-              label,
-              maxLines: 1,
-              style: TextStyle(
-                  fontSize: 12, fontWeight: FontWeight.w700, color: color),
+        // Proportional segment: light tinted base + coloured border, and a
+        // DARKER fill that grows from the left with this leg's progress, so the
+        // bar itself shows how much of this train you've already ridden.
+        ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: Container(
+            height: 26,
+            decoration: BoxDecoration(
+              color: color.withAlpha(28),
+              border: Border.all(color: color.withAlpha(150)),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                // The darker progress fill, anchored left, fractional width.
+                if (progress > 0)
+                  FractionallySizedBox(
+                    alignment: Alignment.centerLeft,
+                    widthFactor: progress,
+                    child: Container(color: color.withAlpha(120)),
+                  ),
+                // Line name on top of the fill.
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  child: Center(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        label,
+                        maxLines: 1,
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: color),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -267,89 +341,12 @@ class JourneyCard extends ConsumerWidget {
 
   /// Colour per train product, so segments are visually distinct.
   Color _productColor(BuildContext context, JourneyLeg leg) {
-    final p = (leg.line?.productName ?? leg.line?.displayName ?? '')
-        .toUpperCase();
+    final p =
+        (leg.line?.productName ?? leg.line?.displayName ?? '').toUpperCase();
     if (p.startsWith('ICE')) return Colors.red.shade700;
     if (p.startsWith('IC') || p.startsWith('EC')) return Colors.blue.shade700;
     if (p.startsWith('RE') || p.startsWith('RB')) return Colors.teal.shade700;
     if (p.startsWith('S')) return Colors.green.shade700;
     return Theme.of(context).colorScheme.primary;
-  }
-
-}
-
-/// A thin full-width bar that fills left→right with the journey's OVERALL
-/// progress (elapsed wall-clock time vs the whole departure→arrival span),
-/// drawn under the per-leg length bars. 0 before departure, full after arrival.
-///
-/// It self-ticks only WHILE the journey is in progress (so the bar visibly
-/// creeps forward); a future or finished journey holds a static value and runs
-/// no timer, so a long list of saved trips costs nothing.
-class _JourneyProgressBar extends StatefulWidget {
-  final DateTime? start;
-  final DateTime? end;
-  const _JourneyProgressBar({this.start, this.end});
-
-  @override
-  State<_JourneyProgressBar> createState() => _JourneyProgressBarState();
-}
-
-class _JourneyProgressBarState extends State<_JourneyProgressBar> {
-  Timer? _timer;
-
-  @override
-  void initState() {
-    super.initState();
-    _syncTimer();
-  }
-
-  @override
-  void didUpdateWidget(covariant _JourneyProgressBar old) {
-    super.didUpdateWidget(old);
-    if (old.start != widget.start || old.end != widget.end) _syncTimer();
-  }
-
-  /// Run a slow ticker only while the journey is actually under way — the bar
-  /// advances over hours, so 20 s is plenty and keeps the list idle otherwise.
-  void _syncTimer() {
-    _timer?.cancel();
-    final f = _fraction();
-    if (f != null && f > 0 && f < 1) {
-      _timer = Timer.periodic(const Duration(seconds: 20), (_) {
-        if (mounted) setState(() {});
-      });
-    }
-  }
-
-  /// Elapsed fraction in [0,1], or null when the times are unusable.
-  double? _fraction() {
-    final s = widget.start, e = widget.end;
-    if (s == null || e == null) return null;
-    final total = e.difference(s).inSeconds;
-    if (total <= 0) return null;
-    final elapsed = DateTime.now().difference(s).inSeconds;
-    return (elapsed / total).clamp(0.0, 1.0);
-  }
-
-  @override
-  void dispose() {
-    _timer?.cancel();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final f = _fraction();
-    if (f == null) return const SizedBox.shrink();
-    final theme = Theme.of(context);
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(3),
-      child: LinearProgressIndicator(
-        value: f,
-        minHeight: 5,
-        backgroundColor: theme.colorScheme.surfaceContainerHighest,
-        valueColor: AlwaysStoppedAnimation(theme.colorScheme.primary),
-      ),
-    );
   }
 }
