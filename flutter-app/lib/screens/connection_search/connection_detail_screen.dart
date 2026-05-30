@@ -26,6 +26,7 @@ import '../../widgets/traewelling_logo.dart';
 import '../../widgets/trwl_checkin_sheet.dart';
 import '../train_lookup/widgets/train_detail_view.dart';
 import 'widgets/leg_alternatives.dart';
+import 'widgets/leg_switcher.dart';
 
 /// In-memory cache (app session) so a leg's train data is fetched once and
 /// reused — scrolling away and back never re-downloads or rebuilds from
@@ -92,6 +93,16 @@ class _ConnectionDetailScreenState
   /// First non-walking leg after [i], or null — the train this leg connects to.
   JourneyLeg? _nextTransitLeg(List<JourneyLeg> legs, int i) {
     for (var j = i + 1; j < legs.length; j++) {
+      if (!legs[j].isWalking) return legs[j];
+    }
+    return null;
+  }
+
+  /// Last non-walking leg before [i], or null — the train you arrive on before
+  /// changing into leg [i]. Used to judge whether the transfer into [i] is at
+  /// risk and from when you can realistically board.
+  JourneyLeg? _prevTransitLeg(List<JourneyLeg> legs, int i) {
+    for (var j = i - 1; j >= 0; j--) {
       if (!legs[j].isWalking) return legs[j];
     }
     return null;
@@ -186,18 +197,28 @@ class _ConnectionDetailScreenState
                   i + 1 < legs.length ? legs[i + 1] : null)
             else ...[
               _LegNotes(notes: _visibleNotes(legs[i].disruptions)),
-              _LegSection(
-                key: ValueKey('leg-$i-${legs[i].tripId}-$_refreshTick'),
-                leg: legs[i],
-                index: i,
-                nextTransitLeg: _nextTransitLeg(legs, i),
-                // A fresh trip fetch carries live delays → recompute the
-                // transfer windows above so a shrunk gap shows immediately.
-                onTripUpdated: () {
-                  if (mounted) setState(() {});
-                },
-                onReplaceLeg: _replaceLeg,
-              ),
+              Builder(builder: (_) {
+                final prev = _prevTransitLeg(legs, i);
+                final readyAt = prev != null ? _liveArrivalOf(prev) : null;
+                final gap = prev != null
+                    ? _gapMinutes(readyAt, _liveDepartureOf(legs[i]))
+                    : null;
+                return _LegSection(
+                  key: ValueKey('leg-$i-${legs[i].tripId}-$_refreshTick'),
+                  leg: legs[i],
+                  index: i,
+                  nextTransitLeg: _nextTransitLeg(legs, i),
+                  incomingGapMinutes: gap,
+                  readyAt: readyAt,
+                  transferStationName: prev?.destination.name,
+                  // A fresh trip fetch carries live delays → recompute the
+                  // transfer windows above so a shrunk gap shows immediately.
+                  onTripUpdated: () {
+                    if (mounted) setState(() {});
+                  },
+                  onReplaceLeg: _replaceLeg,
+                );
+              }),
             ],
           ],
         ],
@@ -778,6 +799,13 @@ class _LegSection extends ConsumerStatefulWidget {
   /// score this leg's Anschluss (probability of catching the following train).
   final JourneyLeg? nextTransitLeg;
 
+  /// Live minutes available for the transfer INTO this train (null = first leg
+  /// / unknown), when you'll realistically be ready, and the change station —
+  /// drive the at-risk "next reachable train" offer in the leg switcher.
+  final int? incomingGapMinutes;
+  final DateTime? readyAt;
+  final String? transferStationName;
+
   const _LegSection({
     super.key,
     required this.leg,
@@ -785,6 +813,9 @@ class _LegSection extends ConsumerStatefulWidget {
     this.onTripUpdated,
     this.onReplaceLeg,
     this.nextTransitLeg,
+    this.incomingGapMinutes,
+    this.readyAt,
+    this.transferStationName,
   });
 
   @override
@@ -1016,7 +1047,22 @@ class _LegSectionState extends ConsumerState<_LegSection>
     final trip = _trip;
     if (trip != null) {
       final leg = widget.leg;
-      return TrainDetailView(
+      // Swipe/step control to cycle this segment's other departures and swap
+      // the train in place. Only when a swap target exists (onReplaceLeg) and
+      // it's a real train leg.
+      final switcher = (widget.onReplaceLeg != null &&
+              !leg.isWalking &&
+              leg.line != null)
+          ? LegAlternativeSwitcher(
+              leg: leg,
+              index: widget.index,
+              onReplace: widget.onReplaceLeg!,
+              incomingGapMinutes: widget.incomingGapMinutes,
+              readyAt: widget.readyAt,
+              transferStationName: widget.transferStationName,
+            )
+          : null;
+      final detail = TrainDetailView(
         trip: trip,
         coach: _coach,
         onStopTap: _openStopMap,
@@ -1052,6 +1098,11 @@ class _LegSectionState extends ConsumerState<_LegSection>
             : null,
         legDestinationName:
             leg.destination.name.isNotEmpty ? leg.destination.name : null,
+      );
+      if (switcher == null) return detail;
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [switcher, detail],
       );
     }
     // Loading / fallback: still show the leg summary so the user sees the train.
