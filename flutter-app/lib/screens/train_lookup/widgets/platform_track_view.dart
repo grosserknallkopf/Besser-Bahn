@@ -1,0 +1,382 @@
+import 'dart:math' as math;
+
+import 'package:flutter/material.dart';
+
+import '../../../models/coach_sequence.dart';
+import '../../../theme/app_colors.dart';
+
+/// The Wagenreihung drawn TO SCALE on the actual platform: the section letters
+/// (A, B, C …), the cars and the Gleis all share one horizontal coordinate
+/// system (the platform's own start…end), so a car sits visually under the
+/// section it actually stops in — and when you scroll left/right the sections
+/// scroll WITH the cars and stay aligned.
+///
+/// Needs real geometry (a platform length and a position per car). Use
+/// [hasGeometry] to decide; when it's false the caller falls back to the
+/// simple equal-width row (no platform info to place things against).
+class PlatformTrackView extends StatelessWidget {
+  final CoachSequence sequence;
+  final bool selectable;
+  final Map<int, int> freeByWagon;
+  final int? selectedWagon;
+  final void Function(Coach coach)? onCoachTap;
+
+  /// Height of a car box. Compact inline (~40) vs roomy fullscreen (~64).
+  final double carHeight;
+
+  /// Target on-screen width of an average car — drives the platform scale.
+  final double targetCarWidth;
+
+  const PlatformTrackView({
+    super.key,
+    required this.sequence,
+    this.selectable = false,
+    this.freeByWagon = const {},
+    this.selectedWagon,
+    this.onCoachTap,
+    this.carHeight = 40,
+    this.targetCarWidth = 46,
+  });
+
+  /// True when we can lay the train out to scale: a positive platform length
+  /// and a real position on every car.
+  static bool hasGeometry(CoachSequence s) {
+    if (s.platform.length <= 0) return false;
+    final coaches = s.allCoaches;
+    if (coaches.isEmpty) return false;
+    return coaches.every(
+        (c) => c.platformPosition != null && c.platformPosition!.length > 0);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final coaches = sequence.allCoaches;
+    final plat = sequence.platform;
+
+    final trainStart =
+        coaches.map((c) => c.platformPosition!.start).reduce(math.min);
+    final trainEnd =
+        coaches.map((c) => c.platformPosition!.end).reduce(math.max);
+    final trainLen = (trainEnd - trainStart).abs();
+    if (trainLen <= 0) return const SizedBox.shrink();
+
+    final avgLen = trainLen / coaches.length;
+    final scale = targetCarWidth / avgLen;
+
+    // Which slice of the platform to draw. Normally the whole platform (so you
+    // see the empty sections beyond the train too); but if the platform dwarfs
+    // the train, zoom to the train + one car of padding so it isn't lost in a
+    // sea of empty asphalt.
+    double ds = plat.start, de = plat.end;
+    if (de <= ds) {
+      ds = trainStart;
+      de = trainEnd;
+    }
+    final pad = avgLen * 0.9;
+    if ((de - ds) > trainLen * 2.4) {
+      ds = math.max(plat.start, trainStart - pad);
+      de = math.min(plat.end, trainEnd + pad);
+    }
+    final span = de - ds;
+    if (span <= 0) return const SizedBox.shrink();
+
+    double px(double u) => (u - ds) * scale;
+    final totalW = span * scale;
+
+    const labelH = 22.0;
+    const labelGap = 4.0;
+    const trackH = 16.0;
+    final stackH = labelH + labelGap + carHeight + trackH;
+
+    final bandEven = theme.colorScheme.surfaceContainerHighest.withValues(
+        alpha: 0.55);
+    final bandOdd = theme.colorScheme.surfaceContainerHighest.withValues(
+        alpha: 0.20);
+    final boundary = theme.colorScheme.outlineVariant;
+
+    final children = <Widget>[];
+
+    // 1) Section bands (alternating) + their right-edge boundary lines, full
+    //    height so the eye buckets each car into its section.
+    for (var i = 0; i < plat.sectors.length; i++) {
+      final s = plat.sectors[i];
+      final left = px(s.start);
+      final w = (s.end - s.start) * scale;
+      if (w <= 0 || left + w <= 0 || left >= totalW) continue;
+      children.add(Positioned(
+        left: left,
+        width: w,
+        top: 0,
+        bottom: 0,
+        child: Container(
+          decoration: BoxDecoration(
+            color: i.isEven ? bandEven : bandOdd,
+            border: Border(right: BorderSide(color: boundary, width: 1)),
+          ),
+        ),
+      ));
+      // Big, clear section letter at the top of the band.
+      children.add(Positioned(
+        left: left,
+        width: w,
+        top: 0,
+        height: labelH,
+        child: Center(
+          child: Text(
+            s.name,
+            style: TextStyle(
+              fontSize: carHeight >= 56 ? 18 : 13,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.5,
+              color: theme.colorScheme.onSurface,
+            ),
+          ),
+        ),
+      ));
+    }
+
+    // 2) The Gleis (track) running the full width under the cars.
+    children.add(Positioned(
+      left: 0,
+      right: 0,
+      bottom: 0,
+      height: trackH,
+      child: CustomPaint(painter: _TrackPainter(color: AppColors.locomotive)),
+    ));
+
+    // 3) The cars, each placed at its true platform position.
+    for (final c in coaches) {
+      final pos = c.platformPosition!;
+      final left = px(pos.start);
+      final w = math.max((pos.end - pos.start) * scale, 18.0);
+      children.add(Positioned(
+        left: left,
+        width: w,
+        top: labelH + labelGap,
+        height: carHeight,
+        child: _TrackCar(
+          coach: c,
+          width: w,
+          height: carHeight,
+          selectable: selectable,
+          freeCount: freeByWagon[c.wagonNumber],
+          isSelected:
+              selectedWagon != null && c.wagonNumber == selectedWagon,
+          onTap: onCoachTap == null ? null : () => onCoachTap!(c),
+        ),
+      ));
+    }
+
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: SizedBox(
+        width: math.max(totalW, 1),
+        height: stackH,
+        child: Stack(clipBehavior: Clip.none, children: children),
+      ),
+    );
+  }
+}
+
+/// Two rails + sleepers, drawn the full width so the cars read as standing on a
+/// real track.
+class _TrackPainter extends CustomPainter {
+  final Color color;
+  const _TrackPainter({required this.color});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rail = Paint()
+      ..color = color.withValues(alpha: 0.85)
+      ..strokeWidth = 1.6;
+    final tie = Paint()
+      ..color = color.withValues(alpha: 0.35)
+      ..strokeWidth = 1.4;
+    final y1 = size.height * 0.38;
+    final y2 = size.height * 0.74;
+    // Sleepers first (under the rails).
+    for (double x = 4; x < size.width; x += 12) {
+      canvas.drawLine(Offset(x, y1 - 2), Offset(x, y2 + 2), tie);
+    }
+    canvas.drawLine(Offset(0, y1), Offset(size.width, y1), rail);
+    canvas.drawLine(Offset(0, y2), Offset(size.width, y2), rail);
+  }
+
+  @override
+  bool shouldRepaint(covariant _TrackPainter old) => old.color != color;
+}
+
+/// One car sized to fill its platform slot: class stripe, wagon number and a
+/// free-seat badge (or amenity icons). Tappable when selecting a coach.
+class _TrackCar extends StatelessWidget {
+  final Coach coach;
+  final double width;
+  final double height;
+  final bool selectable;
+  final int? freeCount;
+  final bool isSelected;
+  final VoidCallback? onTap;
+
+  const _TrackCar({
+    required this.coach,
+    required this.width,
+    required this.height,
+    required this.selectable,
+    required this.freeCount,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  Color get _classColor => coach.isLocomotive
+      ? AppColors.locomotive
+      : coach.isRestaurant
+          ? AppColors.restaurant
+          : coach.isFirstClass
+              ? AppColors.firstClass
+              : coach.isMixed
+                  ? AppColors.firstClass
+                  : AppColors.secondClass;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final open = coach.isOpen;
+    final isLoco = coach.isLocomotive;
+    final accent = open ? _classColor : AppColors.closedCoach;
+    final canSelect = selectable && !isLoco && coach.wagonNumber > 0;
+    final borderColor = isSelected ? AppColors.onTime : accent;
+    final compact = height < 50;
+
+    final car = Container(
+      margin: const EdgeInsets.symmetric(horizontal: 0.6),
+      decoration: BoxDecoration(
+        color: isSelected
+            ? AppColors.onTime.withValues(alpha: 0.16)
+            : isLoco
+                ? AppColors.locomotive
+                : theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(color: borderColor, width: isSelected ? 2.5 : 1.5),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: isLoco
+          ? const Center(child: Icon(Icons.train, color: Colors.white, size: 16))
+          : Column(
+              children: [
+                Container(height: 4, color: accent),
+                Expanded(
+                  child: Center(
+                    child: Text(
+                      coach.wagonNumber > 0 ? '${coach.wagonNumber}' : '–',
+                      style: TextStyle(
+                        fontSize: compact ? 12 : 15,
+                        fontWeight: FontWeight.bold,
+                        color: open ? null : Colors.grey,
+                      ),
+                    ),
+                  ),
+                ),
+                if (freeCount != null)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: _FreeSeatBadge(free: freeCount!, big: !compact),
+                  )
+                else if (!compact)
+                  SizedBox(
+                    height: 14,
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        if (coach.hasBikeSpace)
+                          const Icon(Icons.pedal_bike, size: 11),
+                        if (coach.hasQuietZone)
+                          const Icon(Icons.volume_off, size: 11),
+                        if (coach.hasFamilyZone)
+                          const Icon(Icons.family_restroom, size: 11),
+                        if (coach.hasWheelchairSpace)
+                          const Icon(Icons.accessible, size: 11),
+                        if (coach.isRestaurant)
+                          const Icon(Icons.restaurant, size: 11),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+    );
+
+    return Tooltip(
+      message: _tooltip(),
+      child: canSelect
+          ? InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(5),
+              child: car,
+            )
+          : car,
+    );
+  }
+
+  String _tooltip() {
+    final parts = <String>[];
+    if (coach.wagonNumber > 0) parts.add('Wagen ${coach.wagonNumber}');
+    if (coach.isFirstClass) parts.add('1. Klasse');
+    if (coach.isSecondClass) parts.add('2. Klasse');
+    if (coach.isMixed) parts.add('1./2. Klasse');
+    if (coach.isRestaurant) parts.add('Bordrestaurant');
+    if (coach.isLocomotive) parts.add('Triebkopf');
+    if (coach.platformPosition != null &&
+        coach.platformPosition!.sector.trim().isNotEmpty) {
+      parts.add('Abschnitt ${coach.platformPosition!.sector}');
+    }
+    if (freeCount != null) parts.add('$freeCount frei');
+    if (!coach.isOpen) parts.add('Gesperrt');
+    return parts.join(' · ');
+  }
+}
+
+/// Free-seat indicator: a seat icon with the count, or a struck-through seat
+/// when the coach is full.
+class _FreeSeatBadge extends StatelessWidget {
+  final int free;
+  final bool big;
+  const _FreeSeatBadge({required this.free, this.big = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final full = free == 0;
+    final sz = big ? 13.0 : 11.0;
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        SizedBox(
+          width: sz,
+          height: sz,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Icon(Icons.event_seat,
+                  size: sz,
+                  color: full ? AppColors.closedCoach : AppColors.onTime),
+              if (full)
+                Transform.rotate(
+                  angle: -0.7,
+                  child:
+                      Container(width: sz + 2, height: 1.6, color: AppColors.delay),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 2),
+        Text(
+          full ? 'voll' : '$free',
+          style: TextStyle(
+            fontSize: big ? 11 : 9,
+            fontWeight: FontWeight.w700,
+            color: full ? AppColors.closedCoach : AppColors.onTime,
+          ),
+        ),
+      ],
+    );
+  }
+}

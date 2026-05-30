@@ -1,0 +1,254 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../models/coach_sequence.dart';
+import '../../../models/seat_map.dart';
+import '../../../models/trip.dart';
+import '../../../providers/seat_map_provider.dart';
+import '../../../theme/app_colors.dart';
+import 'coach_sequence_view.dart' show splitTrainBanner;
+import 'platform_track_view.dart';
+import 'seat_map_view.dart';
+
+/// Dedicated, full-screen Wagenreihung + Sitzplatz view. The inline card is
+/// cramped (especially the platform layout and the seat plan); here both get
+/// the whole screen: a large to-scale platform with section letters and the
+/// Gleis, and — for the tapped coach — a big, vertical seat plan.
+class WagenreihungScreen extends ConsumerStatefulWidget {
+  final Trip trip;
+  final CoachSequence sequence;
+
+  /// Coach pre-selected from the inline view, so opening fullscreen keeps your
+  /// place. Null → first coach with free seats.
+  final int? initialWagon;
+
+  /// Destination on this leg — highlights the right portion of a wing train.
+  final String? targetDestination;
+
+  const WagenreihungScreen({
+    super.key,
+    required this.trip,
+    required this.sequence,
+    this.initialWagon,
+    this.targetDestination,
+  });
+
+  @override
+  ConsumerState<WagenreihungScreen> createState() => _WagenreihungScreenState();
+}
+
+class _WagenreihungScreenState extends ConsumerState<WagenreihungScreen> {
+  int? _selectedWagon;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedWagon = widget.initialWagon;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final trip = widget.trip;
+    final sequence = widget.sequence;
+    final reservable = SeatPlanBody.isAvailableFor(trip);
+    final req = reservable ? SeatMapRequest.fromTrip(trip) : null;
+    final seatAsync = req != null ? ref.watch(seatMapProvider(req)) : null;
+    final SeatMap? seatMap =
+        seatAsync?.maybeWhen(data: (m) => m, orElse: () => null);
+
+    final freeByWagon = <int, int>{};
+    if (seatMap != null) {
+      for (final c in seatMap.coaches) {
+        final nr = int.tryParse(c.number);
+        if (nr != null) freeByWagon[nr] = c.freeCount;
+      }
+    }
+    final effectiveWagon = _effectiveWagon(seatMap);
+
+    final gleis = sequence.departurePlatform;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(trip.line.displayName.isNotEmpty
+            ? 'Wagenreihung · ${trip.line.displayName}'
+            : 'Wagenreihung'),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.only(bottom: 32),
+        children: [
+          if (gleis.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+              child: Row(
+                children: [
+                  Icon(Icons.train, size: 18, color: theme.colorScheme.primary),
+                  const SizedBox(width: 6),
+                  Text('Gleis $gleis',
+                      style: theme.textTheme.titleMedium
+                          ?.copyWith(fontWeight: FontWeight.bold)),
+                  if (sequence.hasPlatformChange) ...[
+                    const SizedBox(width: 8),
+                    Text('(statt ${sequence.scheduledPlatform})',
+                        style: theme.textTheme.bodySmall
+                            ?.copyWith(color: theme.colorScheme.error)),
+                  ],
+                ],
+              ),
+            ),
+
+          if (sequence.splits)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: splitTrainBanner(context, sequence,
+                  targetDestination: widget.targetDestination),
+            ),
+
+          // Large to-scale platform: section letters + cars + Gleis, all
+          // sharing one scale so they line up and scroll together.
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 14, 8, 6),
+            child: PlatformTrackView(
+              sequence: sequence,
+              selectable: reservable,
+              freeByWagon: freeByWagon,
+              selectedWagon: effectiveWagon,
+              onCoachTap: reservable
+                  ? (c) => setState(() => _selectedWagon = c.wagonNumber)
+                  : null,
+              carHeight: 64,
+              targetCarWidth: 78,
+            ),
+          ),
+
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Wrap(spacing: 14, runSpacing: 6, children: [
+              _legendItem(AppColors.firstClass, '1. Klasse'),
+              _legendItem(AppColors.secondClass, '2. Klasse'),
+              _legendItem(AppColors.restaurant, 'Restaurant'),
+              _legendItem(AppColors.locomotive, 'Triebkopf'),
+            ]),
+          ),
+
+          if (reservable) ...[
+            const Divider(height: 28),
+            _seatSection(theme, seatAsync, effectiveWagon),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _seatSection(
+      ThemeData theme, AsyncValue<SeatMap?>? async, int? wagon) {
+    if (async == null) return const SizedBox.shrink();
+    return async.when(
+      loading: () => const Padding(
+        padding: EdgeInsets.all(40),
+        child: Center(child: CircularProgressIndicator()),
+      ),
+      error: (_, _) => _info(theme, 'Sitzplan konnte nicht geladen werden.'),
+      data: (map) {
+        if (map == null || map.isEmpty) {
+          return _info(theme, 'Für diesen Zug ist kein Sitzplan verfügbar.');
+        }
+        final coach = _coachFor(map, wagon);
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+              child: Text(
+                '${map.totalFree} von ${map.totalSeats} Plätzen frei'
+                '${coach != null ? '  ·  Wagen ${coach.number}: ${coach.freeCount} frei' : ''}',
+                style: theme.textTheme.bodyMedium
+                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
+            ),
+            if (coach == null)
+              _info(theme, 'Wagen oben antippen, um den Sitzplan zu sehen.')
+            else if (coach.layout == null)
+              _info(theme, 'Für Wagen ${coach.number} liegt kein Plan vor.')
+            else
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: Container(
+                    color: theme.colorScheme.surfaceContainerHighest
+                        .withValues(alpha: 0.35),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    child: Center(
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        // Bigger unit → a roomy plan; the page itself scrolls
+                        // vertically so the whole (tall) coach is reachable.
+                        child: CoachSeatPlan(
+                            coach: coach, layout: coach.layout!, unit: 10),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Wrap(spacing: 16, runSpacing: 8, children: [
+                _legendItem(AppColors.onTime, 'frei'),
+                _legendItem(AppColors.closedCoach, 'reserviert'),
+              ]),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  SeatCoach? _coachFor(SeatMap map, int? wagon) {
+    if (map.coaches.isEmpty) return null;
+    if (wagon != null) {
+      for (final c in map.coaches) {
+        if (int.tryParse(c.number) == wagon) return c;
+      }
+    }
+    for (final c in map.coaches) {
+      if (c.hasFree) return c;
+    }
+    return map.coaches.first;
+  }
+
+  int? _effectiveWagon(SeatMap? map) {
+    if (_selectedWagon != null) return _selectedWagon;
+    if (map == null) return null;
+    for (final c in map.coaches) {
+      if (c.hasFree) return int.tryParse(c.number);
+    }
+    return map.coaches.isNotEmpty ? int.tryParse(map.coaches.first.number) : null;
+  }
+
+  Widget _legendItem(Color color, String label) => Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+              width: 11,
+              height: 11,
+              decoration: BoxDecoration(
+                  color: color, borderRadius: BorderRadius.circular(3))),
+          const SizedBox(width: 5),
+          Text(label, style: const TextStyle(fontSize: 12)),
+        ],
+      );
+
+  Widget _info(ThemeData theme, String msg) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: Row(children: [
+          Icon(Icons.info_outline,
+              size: 20, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 10),
+          Expanded(
+              child: Text(msg,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant))),
+        ]),
+      );
+}

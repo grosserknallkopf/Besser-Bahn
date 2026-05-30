@@ -9,6 +9,7 @@ import 'coach_sequence_view.dart';
 import 'seat_map_view.dart';
 import 'stop_timeline.dart';
 import 'train_info_header.dart';
+import 'wagenreihung_screen.dart';
 
 /// The full detail of one train: header, live map, coach sequence and stop
 /// timeline. Used standalone on the train screen and stacked per leg in the
@@ -129,6 +130,7 @@ class _TrainDetailViewState extends ConsumerState<TrainDetailView> {
             embedded: true,
             targetDestination: widget.legDestinationName,
             showSplitBanner: !isLeg,
+            onOpenFullscreen: () => _openFullscreen(effectiveWagon),
           )
         : seatPlan;
 
@@ -212,6 +214,24 @@ class _TrainDetailViewState extends ConsumerState<TrainDetailView> {
         return Icons.restaurant;
     }
     return null;
+  }
+
+  /// Hand off to the dedicated fullscreen Wagenreihung + seat-plan screen,
+  /// carrying the current coach selection so you keep your place.
+  void _openFullscreen(int? wagon) {
+    final coach = widget.coach;
+    if (coach == null) return;
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => WagenreihungScreen(
+          trip: widget.trip,
+          sequence: coach,
+          initialWagon: wagon,
+          targetDestination: widget.legDestinationName,
+        ),
+      ),
+    );
   }
 
   int? _effectiveWagon(SeatMap? map) {

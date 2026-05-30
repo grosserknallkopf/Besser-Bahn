@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../models/coach_sequence.dart';
 import '../../../theme/app_colors.dart';
+import 'platform_track_view.dart';
 
 class CoachSequenceView extends StatefulWidget {
   final CoachSequence sequence;
@@ -34,6 +35,11 @@ class CoachSequenceView extends StatefulWidget {
   /// decide which portion to board there, not down in the Wagenreihung).
   final bool showSplitBanner;
 
+  /// When set, an "open fullscreen" button appears in the header that hands off
+  /// to the dedicated Wagenreihung screen (more room for the platform layout
+  /// and the seat plan than the inline card allows).
+  final VoidCallback? onOpenFullscreen;
+
   const CoachSequenceView({
     super.key,
     required this.sequence,
@@ -45,6 +51,7 @@ class CoachSequenceView extends StatefulWidget {
     this.embedded = false,
     this.targetDestination,
     this.showSplitBanner = true,
+    this.onOpenFullscreen,
   });
 
   @override
@@ -90,6 +97,17 @@ class _CoachSequenceViewState extends State<CoachSequenceView> {
                   const Spacer(),
                   // Gleis NOT repeated here — already on the boarding stop above
                   // (shown red there when it changed).
+                  if (widget.onOpenFullscreen != null)
+                    InkWell(
+                      onTap: widget.onOpenFullscreen,
+                      borderRadius: BorderRadius.circular(20),
+                      child: Padding(
+                        padding: const EdgeInsets.all(4),
+                        child: Icon(Icons.open_in_full,
+                            size: 17,
+                            color: theme.colorScheme.onSurfaceVariant),
+                      ),
+                    ),
                   Icon(_expanded ? Icons.expand_less : Icons.expand_more,
                       size: 20, color: theme.colorScheme.onSurfaceVariant),
                 ],
@@ -105,66 +123,80 @@ class _CoachSequenceViewState extends State<CoachSequenceView> {
             if (_expanded) ...[
             const SizedBox(height: 8),
 
-            // Sector labels
-            if (sequence.platform.sectors.isNotEmpty && platformLength > 0)
-              SizedBox(
-                height: 16,
-                child: Row(
-                  children: [
-                    for (final sector in sequence.platform.sectors)
-                      Expanded(
-                        flex: ((sector.end - sector.start) / platformLength * 1000)
-                            .round(),
-                        child: Container(
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            border: Border(
-                              bottom: BorderSide(
-                                  color: theme.colorScheme.outlineVariant),
+            // To-scale platform layout: section letters + cars + Gleis share
+            // one coordinate system, so cars sit under their real section and
+            // everything scrolls together. Falls back to the simple
+            // equal-width train when there's no platform geometry.
+            if (PlatformTrackView.hasGeometry(sequence))
+              PlatformTrackView(
+                sequence: sequence,
+                selectable: selectable,
+                freeByWagon: freeByWagon,
+                selectedWagon: selectedWagon,
+                onCoachTap: onCoachTap,
+              )
+            else ...[
+              // Sector labels
+              if (sequence.platform.sectors.isNotEmpty && platformLength > 0)
+                SizedBox(
+                  height: 16,
+                  child: Row(
+                    children: [
+                      for (final sector in sequence.platform.sectors)
+                        Expanded(
+                          flex: ((sector.end - sector.start) /
+                                  platformLength *
+                                  1000)
+                              .round(),
+                          child: Container(
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              border: Border(
+                                bottom: BorderSide(
+                                    color: theme.colorScheme.outlineVariant),
+                              ),
                             ),
-                          ),
-                          child: Text(
-                            sector.name,
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              color: theme.colorScheme.onSurfaceVariant,
+                            child: Text(
+                              sector.name,
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: theme.colorScheme.onSurfaceVariant,
+                              ),
                             ),
                           ),
                         ),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 8),
+              // Coach visualization as a connected train (horizontal scroll)
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    // Streamlined ICE nose at the very front of the train.
+                    const _NoseCap(front: true),
+                    for (var i = 0; i < coaches.length; i++) ...[
+                      _Car(
+                        coach: coaches[i],
+                        selectable: selectable,
+                        freeCount: freeByWagon[coaches[i].wagonNumber],
+                        isSelected: selectedWagon != null &&
+                            coaches[i].wagonNumber == selectedWagon,
+                        onTap: onCoachTap == null
+                            ? null
+                            : () => onCoachTap(coaches[i]),
                       ),
+                      if (i < coaches.length - 1) const _Coupler(),
+                    ],
+                    // …and at the rear.
+                    const _NoseCap(front: false),
                   ],
                 ),
               ),
-
-            const SizedBox(height: 8),
-
-            // Coach visualization as a connected train (horizontal scroll)
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  // Streamlined ICE nose at the very front of the train.
-                  const _NoseCap(front: true),
-                  for (var i = 0; i < coaches.length; i++) ...[
-                    _Car(
-                      coach: coaches[i],
-                      selectable: selectable,
-                      freeCount: freeByWagon[coaches[i].wagonNumber],
-                      isSelected: selectedWagon != null &&
-                          coaches[i].wagonNumber == selectedWagon,
-                      onTap: onCoachTap == null
-                          ? null
-                          : () => onCoachTap(coaches[i]),
-                    ),
-                    if (i < coaches.length - 1) const _Coupler(),
-                  ],
-                  // …and at the rear.
-                  const _NoseCap(front: false),
-                ],
-              ),
-            ),
+            ],
 
             const SizedBox(height: 8),
 

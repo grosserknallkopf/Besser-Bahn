@@ -133,11 +133,20 @@ class SeatPlanBody extends StatelessWidget {
               child: Container(
                 color: theme.colorScheme.surfaceContainerHighest
                     .withValues(alpha: 0.35),
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: CoachSeatPlan(coach: coach, layout: coach.layout!),
+                // The coach is drawn vertically now (long axis top-to-bottom),
+                // so it scrolls DOWN inside a bounded window and fits the phone
+                // width instead of being a cramped sideways strip.
+                child: SizedBox(
+                  height: 380,
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.vertical,
+                    padding: const EdgeInsets.symmetric(
+                        vertical: 12, horizontal: 12),
+                    child: Center(
+                      child:
+                          CoachSeatPlan(coach: coach, layout: coach.layout!),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -363,27 +372,41 @@ class _Bounds {
 }
 
 /// Renders one coach's seat plan from DB grid geometry, centred in its canvas.
+///
+/// Drawn ROTATED 90°: the coach runs top-to-bottom (its long axis is vertical),
+/// so it fits a phone's width and scrolls vertically instead of being a wide,
+/// short strip you had to scroll sideways. DB's grid is X = along the train,
+/// Y = across it; we map grid-X → screen-Y and grid-Y → screen-X.
 class CoachSeatPlan extends StatelessWidget {
   final SeatCoach coach;
   final CoachLayout layout;
 
-  const CoachSeatPlan({super.key, required this.coach, required this.layout});
+  /// px per grid unit — bumped up on the fullscreen screen for a bigger plan.
+  final double unit;
 
-  static const _unit = 7.0; // px per grid unit
+  const CoachSeatPlan({
+    super.key,
+    required this.coach,
+    required this.layout,
+    this.unit = 7.0,
+  });
+
   static const _margin = 2.0; // grid-unit padding around the content
 
   @override
   Widget build(BuildContext context) {
     final b = _Bounds.of(layout);
-    final w = (b.width + _margin * 2) * _unit;
-    final h = (b.height + _margin * 2) * _unit;
+    // Rotated: on-screen width comes from the grid's short (Y) axis, height
+    // from the long (X) axis.
+    final w = (b.height + _margin * 2) * unit;
+    final h = (b.width + _margin * 2) * unit;
     return CustomPaint(
       size: Size(w, h),
       painter: _CoachPainter(
         coach: coach,
         layout: layout,
         bounds: b,
-        unit: _unit,
+        unit: unit,
         margin: _margin,
         onSurfaceVariant: Theme.of(context).colorScheme.onSurfaceVariant,
       ),
@@ -409,8 +432,10 @@ class _CoachPainter extends CustomPainter {
   });
 
   // Translate a grid coordinate into canvas pixels (content centred via bbox).
+  // Rotated 90°: grid-X (along the train) → screen-Y (down), grid-Y (across)
+  // → screen-X (right), so the coach reads top-to-bottom.
   Offset _p(double x, double y) =>
-      Offset((x - bounds.minX + margin) * unit, (y - bounds.minY + margin) * unit);
+      Offset((y - bounds.minY + margin) * unit, (x - bounds.minX + margin) * unit);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -454,23 +479,25 @@ class _CoachPainter extends CustomPainter {
       Paint()..color = _statusColor(status),
     );
 
-    // Backrest: a thicker bar on the side the seat faces.
+    // Backrest: a thicker bar on the side the seat faces. Directions are
+    // remapped for the 90° rotation (grid-X→screen-Y, grid-Y→screen-X):
+    // links→top, rechts→bottom, oben→left, unten→right.
     final back = Paint()
       ..color = Colors.black.withValues(alpha: 0.22)
       ..strokeWidth = unit * 0.7
       ..strokeCap = StrokeCap.round;
     switch (el.direction) {
       case ElementDirection.links:
-        canvas.drawLine(rect.topLeft, rect.bottomLeft, back);
-        break;
-      case ElementDirection.rechts:
-        canvas.drawLine(rect.topRight, rect.bottomRight, back);
-        break;
-      case ElementDirection.oben:
         canvas.drawLine(rect.topLeft, rect.topRight, back);
         break;
-      case ElementDirection.unten:
+      case ElementDirection.rechts:
         canvas.drawLine(rect.bottomLeft, rect.bottomRight, back);
+        break;
+      case ElementDirection.oben:
+        canvas.drawLine(rect.topLeft, rect.bottomLeft, back);
+        break;
+      case ElementDirection.unten:
+        canvas.drawLine(rect.topRight, rect.bottomRight, back);
         break;
       case ElementDirection.none:
         break;
@@ -508,9 +535,10 @@ class _CoachPainter extends CustomPainter {
         Paint()..color = onSurfaceVariant.withValues(alpha: 0.3),
       );
     } else if (sub.startsWith('WAND')) {
+      // Rotated: a partition that ran across the train is horizontal now.
       canvas.drawLine(
         Offset(o.dx, o.dy),
-        Offset(o.dx, o.dy + unit * 2.4),
+        Offset(o.dx + unit * 2.4, o.dy),
         Paint()
           ..color = onSurfaceVariant.withValues(alpha: 0.45)
           ..strokeWidth = unit * 0.6,
