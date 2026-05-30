@@ -281,6 +281,7 @@ class _StopTimelineState extends State<StopTimeline> {
   /// the train is past stop i+1, partial while in it, empty before. Time-based,
   /// so a row's fill and the surrounding elements line up into one rail.
   double _segFill(int i) {
+    if (i < 0 || i + 1 >= widget.stopovers.length) return 0; // no segment after
     final a = _depAt(i), b = _arrAt(i + 1);
     if (a == null || b == null) return 0;
     final total = b.difference(a).inSeconds;
