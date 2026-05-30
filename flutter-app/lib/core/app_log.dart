@@ -158,6 +158,12 @@ class AppLog {
         original(null, wrapWidth: wrapWidth);
         return;
       }
+      // Tile-network noise NEVER reaches the console raw — no matter which path
+      // printed it. It's folded into the quiet 2-second [tiles] timeline only.
+      if (_isTileNoise(message)) {
+        tileError(message);
+        return;
+      }
       if (message == last) {
         count++;
         if (count == 3 || count == 10 || count == 50 || count % 200 == 0) {

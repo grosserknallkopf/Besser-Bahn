@@ -63,148 +63,11 @@ class _TrainMapViewState extends ConsumerState<TrainMapView> {
 
   bool _polylineStarted = false;
 
-  /// Sequential-prefetch progress, surfaced as a thin bar under the app bar so
-  /// the rider sees the stops streaming in one at a time (not a frozen screen).
-  bool _prefetching = false;
-  int _prefetchDone = 0;
-  int _prefetchTotal = 0;
-
   @override
   void initState() {
     super.initState();
     _trip = widget.trip;
     _ensurePolyline();
-    // Defer the heavy bahnhof.de prefetch so the MAP TILES win the network
-    // first. Firing the scrape burst at open time starved the connection — the
-    // whole network (bahn.de, bahnhof.de, the tile host) went 'unreachable' for
-    // ~18 s, then recovered the instant the prefetch ended. Let the initial
-    // tiles + route geometry load, THEN warm the parked trains gently.
-    Future.delayed(const Duration(seconds: 3), () {
-      if (mounted) _prefetchStopTrains();
-    });
-  }
-
-  /// Warm both caches for every stop, ONE STOP FULLY AT A TIME: the rider's
-  /// boarding stop first, then expanding outward. For each stop we await its
-  /// Wagenreihung (which car stops where) AND its station map (the Gleis the
-  /// cars stand on) before even *requesting* the next stop.
-  ///
-  /// This is the fix for the "open the big map and it errors / hangs" report:
-  /// the old path fired every stop's vehicle-sequence call at once
-  /// (`Future.wait`) AND ran the station-map prefetch in parallel — a burst of
-  /// dozens of requests that timed out en masse and janked the device. Now it's
-  /// a single strict queue: at most one request in flight, the relevant stop
-  /// resolves first, the rest trickle in behind it. Best-effort throughout —
-  /// a missing map/Wagenreihung just means no parked train at that stop.
-  Future<void> _prefetchStopTrains() async {
-    final line = _trip.line;
-    final stops = _trip.stopovers;
-    if (stops.isEmpty) return;
-    final coachSvc = ref.read(coachSequenceServiceProvider);
-    final mapSvc = ref.read(stationMapServiceProvider);
-    final order = _prefetchOrder(stops);
-    // The progress bar tracks only the PRIORITY window (boarding stop + nearest
-    // few). Once those are warm the map already shows the train where the rider
-    // is looking, so the bar disappears — the remaining stops keep warming
-    // silently in the background instead of holding a "still loading" bar up for
-    // the whole minute a long route takes to fetch end-to-end.
-    final eager = order.length <= 6 ? order.length : 6;
-
-    if (mounted) {
-      setState(() {
-        _prefetching = true;
-        _prefetchDone = 0;
-        _prefetchTotal = eager;
-      });
-    }
-
-    AppLog.log('route prefetch start: ${order.length} stops '
-        '($eager priority)', tag: 'route');
-    final overall = Stopwatch()..start();
-    // SEQUENTIAL (1 connection). The diagnostics proved the long per-stop times
-    // weren't slow servers — concurrent connections (scrapes + vector tiles +
-    // sprites) choked the connection so everything timed out. Uncontended, each
-    // scrape is ~250 ms (see the live test), so 9 stops finish in ~2-3 s. One
-    // request at a time mirrors the (working) single-station Karte tab.
-    const concurrency = 1;
-    final queue = List<int>.of(order);
-    var done = 0, ok = 0, slowest = 0;
-    String slowStop = '';
-
-    Future<void> worker() async {
-      while (queue.isNotEmpty) {
-        if (!mounted) return;
-        final i = queue.removeAt(0); // front = highest priority
-        final s = stops[i];
-        final sw = Stopwatch()..start();
-        // 1) Wagenreihung for this stop (cheap JSON; null on S-Bahn/bus etc.).
-        if (line.fahrtNr.isNotEmpty) {
-          await coachSvc.getCoachSequenceForDeparture(
-            category: line.productName,
-            trainNumber: line.fahrtNr,
-            stationEva: s.stop.id,
-            departureTime: s.departure ?? s.arrival,
-          );
-        }
-        if (!mounted) return;
-        // 2) Station map (heavy ~230 KB scrape) — background mode: short
-        // timeout, no alt-slug retry, failures swallowed.
-        var failed = false;
-        try {
-          await mapSvc.fetchByStationName(s.stop.name, background: true);
-          ok++;
-        } catch (_) {
-          failed = true; // missing map → just no parked train there
-        }
-        if (!mounted) return;
-        final ms = sw.elapsedMilliseconds;
-        if (ms > slowest) {
-          slowest = ms;
-          slowStop = s.stop.name;
-        }
-        // Surface only the SLOW or failed stops — the "why is it lahm" signal —
-        // without a line per stop flooding the log.
-        if (ms > 1500 || failed) {
-          AppLog.log('  ${failed ? "✗" : "slow"} ${s.stop.name}: ${ms}ms',
-              tag: 'route');
-        }
-        done++;
-        // Drive the bar through the priority window, then hide it and keep going.
-        if (done <= eager) {
-          setState(() => _prefetchDone = done);
-          if (done >= eager) setState(() => _prefetching = false);
-        }
-      }
-    }
-
-    await Future.wait([for (var w = 0; w < concurrency; w++) worker()]);
-    AppLog.log('route prefetch done: $ok/${order.length} maps in '
-        '${overall.elapsedMilliseconds}ms, slowest "$slowStop" ${slowest}ms',
-        tag: 'route');
-    if (mounted && _prefetching) setState(() => _prefetching = false);
-  }
-
-  /// Stop indices in fetch priority: the rider's boarding stop first (its
-  /// platform train is what they want to see), then alternating outward so the
-  /// stops nearest the boarding stop warm before the far ends of a long route.
-  List<int> _prefetchOrder(List<Stopover> stops) {
-    final n = stops.length;
-    var start = 0;
-    final id = widget.boardingId;
-    if (id != null && id.isNotEmpty) {
-      for (var i = 0; i < n; i++) {
-        if (stops[i].stop.id == id || stops[i].stop.name == id) {
-          start = i;
-          break;
-        }
-      }
-    }
-    final order = <int>[start];
-    for (var d = 1; d < n; d++) {
-      if (start + d < n) order.add(start + d);
-      if (start - d >= 0) order.add(start - d);
-    }
-    return order;
   }
 
   /// Kick off the (network) route-geometry fetch only once the map is actually
@@ -236,22 +99,7 @@ class _TrainMapViewState extends ConsumerState<TrainMapView> {
   Widget build(BuildContext context) {
     final hasStops = _trip.stopovers.any((s) => s.stop.hasLocation);
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_trip.line.displayName),
-        // While the stops stream in one at a time, a thin determinate bar shows
-        // progress (e.g. "loading 3/12") instead of the screen looking frozen.
-        bottom: _prefetching
-            ? PreferredSize(
-                preferredSize: const Size.fromHeight(3),
-                child: LinearProgressIndicator(
-                  value: _prefetchTotal > 0
-                      ? _prefetchDone / _prefetchTotal
-                      : null,
-                  minHeight: 3,
-                ),
-              )
-            : null,
-      ),
+      appBar: AppBar(title: Text(_trip.line.displayName)),
       body: hasStops
           ? TrainMap(
               trip: _trip,
@@ -305,88 +153,147 @@ class _TrainMapState extends ConsumerState<TrainMap> {
   /// The parked train per stop index, computed once its caches are warm.
   final Map<int, _ParkedStop> _parked = {};
 
-  /// Stop indices we've already resolved (success OR confirmed no-data), so we
-  /// don't recompute the same stop on every poll.
+  /// Stop indices whose parked train is already built (success OR confirmed
+  /// no-data), so we never recompute them.
   final Set<int> _done = {};
 
-  Timer? _poll;
-  int _pollAttempts = 0;
+  /// Stop indices we've already started fetching, so a stop isn't requested
+  /// twice as the camera moves over it. Cleared for a stop if its fetch fails,
+  /// so re-zooming retries it.
+  final Set<int> _requested = {};
 
-  /// Hard ceiling on poll attempts (× 800 ms ≈ 2 min). The prefetch streams the
-  /// StationMaps in bounded windows (≤12 s each) plus the Wagenreihungen, so a
-  /// long route is warm well inside this. Without a ceiling, a stop whose map or
-  /// Wagenreihung never resolves (small stations often have neither) would keep
-  /// the timer polling forever while the screen is open — bounded to the screen
-  /// lifetime, but wasteful. We stop once everything resolved OR this ceiling.
-  static const _maxPollAttempts = 150;
+  /// Stops queued for the (sequential) lazy fetch and whether a drain is active.
+  final List<int> _queue = [];
+  bool _draining = false;
+  Timer? _debounce;
+
+  /// Only fetch a stop's heavy platform map once the rider has zoomed in toward
+  /// it — at the route overview the to-scale trains are sub-pixel anyway, so
+  /// prefetching the whole route there is pure waste (and the burst that choked
+  /// the connection). Below this zoom we fetch nothing.
+  static const _detailZoom = 12.5;
 
   @override
   void initState() {
     super.initState();
-    // The prefetch streams the per-stop StationMaps + Wagenreihungen in over a
-    // few seconds; poll the warm caches and build each stop's static parked
-    // train as its data arrives, then stop. This is the ONLY place the parked
-    // geometry is computed — it never runs per frame.
-    _refreshParked();
-    _poll = Timer.periodic(const Duration(milliseconds: 800), (t) {
-      _refreshParked();
-      _pollAttempts++;
-      if (_done.length >= widget.trip.stopovers.length ||
-          _pollAttempts >= _maxPollAttempts) {
-        t.cancel();
-      }
-    });
+    // Warm just the rider's boarding stop (ONE request, deferred so it doesn't
+    // race the initial tiles) so their own platform train is ready the moment
+    // they zoom in. Every other stop loads lazily, only when zoomed into view.
+    final b = _boardingIndex;
+    if (b >= 0) {
+      Future.delayed(const Duration(seconds: 2), () {
+        if (mounted && _requested.add(b)) {
+          _queue.add(b);
+          _drainQueue();
+        }
+      });
+    }
   }
 
   @override
   void dispose() {
-    _poll?.cancel();
+    _debounce?.cancel();
     super.dispose();
   }
 
-  /// For every stop not yet resolved, if BOTH its StationMap and Wagenreihung
-  /// are now cached, compute its parked-train cars once and keep them.
-  void _refreshParked() {
-    if (!mounted) return;
+  /// Camera moved → after a short debounce, queue any stop now in view (and
+  /// zoomed in enough to matter) for its lazy platform fetch.
+  void _onCamera(MapCamera cam, bool _) {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 350), () {
+      if (!mounted || cam.zoom < _detailZoom) return;
+      final bounds = cam.visibleBounds;
+      final stops = widget.trip.stopovers;
+      var added = false;
+      for (var i = 0; i < stops.length; i++) {
+        if (_requested.contains(i)) continue;
+        final s = stops[i];
+        if (!s.stop.hasLocation) continue;
+        if (!bounds.contains(LatLng(s.stop.latitude!, s.stop.longitude!))) {
+          continue;
+        }
+        _requested.add(i);
+        _queue.add(i);
+        added = true;
+      }
+      if (added) _drainQueue();
+    });
+  }
+
+  /// Fetch queued stops ONE AT A TIME (a single connection — mirrors the
+  /// single-station Karte tab, which works fine; the old whole-route burst is
+  /// what choked the connection). Each stop: Wagenreihung + station map, then
+  /// build its parked train.
+  Future<void> _drainQueue() async {
+    if (_draining) return;
+    _draining = true;
+    final coachSvc = ref.read(coachSequenceServiceProvider);
+    final mapSvc = ref.read(stationMapServiceProvider);
+    final line = widget.trip.line;
+    final stops = widget.trip.stopovers;
+    while (_queue.isNotEmpty && mounted) {
+      final i = _queue.removeAt(0);
+      final s = stops[i];
+      final sw = Stopwatch()..start();
+      if (line.fahrtNr.isNotEmpty) {
+        await coachSvc.getCoachSequenceForDeparture(
+          category: line.productName,
+          trainNumber: line.fahrtNr,
+          stationEva: s.stop.id,
+          departureTime: s.departure ?? s.arrival,
+        );
+      }
+      if (!mounted) break;
+      var failed = false;
+      try {
+        await mapSvc.fetchByStationName(s.stop.name, background: true);
+      } catch (_) {
+        failed = true;
+      }
+      if (!mounted) break;
+      AppLog.log('${failed ? "✗" : "✓"} ${s.stop.name} ${sw.elapsedMilliseconds}ms',
+          tag: 'route');
+      if (failed) {
+        _requested.remove(i); // allow a retry if the rider re-visits this stop
+      } else {
+        _buildParked(i);
+      }
+    }
+    _draining = false;
+  }
+
+  /// Build one stop's parked-train cars from the now-warm caches. A small
+  /// station with no platform-sector data simply yields no train (correct, not
+  /// an error) — it's marked done so we don't retry it.
+  void _buildParked(int i) {
+    if (!mounted || _done.contains(i)) return;
     final mapSvc = ref.read(stationMapServiceProvider);
     final coachSvc = ref.read(coachSequenceServiceProvider);
     final line = widget.trip.line;
-    var changed = false;
-    final stops = widget.trip.stopovers;
-    for (var i = 0; i < stops.length; i++) {
-      if (_done.contains(i)) continue;
-      final s = stops[i];
-      final gleisRaw = s.platform?.trim() ?? '';
-      final map = mapSvc.cachedByName(s.stop.name);
-      // No map yet → keep polling. A map with no platforms means the scrape
-      // failed/placeholder → give up on this stop.
-      if (map == null) continue;
-      if (gleisRaw.isEmpty || map.platforms.isEmpty) {
-        _done.add(i);
-        continue;
-      }
-      final cs = coachSvc.cachedForDeparture(
-        category: line.productName,
-        trainNumber: line.fahrtNr,
-        stationEva: s.stop.id,
-        departureTime: s.departure ?? s.arrival,
-      );
-      if (cs == null) continue; // Wagenreihung not in yet (or never will be).
-      _done.add(i);
-      final cars = pt.platformTrainCars(
-        map,
-        gleis: pt.normalizeGleis(gleisRaw),
-        // Only the rider's boarding stop dims the non-boarding portion; at the
-        // other stops the whole standing train is shown lit.
-        section: i == _boardingIndex ? _boardingSection : null,
-        cs: cs,
-      );
-      if (cars.isNotEmpty) {
-        _parked[i] = _ParkedStop(cars);
-        changed = true;
-      }
+    final s = widget.trip.stopovers[i];
+    final gleisRaw = s.platform?.trim() ?? '';
+    final map = mapSvc.cachedByName(s.stop.name);
+    if (map == null) return; // fetch didn't land in cache; leave for a retry
+    _done.add(i);
+    if (gleisRaw.isEmpty || map.platforms.isEmpty) return;
+    final cs = coachSvc.cachedForDeparture(
+      category: line.productName,
+      trainNumber: line.fahrtNr,
+      stationEva: s.stop.id,
+      departureTime: s.departure ?? s.arrival,
+    );
+    if (cs == null) return;
+    final cars = pt.platformTrainCars(
+      map,
+      gleis: pt.normalizeGleis(gleisRaw),
+      // Only the rider's boarding stop dims the non-boarding portion.
+      section: i == _boardingIndex ? _boardingSection : null,
+      cs: cs,
+    );
+    if (cars.isNotEmpty) {
+      _parked[i] = _ParkedStop(cars);
+      if (mounted) setState(() {});
     }
-    if (changed && mounted) setState(() {});
   }
 
   /// The stop the rider boards at, resolved from the leg's [boardingId] (EVA,
@@ -449,6 +356,8 @@ class _TrainMapState extends ConsumerState<TrainMap> {
 
     return AppMap(
       interactive: widget.interactive,
+      // Lazily fetch a stop's platform only once it's zoomed into view.
+      onPositionChanged: _onCamera,
       // Show the real DB station floor plans when you zoom into a stop, so the
       // gliding/parked train reads as pulling into each platform. (Indoor tiles
       // only fetch at high zoom — minNativeZoom 14 — so the overview costs

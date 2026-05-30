@@ -26,6 +26,11 @@ class AppMap extends StatelessWidget {
   final bool allowRotation;
   final void Function(TapPosition, LatLng)? onTap;
 
+  /// Camera moved (pan/zoom). Lets a map lazily load detail for whatever the
+  /// rider has navigated to — e.g. the route map fetches a stop's platform only
+  /// once it's zoomed into view, instead of prefetching the whole route upfront.
+  final void Function(MapCamera camera, bool hasGesture)? onPositionChanged;
+
   /// A bahnhof.de floor id (e.g. `GROUND_FLOOR`) → overlay the real indoor
   /// floor plan. Null for an outdoor-only map.
   final String? indoorLevel;
@@ -48,6 +53,7 @@ class AppMap extends StatelessWidget {
     this.interactive = true,
     this.allowRotation = false,
     this.onTap,
+    this.onPositionChanged,
     this.indoorLevel,
     this.dbAttribution = false,
     this.children = const [],
@@ -65,6 +71,7 @@ class AppMap extends StatelessWidget {
         maxZoom: maxZoom,
         initialCameraFit: initialCameraFit,
         onTap: onTap,
+        onPositionChanged: onPositionChanged,
         interactionOptions: InteractionOptions(
           flags: !interactive
               ? InteractiveFlag.none
