@@ -98,7 +98,7 @@ class PlatformTrackView extends StatelessWidget {
 
     // A rounded loco-style snout sits at each end of the train, so leave room
     // for it on both sides and shift the whole layout right by one nose width.
-    final noseW = carHeight * 1.05;
+    final noseW = carHeight * 1.3;
     final leadPad = noseW + 2;
 
     double px(double u) => (u - ds) * scale + leadPad;
@@ -296,16 +296,15 @@ class _NosePainter extends CustomPainter {
     final w = size.width, h = size.height;
 
     final body = Path()
-      ..moveTo(0.12 * w, h) // bottom, just behind the nose tip
+      ..moveTo(0.14 * w, h) // bottom, just behind the nose tip
       ..lineTo(w, h) // flat underframe to the car end
-      ..lineTo(w, 0.24 * h) // up the car-end edge (stop short for the notch)
-      ..lineTo(0.86 * w, 0.24 * h) // notch in…
-      ..lineTo(0.86 * w, 0.05 * h) // …and up to the roof
-      ..lineTo(0.72 * w, 0) // roof corner
-      // roof sweeps down to the low, rounded nose tip
-      ..cubicTo(0.42 * w, 0, 0.15 * w, 0.16 * h, 0.06 * w, 0.42 * h)
-      // belly curves back under the nose to the underframe
-      ..cubicTo(0, 0.56 * h, 0, 0.82 * h, 0.12 * w, h)
+      ..lineTo(w, 0.14 * h) // up the full-height car-end edge
+      ..lineTo(0.90 * w, 0.14 * h) // small coupling notch in…
+      ..lineTo(0.90 * w, 0.02 * h) // …and up to the roof
+      // one smooth, rounded roof hump sweeping down to the low nose tip
+      ..cubicTo(0.55 * w, 0.0, 0.28 * w, 0.06 * h, 0.08 * w, 0.46 * h)
+      // rounded nose tip / belly back to the underframe
+      ..cubicTo(0.0, 0.64 * h, 0.0, 0.86 * h, 0.14 * w, h)
       ..close();
 
     canvas.drawPath(body, Paint()..color = AppColors.locomotive);
