@@ -1,4 +1,5 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
@@ -96,10 +97,11 @@ class PlatformTrackView extends StatelessWidget {
     final carTop = dirH + labelH + labelGap;
     final stackH = carTop + carHeight + trackH;
 
-    // A rounded loco-style snout sits at each end of the train, so leave room
-    // for it on both sides: the end cars themselves are shaped into the ICE
-    // snout and overhang their platform slot by this much on the outer side.
-    final overhang = carHeight * 0.6;
+    // The end cars themselves are shaped into the snout (no separate nose) and
+    // overhang their platform slot on the outer side. A high-speed train (ICE)
+    // gets a long aerodynamic nose; a regional train a short, blunt cab.
+    final highSpeed = _isHighSpeed(sequence);
+    final overhang = carHeight * (highSpeed ? 0.75 : 0.32);
     final leadPad = overhang + 2;
 
     double px(double u) => (u - ds) * scale + leadPad;
@@ -221,6 +223,7 @@ class PlatformTrackView extends StatelessWidget {
           child: _TrackEndCar(
             coach: c,
             front: front,
+            highSpeed: highSpeed,
             width: w,
             height: carHeight,
             selectable: selectable,
@@ -296,38 +299,58 @@ Color _coachAccent(Coach c) {
   return AppColors.secondClass;
 }
 
-/// How much of an end car's width is the snout (the rest is the full-height
-/// body that carries the number).
-const double _noseFrac = 0.55;
+/// True for a high-speed train (ICE/ICE-E) — gets the long aerodynamic nose.
+bool _isHighSpeed(CoachSequence s) {
+  for (final g in s.groups) {
+    final c = g.transport.category.toUpperCase();
+    if (c == 'ICE' || c == 'ECE') return true;
+    if (g.transport.type.toUpperCase().contains('HIGH_SPEED')) return true;
+  }
+  return false;
+}
 
-/// The wedge outline of an end car: a low, rounded nose at the OUTER end, the
-/// roof sweeping up to a full-height body at the INNER (coupling) end, flat
-/// underframe. [front] true = nose on the left, false = nose on the right.
-Path _endCarPath(Size size, {required bool front}) {
+/// Fraction of an end car's width taken by the snout (rest is the full-height
+/// body that carries the number). ICE = long nose, regional = short blunt cab.
+double _noseFracFor(bool highSpeed) => highSpeed ? 0.60 : 0.34;
+
+/// Outline of an end car, built with the nose at the LEFT (front); the rear car
+/// mirrors it. ICE: a long, smooth convex nose dropping to a low rounded tip
+/// (like the ICE 4). Regional: a blunt cab — short rounded top corner, then a
+/// near-vertical front straight down.
+Path _endCarPath(Size size, {required bool front, required bool highSpeed}) {
   final w = size.width, h = size.height;
-  final nf = _noseFrac * w; // snout length in px
-  if (front) {
-    // Small rounded tip at the front, then a near-straight, aggressive diagonal
-    // up to the roof; short flat roof to the full-height coupling end.
-    return Path()
-      ..moveTo(0.16 * nf, h) // bottom, just behind the tip
+  final nf = _noseFracFor(highSpeed) * w; // snout length in px
+  final Path p;
+  if (highSpeed) {
+    p = Path()
+      ..moveTo(0.10 * nf, h) // bottom, just behind the tip
       ..lineTo(w, h) // flat underframe to the inner end
       ..lineTo(w, 0) // full-height inner (coupling) edge
-      ..lineTo(0.96 * nf, 0) // short flat roof, then…
-      ..lineTo(0.12 * nf, 0.30 * h) // …the aggressive near-straight diagonal
-      ..quadraticBezierTo(0, 0.46 * h, 0.03 * nf, 0.64 * h) // small round tip
-      ..quadraticBezierTo(0.06 * nf, 0.86 * h, 0.16 * nf, h) // belly to bottom
+      ..lineTo(0.80 * nf, 0) // short flat roof, then the long convex sweep…
+      ..cubicTo(0.46 * nf, 0, 0.16 * nf, 0.12 * h, 0.05 * nf, 0.44 * h)
+      // …down to a low, rounded nose tip and belly
+      ..cubicTo(0, 0.58 * h, 0, 0.78 * h, 0.10 * nf, h)
+      ..close();
+  } else {
+    p = Path()
+      ..moveTo(0.06 * nf, h) // bottom front (near-vertical face)
+      ..lineTo(w, h) // flat underframe to the inner end
+      ..lineTo(w, 0) // full-height inner (coupling) edge
+      ..lineTo(0.34 * nf, 0) // roof to the front-top
+      ..quadraticBezierTo(0.02 * nf, 0, 0, 0.26 * h) // short rounded top corner
+      ..lineTo(0.06 * nf, h) // straight near-vertical front to the bottom
       ..close();
   }
-  return Path()
-    ..moveTo(w - 0.16 * nf, h)
-    ..lineTo(0, h)
-    ..lineTo(0, 0)
-    ..lineTo(w - 0.96 * nf, 0)
-    ..lineTo(w - 0.12 * nf, 0.30 * h)
-    ..quadraticBezierTo(w, 0.46 * h, w - 0.03 * nf, 0.64 * h)
-    ..quadraticBezierTo(w - 0.06 * nf, 0.86 * h, w - 0.16 * nf, h)
-    ..close();
+  if (front) return p;
+  // Mirror horizontally (x' = w - x) so the rear car's nose points the other
+  // way — a column-major flip matrix, no deprecated Matrix4 helpers.
+  final flip = Float64List.fromList([
+    -1, 0, 0, 0, //
+    0, 1, 0, 0, //
+    0, 0, 1, 0, //
+    w, 0, 0, 1, //
+  ]);
+  return p.transform(flip);
 }
 
 /// The first/last car of an ICE: the car itself IS the snout (no separate nose
@@ -336,6 +359,7 @@ Path _endCarPath(Size size, {required bool front}) {
 class _TrackEndCar extends StatelessWidget {
   final Coach coach;
   final bool front;
+  final bool highSpeed;
   final double width;
   final double height;
   final bool selectable;
@@ -346,6 +370,7 @@ class _TrackEndCar extends StatelessWidget {
   const _TrackEndCar({
     required this.coach,
     required this.front,
+    required this.highSpeed,
     required this.width,
     required this.height,
     required this.selectable,
@@ -360,7 +385,7 @@ class _TrackEndCar extends StatelessWidget {
     final fg = AppColors.onClass(accent);
     final canSelect = selectable && !coach.isLocomotive && coach.wagonNumber > 0;
     final compact = height < 50;
-    final bodyW = width * (1 - _noseFrac) * 0.96;
+    final bodyW = width * (1 - _noseFracFor(highSpeed)) * 0.96;
 
     final content = Align(
       alignment: front ? Alignment.centerRight : Alignment.centerLeft,
@@ -398,7 +423,10 @@ class _TrackEndCar extends StatelessWidget {
         Positioned.fill(
           child: CustomPaint(
             painter: _EndCarPainter(
-                front: front, accent: accent, selected: isSelected),
+                front: front,
+                highSpeed: highSpeed,
+                accent: accent,
+                selected: isSelected),
           ),
         ),
         Positioned.fill(child: content),
@@ -419,14 +447,18 @@ class _TrackEndCar extends StatelessWidget {
 
 class _EndCarPainter extends CustomPainter {
   final bool front;
+  final bool highSpeed;
   final Color accent;
   final bool selected;
   const _EndCarPainter(
-      {required this.front, required this.accent, required this.selected});
+      {required this.front,
+      required this.highSpeed,
+      required this.accent,
+      required this.selected});
 
   @override
   void paint(Canvas canvas, Size size) {
-    final body = _endCarPath(size, front: front);
+    final body = _endCarPath(size, front: front, highSpeed: highSpeed);
     canvas.drawPath(body, Paint()..color = accent);
     canvas.drawPath(
       body,
@@ -439,7 +471,10 @@ class _EndCarPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _EndCarPainter old) =>
-      old.front != front || old.accent != accent || old.selected != selected;
+      old.front != front ||
+      old.highSpeed != highSpeed ||
+      old.accent != accent ||
+      old.selected != selected;
 }
 
 /// Shared tooltip text for a car on the track.
