@@ -2,24 +2,21 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../models/coach_sequence.dart';
-import '../../../models/seat_map.dart';
 import '../../../models/trip.dart';
-import '../../../providers/seat_map_provider.dart';
-import 'coach_sequence_view.dart';
-import 'seat_map_view.dart';
+import 'coach_sequence_view.dart' show splitTrainBanner;
+import 'seat_map_view.dart' show SeatPlanBody;
 import 'stop_timeline.dart';
 import 'train_info_header.dart';
 import 'wagenreihung_screen.dart';
 
-/// The full detail of one train: header, live map, coach sequence and stop
-/// timeline. Used standalone on the train screen and stacked per leg in the
-/// connection view. Returns column children (no Scaffold) so it can be embedded.
+/// The full detail of one train: header, live map and stop timeline. Used
+/// standalone on the train screen and stacked per leg in the connection view.
+/// Returns column children (no Scaffold) so it can be embedded.
 ///
-/// For trains with a reservable seat plan, the free-seat view lives *inside*
-/// the Wagenreihung card: the train doubles as the coach picker (selectable
-/// cars + free-seat badges) and the selected coach's seat plan renders below
-/// it — no separate "Freie Sitzplätze" section. Selection + class state live
-/// here and feed both. When there's no Wagenreihung, the panel stands alone.
+/// The Wagenreihung + free-seat plan no longer live inline (no dropdown): a
+/// single tappable tile opens the dedicated fullscreen
+/// [WagenreihungScreen], where the platform layout and the seats get the whole
+/// screen and the free seats load straight away.
 class TrainDetailView extends ConsumerStatefulWidget {
   final Trip trip;
   final CoachSequence? coach;
@@ -61,84 +58,35 @@ class TrainDetailView extends ConsumerStatefulWidget {
 }
 
 class _TrainDetailViewState extends ConsumerState<TrainDetailView> {
-  bool _seatsExpanded = false; // free-seat panel starts collapsed
-  int? _selectedWagon; // explicit user pick; null → auto (first free)
-
   @override
   Widget build(BuildContext context) {
     final trip = widget.trip;
+    final coach = widget.coach;
     final reservable = SeatPlanBody.isAvailableFor(trip);
-
-    // Only fetch the seat map once the panel is opened.
-    final req = (reservable && _seatsExpanded)
-        ? SeatMapRequest.fromTrip(trip)
-        : null;
-    final seatAsync = req != null ? ref.watch(seatMapProvider(req)) : null;
-    final SeatMap? seatMap =
-        seatAsync?.maybeWhen(data: (m) => m, orElse: () => null);
-
-    // Free-seat count per wagon, and the effective selection (explicit pick or
-    // first coach with free seats) shared by the Wagenreihung and the panel.
-    final freeByWagon = <int, int>{};
-    if (seatMap != null) {
-      for (final c in seatMap.coaches) {
-        final nr = int.tryParse(c.number);
-        if (nr != null) freeByWagon[nr] = c.freeCount;
-      }
-    }
-    final effectiveWagon = _effectiveWagon(seatMap);
-    final hasWagenreihung = widget.coach != null;
-
-    final seatPlan = reservable
-        ? SeatPlanBody(
-            trip: trip,
-            expanded: _seatsExpanded,
-            onToggle: () => setState(() => _seatsExpanded = !_seatsExpanded),
-            seatAsync: seatAsync,
-            selectedWagon: effectiveWagon,
-            onSelectWagon: (nr) => setState(() => _selectedWagon = nr),
-            hasExternalSelector: hasWagenreihung,
-          )
-        : null;
+    // There's something to open if we have a coach sequence to draw or a
+    // reservable seat plan to show.
+    final hasExtra = coach != null || reservable;
 
     // A leg of a connection (vs. a standalone train lookup) when an endpoint is
     // set — then the train header folds inline onto the route spine.
     final isLeg = widget.boardingId != null || widget.alightingId != null;
 
     // Wing-train (Flügelzug) guidance. On a leg it's hoisted up under the
-    // boarding stop (where you decide which portion to board); otherwise it
-    // stays inside the Wagenreihung card.
-    final coach = widget.coach;
-    // Only a REAL split (portions to different destinations) gets the red
-    // warning — not every train that merely has >1 coach group (e.g. an RE that
-    // runs coupled units to the same place, where boarding anywhere is fine).
+    // boarding stop (where you decide which portion to board). Only a REAL
+    // split (portions to different destinations) gets the red warning.
     final splitBanner = (isLeg && coach != null && coach.splits)
         ? splitTrainBanner(context, coach,
             targetDestination: widget.legDestinationName)
         : null;
 
-    // Wagenreihung (or, when there's none, the bare seat-plan panel) folded
-    // INTO the train card as a sub-section, not a separate card.
-    final Widget? trainExtra = widget.coach != null
-        ? CoachSequenceView(
-            sequence: widget.coach!,
-            selectable: reservable && _seatsExpanded,
-            freeByWagon: freeByWagon,
-            selectedWagon: effectiveWagon,
-            onCoachTap: (c) => setState(() => _selectedWagon = c.wagonNumber),
-            seatPlan: seatPlan,
-            embedded: true,
-            targetDestination: widget.legDestinationName,
-            showSplitBanner: !isLeg,
-            onOpenFullscreen: () => _openFullscreen(effectiveWagon),
-          )
-        : seatPlan;
+    final Widget? trainExtra =
+        hasExtra ? _wagenreihungTile(context, hasCoach: coach != null) : null;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // One block: train name/info + Wagenreihung + Halte timeline, all in
-        // one card. On a leg the header renders inline on the route line.
+        // One block: train name/info + Halte timeline, in one card. On a leg
+        // the header renders inline on the route line.
         StopTimeline(
           stopovers: trip.stopovers,
           onStopTap: widget.onStopTap,
@@ -157,6 +105,69 @@ class _TrainDetailViewState extends ConsumerState<TrainDetailView> {
           boardingBanner: splitBanner,
         ),
       ],
+    );
+  }
+
+  /// The single entry point to the Wagenreihung + seat plan: tap → fullscreen.
+  Widget _wagenreihungTile(BuildContext context, {required bool hasCoach}) {
+    final theme = Theme.of(context);
+    final title = hasCoach ? 'Wagenreihung & Sitzplätze' : 'Freie Sitzplätze';
+    final subtitle = hasCoach
+        ? 'Wagen, Abschnitte & freie Plätze ansehen'
+        : 'Sitzplan & freie Plätze ansehen';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+      child: Material(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(10),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: _openFullscreen,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            child: Row(
+              children: [
+                Icon(Icons.train, size: 20, color: theme.colorScheme.primary),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title,
+                          style: theme.textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.bold)),
+                      const SizedBox(height: 2),
+                      Text(subtitle,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant)),
+                    ],
+                  ),
+                ),
+                Icon(Icons.open_in_full,
+                    size: 18, color: theme.colorScheme.onSurfaceVariant),
+                const SizedBox(width: 6),
+                Icon(Icons.chevron_right,
+                    size: 20, color: theme.colorScheme.onSurfaceVariant),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Open the dedicated fullscreen Wagenreihung + seat-plan screen. Pushed on
+  /// the root navigator so it covers the tab shell with a real back button.
+  void _openFullscreen() {
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute(
+        fullscreenDialog: true,
+        builder: (_) => WagenreihungScreen(
+          trip: widget.trip,
+          sequence: widget.coach,
+          targetDestination: widget.legDestinationName,
+        ),
+      ),
     );
   }
 
@@ -214,32 +225,5 @@ class _TrainDetailViewState extends ConsumerState<TrainDetailView> {
         return Icons.restaurant;
     }
     return null;
-  }
-
-  /// Hand off to the dedicated fullscreen Wagenreihung + seat-plan screen,
-  /// carrying the current coach selection so you keep your place.
-  void _openFullscreen(int? wagon) {
-    final coach = widget.coach;
-    if (coach == null) return;
-    Navigator.of(context, rootNavigator: true).push(
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (_) => WagenreihungScreen(
-          trip: widget.trip,
-          sequence: coach,
-          initialWagon: wagon,
-          targetDestination: widget.legDestinationName,
-        ),
-      ),
-    );
-  }
-
-  int? _effectiveWagon(SeatMap? map) {
-    if (_selectedWagon != null) return _selectedWagon;
-    if (map == null) return null;
-    for (final c in map.coaches) {
-      if (c.hasFree) return int.tryParse(c.number);
-    }
-    return map.coaches.isNotEmpty ? int.tryParse(map.coaches.first.number) : null;
   }
 }

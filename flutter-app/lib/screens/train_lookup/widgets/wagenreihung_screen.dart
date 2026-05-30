@@ -16,7 +16,11 @@ import 'seat_map_view.dart';
 /// Gleis, and — for the tapped coach — a big, vertical seat plan.
 class WagenreihungScreen extends ConsumerStatefulWidget {
   final Trip trip;
-  final CoachSequence sequence;
+
+  /// The coach sequence to draw to scale. Null for trains that only offer a
+  /// seat plan (no Wagenreihung) — then a coach-chip picker stands in for the
+  /// platform layout.
+  final CoachSequence? sequence;
 
   /// Coach pre-selected from the inline view, so opening fullscreen keeps your
   /// place. Null → first coach with free seats.
@@ -28,7 +32,7 @@ class WagenreihungScreen extends ConsumerStatefulWidget {
   const WagenreihungScreen({
     super.key,
     required this.trip,
-    required this.sequence,
+    this.sequence,
     this.initialWagon,
     this.targetDestination,
   });
@@ -66,7 +70,9 @@ class _WagenreihungScreenState extends ConsumerState<WagenreihungScreen> {
     }
     final effectiveWagon = _effectiveWagon(seatMap);
 
-    final gleis = sequence.departurePlatform;
+    final showTrack =
+        sequence != null && PlatformTrackView.hasGeometry(sequence);
+    final gleis = sequence?.departurePlatform ?? '';
 
     return Scaffold(
       appBar: AppBar(
@@ -87,7 +93,7 @@ class _WagenreihungScreenState extends ConsumerState<WagenreihungScreen> {
                   Text('Gleis $gleis',
                       style: theme.textTheme.titleMedium
                           ?.copyWith(fontWeight: FontWeight.bold)),
-                  if (sequence.hasPlatformChange) ...[
+                  if (sequence!.hasPlatformChange) ...[
                     const SizedBox(width: 8),
                     Text('(statt ${sequence.scheduledPlatform})',
                         style: theme.textTheme.bodySmall
@@ -97,7 +103,7 @@ class _WagenreihungScreenState extends ConsumerState<WagenreihungScreen> {
               ),
             ),
 
-          if (sequence.splits)
+          if (sequence != null && sequence.splits)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: splitTrainBanner(context, sequence,
@@ -106,36 +112,92 @@ class _WagenreihungScreenState extends ConsumerState<WagenreihungScreen> {
 
           // Large to-scale platform: section letters + cars + Gleis, all
           // sharing one scale so they line up and scroll together.
-          Padding(
-            padding: const EdgeInsets.fromLTRB(8, 14, 8, 6),
-            child: PlatformTrackView(
-              sequence: sequence,
-              selectable: reservable,
-              freeByWagon: freeByWagon,
-              selectedWagon: effectiveWagon,
-              onCoachTap: reservable
-                  ? (c) => setState(() => _selectedWagon = c.wagonNumber)
-                  : null,
-              carHeight: 64,
-              targetCarWidth: 78,
+          if (showTrack) ...[
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 14, 8, 6),
+              child: PlatformTrackView(
+                sequence: sequence,
+                selectable: reservable,
+                freeByWagon: freeByWagon,
+                selectedWagon: effectiveWagon,
+                onCoachTap: reservable
+                    ? (c) => setState(() => _selectedWagon = c.wagonNumber)
+                    : null,
+                carHeight: 64,
+                targetCarWidth: 78,
+              ),
             ),
-          ),
-
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Wrap(spacing: 14, runSpacing: 6, children: [
-              _legendItem(AppColors.firstClass, '1. Klasse'),
-              _legendItem(AppColors.secondClass, '2. Klasse'),
-              _legendItem(AppColors.restaurant, 'Restaurant'),
-              _legendItem(AppColors.locomotive, 'Triebkopf'),
-            ]),
-          ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Wrap(spacing: 14, runSpacing: 6, children: [
+                _legendItem(AppColors.firstClass, '1. Klasse'),
+                _legendItem(AppColors.secondClass, '2. Klasse'),
+                _legendItem(AppColors.restaurant, 'Restaurant'),
+                _legendItem(AppColors.locomotive, 'Triebkopf'),
+              ]),
+            ),
+          ]
+          // No platform geometry → chip picker built from the seat map.
+          else if (seatMap != null && seatMap.coaches.isNotEmpty)
+            _coachChips(theme, seatMap, effectiveWagon),
 
           if (reservable) ...[
             const Divider(height: 28),
             _seatSection(theme, seatAsync, effectiveWagon),
           ],
         ],
+      ),
+    );
+  }
+
+  /// Horizontal chips, one per coach, used when there's no platform layout to
+  /// draw — tap to pick the coach whose seats are shown below.
+  Widget _coachChips(ThemeData theme, SeatMap map, int? selected) {
+    return SizedBox(
+      height: 72,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
+        itemCount: map.coaches.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemBuilder: (_, i) {
+          final c = map.coaches[i];
+          final nr = int.tryParse(c.number);
+          final isSel = nr != null && nr == selected;
+          final full = !c.hasFree;
+          return InkWell(
+            onTap: nr != null
+                ? () => setState(() => _selectedWagon = nr)
+                : null,
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              width: 64,
+              decoration: BoxDecoration(
+                color: isSel
+                    ? AppColors.onTime.withValues(alpha: 0.16)
+                    : theme.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: isSel ? AppColors.onTime : theme.colorScheme.outlineVariant,
+                  width: isSel ? 2.5 : 1,
+                ),
+              ),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text('Wg ${c.number}',
+                      style: theme.textTheme.labelLarge
+                          ?.copyWith(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 2),
+                  Text('${c.freeCount} frei',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                          color: full ? AppColors.closedCoach : AppColors.onTime,
+                          fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }

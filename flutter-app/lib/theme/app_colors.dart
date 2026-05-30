@@ -17,10 +17,14 @@ class AppColors {
   static const cancelled = Color(0xFF95A5A6);
   static const warning = Color(0xFFF39C12);
 
-  // Coach sequence
-  static const firstClass = Color(0xFFFFD700);
-  static const secondClass = Color(0xFF3498DB);
-  static const restaurant = Color(0xFFE67E22);
-  static const locomotive = Color(0xFF7F8C8D);
-  static const closedCoach = Color(0xFFBDC3C7);
+  // Coach sequence — saturated enough to fill a whole car body and still read.
+  static const firstClass = Color(0xFFE3B23C); // warm gold (1. Klasse)
+  static const secondClass = Color(0xFF2F6CC0); // clean DB blue (2. Klasse)
+  static const restaurant = Color(0xFFC85C2E); // warm terracotta (Bordbistro)
+  static const locomotive = Color(0xFF5B6770); // graphite Triebkopf
+  static const closedCoach = Color(0xFFB0B8BE);
+
+  /// Readable text/icon colour on top of a filled class colour.
+  static Color onClass(Color c) =>
+      c.computeLuminance() > 0.5 ? const Color(0xDD000000) : Colors.white;
 }

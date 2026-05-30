@@ -81,13 +81,28 @@ class PlatformTrackView extends StatelessWidget {
     final span = de - ds;
     if (span <= 0) return const SizedBox.shrink();
 
-    double px(double u) => (u - ds) * scale;
-    final totalW = span * scale;
+    // Travel direction from the coaches' own orientation: a FORWARDS-majority
+    // train heads toward the start-of-numbering end (left here). Hidden when no
+    // coach reports an orientation — better no arrow than a guessed one.
+    final fwd = coaches.where((c) => c.orientation == 'FORWARDS').length;
+    final bwd = coaches.where((c) => c.orientation == 'BACKWARDS').length;
+    final hasDir = fwd > 0 || bwd > 0;
+    final dirToStart = fwd >= bwd; // arrow points left toward trainStart
 
+    final dirH = hasDir ? 18.0 : 0.0;
     const labelH = 22.0;
     const labelGap = 4.0;
     const trackH = 16.0;
-    final stackH = labelH + labelGap + carHeight + trackH;
+    final carTop = dirH + labelH + labelGap;
+    final stackH = carTop + carHeight + trackH;
+
+    // A rounded loco-style snout sits at each end of the train, so leave room
+    // for it on both sides and shift the whole layout right by one nose width.
+    final noseW = carHeight * 0.85;
+    final leadPad = noseW + 2;
+
+    double px(double u) => (u - ds) * scale + leadPad;
+    final totalW = span * scale + leadPad * 2;
 
     final bandEven = theme.colorScheme.surfaceContainerHighest.withValues(
         alpha: 0.55);
@@ -120,7 +135,7 @@ class PlatformTrackView extends StatelessWidget {
       children.add(Positioned(
         left: left,
         width: w,
-        top: 0,
+        top: dirH,
         height: labelH,
         child: Center(
           child: Text(
@@ -145,7 +160,55 @@ class PlatformTrackView extends StatelessWidget {
       child: CustomPaint(painter: _TrackPainter(color: AppColors.locomotive)),
     ));
 
-    // 3) The cars, each placed at its true platform position.
+    // 2b) Fahrtrichtung arrow in the top strip, at the leading end.
+    if (hasDir) {
+      children.add(Positioned(
+        left: 0,
+        right: 0,
+        top: 0,
+        height: dirH,
+        child: Align(
+          alignment: dirToStart ? Alignment.centerLeft : Alignment.centerRight,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (dirToStart)
+                  Icon(Icons.keyboard_double_arrow_left,
+                      size: 15, color: theme.colorScheme.primary),
+                Text(' Fahrtrichtung ',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: theme.colorScheme.primary)),
+                if (!dirToStart)
+                  Icon(Icons.keyboard_double_arrow_right,
+                      size: 15, color: theme.colorScheme.primary),
+              ],
+            ),
+          ),
+        ),
+      ));
+    }
+
+    // 3) Rounded loco-style snouts at both ends — the "Schnauze" up front.
+    children.add(Positioned(
+      left: px(trainStart) - noseW,
+      width: noseW,
+      top: carTop,
+      height: carHeight,
+      child: const _TrackNose(front: true),
+    ));
+    children.add(Positioned(
+      left: px(trainEnd),
+      width: noseW,
+      top: carTop,
+      height: carHeight,
+      child: const _TrackNose(front: false),
+    ));
+
+    // 4) The cars, each placed at its true platform position.
     for (final c in coaches) {
       final pos = c.platformPosition!;
       final left = px(pos.start);
@@ -153,7 +216,7 @@ class PlatformTrackView extends StatelessWidget {
       children.add(Positioned(
         left: left,
         width: w,
-        top: labelH + labelGap,
+        top: carTop,
         height: carHeight,
         child: _TrackCar(
           coach: c,
@@ -207,6 +270,51 @@ class _TrackPainter extends CustomPainter {
   bool shouldRepaint(covariant _TrackPainter old) => old.color != color;
 }
 
+/// A rounded loco snout for the end of the train — heavily rounded on the
+/// outer side (the "Schnauze"), flat against the first/last car.
+class _TrackNose extends StatelessWidget {
+  final bool front;
+  const _TrackNose({required this.front});
+
+  @override
+  Widget build(BuildContext context) {
+    const outer = Radius.circular(40);
+    const inner = Radius.circular(5);
+    return Container(
+      decoration: BoxDecoration(
+        color: AppColors.locomotive,
+        borderRadius: front
+            ? BorderRadius.horizontal(left: outer, right: inner)
+            : BorderRadius.horizontal(left: inner, right: outer),
+        border: Border.all(
+            color: Colors.black.withValues(alpha: 0.25), width: 1.4),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          // A slanted dark windscreen near the tip.
+          Align(
+            alignment: front ? Alignment.centerLeft : Alignment.centerRight,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 6),
+              child: Container(
+                width: 7,
+                height: 12,
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.38),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+          ),
+          const Icon(Icons.train, color: Colors.white, size: 15),
+        ],
+      ),
+    );
+  }
+}
+
 /// One car sized to fill its platform slot: class stripe, wagon number and a
 /// free-seat badge (or amenity icons). Tappable when selecting a coach.
 class _TrackCar extends StatelessWidget {
@@ -240,46 +348,46 @@ class _TrackCar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final open = coach.isOpen;
     final isLoco = coach.isLocomotive;
+    // The whole car body is filled with its class colour now (blue car = fully
+    // blue, gold = fully gold), with the number/icons in a contrasting tone.
     final accent = open ? _classColor : AppColors.closedCoach;
+    final fg = AppColors.onClass(accent);
     final canSelect = selectable && !isLoco && coach.wagonNumber > 0;
-    final borderColor = isSelected ? AppColors.onTime : accent;
     final compact = height < 50;
 
     final car = Container(
       margin: const EdgeInsets.symmetric(horizontal: 0.6),
       decoration: BoxDecoration(
-        color: isSelected
-            ? AppColors.onTime.withValues(alpha: 0.16)
-            : isLoco
-                ? AppColors.locomotive
-                : theme.colorScheme.surfaceContainerHighest,
+        color: accent,
         borderRadius: BorderRadius.circular(5),
-        border: Border.all(color: borderColor, width: isSelected ? 2.5 : 1.5),
+        border: Border.all(
+          color: isSelected ? AppColors.onTime : Colors.black.withValues(alpha: 0.18),
+          width: isSelected ? 3 : 1,
+        ),
       ),
       clipBehavior: Clip.antiAlias,
       child: isLoco
-          ? const Center(child: Icon(Icons.train, color: Colors.white, size: 16))
+          ? Center(child: Icon(Icons.train, color: fg, size: 16))
           : Column(
               children: [
-                Container(height: 4, color: accent),
+                const SizedBox(height: 3),
                 Expanded(
                   child: Center(
                     child: Text(
                       coach.wagonNumber > 0 ? '${coach.wagonNumber}' : '–',
                       style: TextStyle(
-                        fontSize: compact ? 12 : 15,
-                        fontWeight: FontWeight.bold,
-                        color: open ? null : Colors.grey,
+                        fontSize: compact ? 13 : 16,
+                        fontWeight: FontWeight.w800,
+                        color: fg,
                       ),
                     ),
                   ),
                 ),
                 if (freeCount != null)
                   Padding(
-                    padding: const EdgeInsets.only(bottom: 2),
+                    padding: const EdgeInsets.only(bottom: 3),
                     child: _FreeSeatBadge(free: freeCount!, big: !compact),
                   )
                 else if (!compact)
@@ -289,15 +397,15 @@ class _TrackCar extends StatelessWidget {
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         if (coach.hasBikeSpace)
-                          const Icon(Icons.pedal_bike, size: 11),
+                          Icon(Icons.pedal_bike, size: 11, color: fg),
                         if (coach.hasQuietZone)
-                          const Icon(Icons.volume_off, size: 11),
+                          Icon(Icons.volume_off, size: 11, color: fg),
                         if (coach.hasFamilyZone)
-                          const Icon(Icons.family_restroom, size: 11),
+                          Icon(Icons.family_restroom, size: 11, color: fg),
                         if (coach.hasWheelchairSpace)
-                          const Icon(Icons.accessible, size: 11),
+                          Icon(Icons.accessible, size: 11, color: fg),
                         if (coach.isRestaurant)
-                          const Icon(Icons.restaurant, size: 11),
+                          Icon(Icons.restaurant, size: 11, color: fg),
                       ],
                     ),
                   ),
@@ -346,37 +454,45 @@ class _FreeSeatBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final full = free == 0;
     final sz = big ? 13.0 : 11.0;
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        SizedBox(
-          width: sz,
-          height: sz,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              Icon(Icons.event_seat,
-                  size: sz,
-                  color: full ? AppColors.closedCoach : AppColors.onTime),
-              if (full)
-                Transform.rotate(
-                  angle: -0.7,
-                  child:
-                      Container(width: sz + 2, height: 1.6, color: AppColors.delay),
-                ),
-            ],
+    // A white pill so the badge reads on top of a fully-coloured car body.
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.92),
+        borderRadius: BorderRadius.circular(7),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(
+            width: sz,
+            height: sz,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Icon(Icons.event_seat,
+                    size: sz,
+                    color: full ? AppColors.closedCoach : AppColors.onTime),
+                if (full)
+                  Transform.rotate(
+                    angle: -0.7,
+                    child: Container(
+                        width: sz + 2, height: 1.6, color: AppColors.delay),
+                  ),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(width: 2),
-        Text(
-          full ? 'voll' : '$free',
-          style: TextStyle(
-            fontSize: big ? 11 : 9,
-            fontWeight: FontWeight.w700,
-            color: full ? AppColors.closedCoach : AppColors.onTime,
+          const SizedBox(width: 2),
+          Text(
+            full ? 'voll' : '$free',
+            style: TextStyle(
+              fontSize: big ? 11 : 9,
+              fontWeight: FontWeight.w700,
+              color: full ? const Color(0xFF8A9097) : AppColors.onTime,
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
