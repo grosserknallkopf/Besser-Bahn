@@ -316,6 +316,42 @@ List<({String letter, LatLng pos})> platformSectionLine(
   ];
 }
 
+/// The level that carries the platform SECTOR_CUBE markers — i.e. the floor
+/// whose plan actually shows the Gleise (the "track level"). Some stations put
+/// a Gleis label on a concourse floor, so this picks the level with the most
+/// sector cubes; falls back to the station's initial level. Used to show the
+/// correct indoor floor plan and to read the Gleis/sector data from it.
+String? trackLevel(StationMap map) {
+  final byLevel = <String, int>{};
+  for (final p in map.pois.where((p) => p.isPlatformSector)) {
+    final l = p.level ?? '';
+    byLevel[l] = (byLevel[l] ?? 0) + 1;
+  }
+  if (byLevel.isNotEmpty) {
+    return byLevel.entries.reduce((a, b) => b.value > a.value ? b : a).key;
+  }
+  if (map.levelInit.isNotEmpty) return map.levelInit;
+  return map.levels.isNotEmpty ? map.levels.first : null;
+}
+
+/// All sector markers (A, B, C…) of the platform serving [gleis], in letter
+/// order, placed on the real map with the boarding-rail nudge applied — for the
+/// "Abschnitt A–E" labels along the platform. Empty when the Gleis/island can't
+/// be resolved.
+List<({String letter, LatLng pos})> platformSectors(
+    StationMap map, String gleis) {
+  final plat = _platformForGleis(map, gleis);
+  if (plat == null) return const [];
+  final island = resolveIsland(map, plat, gleis, 0, 8);
+  return [
+    for (final c in island.cubes)
+      (
+        letter: String.fromCharCode(65 + c.idx),
+        pos: LatLng(c.pos.latitude + island.dLat, c.pos.longitude + island.dLon),
+      ),
+  ];
+}
+
 /// One filled outline polygon (LatLng) per car of [cs] on platform [plat] of
 /// [map], with the [Coach] (for colour/number) and whether it's the rider's
 /// portion (in [section], or all `true` when no section is given).

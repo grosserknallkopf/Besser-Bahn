@@ -168,6 +168,20 @@ class _TrainMapState extends ConsumerState<TrainMap> {
   bool _draining = false;
   Timer? _debounce;
 
+  /// The stop the rider has zoomed in on (nearest the camera centre): its floor
+  /// plan + Gleis/sector labels are shown. -1 = none focused yet.
+  int _focusIndex = -1;
+  int _pendingFocus = -1;
+
+  /// The indoor floor plan to render — the focused stop's TRACK level. Null →
+  /// the default ground floor (overview / before any stop is focused).
+  String? _indoorLevel;
+
+  /// Gleis + sector (A–E) labels for the focused stop, recomputed only when the
+  /// focus changes (never per frame).
+  List<({String letter, LatLng pos})> _focusSectors = const [];
+  List<({String name, LatLng pos})> _focusGleise = const [];
+
   /// Only fetch a stop's heavy platform map once the rider has zoomed in toward
   /// it — at the route overview the to-scale trains are sub-pixel anyway, so
   /// prefetching the whole route there is pure waste (and the burst that choked
@@ -189,7 +203,8 @@ class _TrainMapState extends ConsumerState<TrainMap> {
   }
 
   /// Camera moved → after a short debounce, queue any stop now in view (and
-  /// zoomed in enough to matter) for its lazy platform fetch.
+  /// zoomed in enough to matter) for its lazy platform fetch, and focus the
+  /// stop nearest the camera centre (its floor plan + labels).
   void _onCamera(MapCamera cam, bool _) {
     _debounce?.cancel();
     _debounce = Timer(const Duration(milliseconds: 350), () {
@@ -197,18 +212,57 @@ class _TrainMapState extends ConsumerState<TrainMap> {
       final bounds = cam.visibleBounds;
       final stops = widget.trip.stopovers;
       var added = false;
+      var nearest = -1;
+      var best = double.infinity;
       for (var i = 0; i < stops.length; i++) {
-        if (_requested.contains(i)) continue;
         final s = stops[i];
         if (!s.stop.hasLocation) continue;
-        if (!bounds.contains(LatLng(s.stop.latitude!, s.stop.longitude!))) {
-          continue;
+        final p = LatLng(s.stop.latitude!, s.stop.longitude!);
+        if (!bounds.contains(p)) continue;
+        if (!_requested.contains(i)) {
+          _requested.add(i);
+          _queue.add(i);
+          added = true;
         }
-        _requested.add(i);
-        _queue.add(i);
-        added = true;
+        final d = (p.latitude - cam.center.latitude).abs() +
+            (p.longitude - cam.center.longitude).abs();
+        if (d < best) {
+          best = d;
+          nearest = i;
+        }
       }
       if (added) _drainQueue();
+      if (nearest >= 0) {
+        _pendingFocus = nearest;
+        _applyFocus();
+      }
+    });
+  }
+
+  /// Adopt [_pendingFocus] as the focused stop once its map is cached: switch
+  /// the indoor floor plan to that stop's TRACK level (the floor with the
+  /// Gleise — fixes stations like Neumünster whose tracks aren't on the ground
+  /// floor) and pull its Gleis + sector (A–E) labels for the overlay.
+  void _applyFocus() {
+    final i = _pendingFocus;
+    if (i < 0 || i == _focusIndex) return;
+    final s = widget.trip.stopovers[i];
+    final map = ref.read(stationMapServiceProvider).cachedByName(s.stop.name);
+    if (map == null) return; // not fetched yet — _buildParked retries this
+    final lvl = pt.trackLevel(map);
+    final gleis = pt.normalizeGleis(s.platform?.trim() ?? '');
+    final sectors = gleis.isEmpty
+        ? const <({String letter, LatLng pos})>[]
+        : pt.platformSectors(map, gleis);
+    final gleise = [
+      for (final p in map.platforms)
+        if ((p.level ?? '') == lvl) (name: p.name, pos: p.latLng),
+    ];
+    setState(() {
+      _focusIndex = i;
+      _indoorLevel = lvl;
+      _focusSectors = sectors;
+      _focusGleise = gleise;
     });
   }
 
@@ -294,6 +348,9 @@ class _TrainMapState extends ConsumerState<TrainMap> {
       _parked[i] = _ParkedStop(cars);
       if (mounted) setState(() {});
     }
+    // If this stop is the one the rider just zoomed to, now that its map is in
+    // cache we can switch the floor plan + show its labels.
+    if (i == _pendingFocus) _applyFocus();
   }
 
   /// The stop the rider boards at, resolved from the leg's [boardingId] (EVA,
@@ -358,11 +415,11 @@ class _TrainMapState extends ConsumerState<TrainMap> {
       interactive: widget.interactive,
       // Lazily fetch a stop's platform only once it's zoomed into view.
       onPositionChanged: _onCamera,
-      // Show the real DB station floor plans when you zoom into a stop, so the
-      // gliding/parked train reads as pulling into each platform. (Indoor tiles
-      // only fetch at high zoom — minNativeZoom 14 — so the overview costs
-      // nothing; ground floor covers most platforms.)
-      indoorLevel: 'GROUND_FLOOR',
+      // Show the real DB station floor plan when you zoom into a stop. The
+      // level follows the FOCUSED stop's track floor (the one with the Gleise)
+      // — not always the ground floor (e.g. Neumünster). Indoor tiles only
+      // fetch at high zoom (minNativeZoom 14), so the overview costs nothing.
+      indoorLevel: _indoorLevel ?? 'GROUND_FLOOR',
       dbAttribution: true,
       initialCameraFit: CameraFit.bounds(
         bounds: LatLngBounds.fromPoints(points),
@@ -403,6 +460,10 @@ class _TrainMapState extends ConsumerState<TrainMap> {
         // when the rider has zoomed into a stop (gated by metres/pixel, like the
         // live train), so they don't clutter the overview.
         if (parkedCars.isNotEmpty) _ParkedNumbers(cars: parkedCars),
+        // Gleis ("Gleis 5") + sector (A–E) labels for the focused stop, shown
+        // only when zoomed in. Static geometry, computed once on focus change.
+        if (_focusSectors.isNotEmpty || _focusGleise.isNotEmpty)
+          _StopLabels(sectors: _focusSectors, gleise: _focusGleise),
         // The live train: a top-down body that hugs the rails and slides
         // continuously (its own throttled ticker) instead of jumping. While it
         // dwells at a stop that already has a parked train standing on its
@@ -487,6 +548,78 @@ class _ParkedNumbers extends StatelessWidget {
           ),
         ),
       );
+}
+
+/// The focused stop's platform labels: the Gleis numbers (e.g. "Gleis 5") at
+/// each platform and the sector letters (A, B, C…) along the boarding track.
+/// Shown only when zoomed into the platform (gated by screen spacing), so they
+/// don't clutter the route overview. Static geometry — rebuilds only on camera
+/// change via flutter_map's listenable, no ticker.
+class _StopLabels extends StatelessWidget {
+  final List<({String letter, LatLng pos})> sectors;
+  final List<({String name, LatLng pos})> gleise;
+  const _StopLabels({required this.sectors, required this.gleise});
+
+  @override
+  Widget build(BuildContext context) {
+    final cam = MapCamera.of(context);
+    // Only show once the platform fills the screen: gate on the on-screen
+    // spacing between the first two sectors (≈ 25 m apart in reality).
+    if (sectors.length >= 2) {
+      final a = cam.latLngToScreenOffset(sectors[0].pos);
+      final b = cam.latLngToScreenOffset(sectors[1].pos);
+      if ((a - b).distance < 26) return const SizedBox.shrink();
+    } else if (cam.zoom < 16) {
+      return const SizedBox.shrink();
+    }
+
+    final markers = <Marker>[
+      for (final s in sectors)
+        Marker(
+          point: s.pos,
+          width: 18,
+          height: 18,
+          child: Center(
+            child: Text(
+              s.letter,
+              style: const TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w900,
+                color: Colors.black54,
+                shadows: [Shadow(color: Colors.white, blurRadius: 2)],
+              ),
+            ),
+          ),
+        ),
+      for (final g in gleise)
+        Marker(
+          point: g.pos,
+          width: 60,
+          height: 16,
+          child: Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.82),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                'Gleis ${g.name}',
+                overflow: TextOverflow.clip,
+                maxLines: 1,
+                style: const TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.black87,
+                ),
+              ),
+            ),
+          ),
+        ),
+    ];
+    if (markers.isEmpty) return const SizedBox.shrink();
+    return MarkerLayer(markers: markers);
+  }
 }
 
 /// The moving train, drawn as a to-scale top-down body on the route polyline.
