@@ -75,7 +75,10 @@ class StationMapService {
   Future<StationMap> fetchByStationName(String name,
       {bool background = false}) async {
     final slug = slugify(name);
-    AppLog.log('fetchByStationName "$name" → slug "$slug"', tag: 'map');
+    // Background prefetch (the route map warms every stop) stays SILENT on
+    // success — otherwise ~4 lines × 20+ stops floods the debug log so you
+    // can't scroll. Only the foreground Karte-tab open logs.
+    if (!background) AppLog.log('fetchByStationName "$name" → slug "$slug"', tag: 'map');
     try {
       return await fetchBySlug(slug, background: background);
     } on StationMapException catch (e) {
@@ -142,27 +145,18 @@ class StationMapService {
   /// fails fast instead of holding a connection for the full foreground budget.
   Future<StationMap> fetchBySlug(String slug, {bool background = false}) async {
     final hit = _cache[slug];
-    if (hit != null) {
-      AppLog.log('map cache hit "$slug" (instant)', tag: 'map');
-      return hit;
-    }
+    if (hit != null) return hit;
     final uri = Uri.parse('https://www.bahnhof.de/$slug/karte');
-    final timeout = Duration(seconds: background ? 7 : 12);
+    final timeout = Duration(seconds: background ? 5 : 12);
+    final sw = Stopwatch()..start();
 
     // Fast path: ask for the raw RSC flight stream. ~15-20 % smaller than the
     // HTML and parse-friendlier (no __next_f reassembly).
-    final res = await AppLog.timed(
-      'GET $uri (rsc)',
-      () => _client.get(uri, headers: _rscHeaders).timeout(
-            timeout,
-            onTimeout: () => throw StationMapException(
-                'Zeitüberschreitung beim Laden der Karte für "$slug".'),
-          ),
-      tag: 'map',
-    );
-    AppLog.log(
-        'GET $slug (rsc) → HTTP ${res.statusCode}, ${res.bodyBytes.length} bytes',
-        tag: 'map');
+    final res = await _client.get(uri, headers: _rscHeaders).timeout(
+          timeout,
+          onTimeout: () => throw StationMapException(
+              'Zeitüberschreitung beim Laden der Karte für "$slug".'),
+        );
     if (res.statusCode != 200) {
       throw StationMapException('Bahnhof "$slug" nicht gefunden '
           '(HTTP ${res.statusCode}).');
@@ -173,29 +167,31 @@ class StationMapService {
     // and a plain-data StationMap back, both isolate-sendable.
     try {
       final map = await compute(_parseInIsolate, _ParseInput(slug, res.body));
-      _logParsed(slug, 'rsc', map);
+      if (!background) {
+        _logParsed(slug, 'rsc', map, sw.elapsedMilliseconds, res.bodyBytes.length);
+      }
       _cache[slug] = map;
       return map;
     } on StationMapException {
       // RSC stream lacked the poi data (unexpected server shape) — fall back to
       // the full HTML document and reassemble the __next_f chunks the old way,
       // so we never regress versus the original scrape.
-      AppLog.log('rsc parse for "$slug" had no poi → HTML fallback', tag: 'map');
-      final html = await AppLog.timed(
-        'GET $uri (html fallback)',
-        () => _client.get(uri, headers: _htmlHeaders).timeout(
-              timeout,
-              onTimeout: () => throw StationMapException(
-                  'Zeitüberschreitung beim Laden der Karte für "$slug".'),
-            ),
-        tag: 'map',
-      );
+      if (!background) {
+        AppLog.log('rsc parse for "$slug" had no poi → HTML fallback', tag: 'map');
+      }
+      final html = await _client.get(uri, headers: _htmlHeaders).timeout(
+            timeout,
+            onTimeout: () => throw StationMapException(
+                'Zeitüberschreitung beim Laden der Karte für "$slug".'),
+          );
       if (html.statusCode != 200) {
         throw StationMapException('Bahnhof "$slug" nicht gefunden '
             '(HTTP ${html.statusCode}).');
       }
       final map = await compute(_parseInIsolate, _ParseInput(slug, html.body));
-      _logParsed(slug, 'html', map);
+      if (!background) {
+        _logParsed(slug, 'html', map, sw.elapsedMilliseconds, html.bodyBytes.length);
+      }
       _cache[slug] = map;
       return map;
     }
@@ -206,12 +202,12 @@ class StationMapService {
   /// scrape found platforms (Gleise), sector cubes (A/B/C…) and lift/escalator
   /// anchors, or came back empty. `platformTrainCars` needs platforms + ≥2
   /// sector cubes; anchors only help disambiguate multi-island stations.
-  void _logParsed(String slug, String via, StationMap map) {
+  void _logParsed(String slug, String via, StationMap map, int ms, int bytes) {
     final cubes = map.pois.where((p) => p.isPlatformSector).length;
     AppLog.log(
-        'map "$slug" parsed ($via): ${map.platforms.length} platforms, '
-        '$cubes sector-cubes, ${map.platformAnchors.length} anchors, '
-        '${map.levels.length} levels',
+        'map "$slug" ($via ${ms}ms ${(bytes / 1024).round()}KB): '
+        '${map.platforms.length} platforms, $cubes sector-cubes, '
+        '${map.platformAnchors.length} anchors, ${map.levels.length} levels',
         tag: 'map');
   }
 

@@ -321,7 +321,11 @@ List<({List<LatLng> outline, Coach coach, bool boarding})> platformTrainCars(
   // for "stop X shows no train": which guard rejected it (no matching platform
   // POI / no coach positions / too few sector cubes / too few sector anchors).
   String why(String r) {
-    AppLog.log('platformTrainCars "${map.slug}" Gleis $gleis: $r', tag: 'train');
+    // Collapsed: the route map calls this per stop on every cache poll, so a
+    // plain log would repeat the same "no train here" line endlessly. Only
+    // failing stops log, and identical reasons fold into "… (×N)".
+    AppLog.logCollapsed('platformTrainCars "${map.slug}" Gleis $gleis: $r',
+        tag: 'train');
     return r;
   }
 
