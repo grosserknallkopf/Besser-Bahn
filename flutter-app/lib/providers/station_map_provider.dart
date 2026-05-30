@@ -2,10 +2,21 @@ import 'dart:math' as math;
 import 'package:latlong2/latlong.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/app_log.dart';
+import '../core/train_dimensions.dart';
+import '../core/train_geometry.dart';
+import '../models/coach_sequence.dart';
 import '../models/station.dart';
 import '../models/station_map.dart';
 import '../services/station_map_service.dart';
 import 'service_providers.dart';
+
+/// A–I letter index (0–8) of a single-letter section name, else null.
+int? _letterIdx(String n) {
+  final t = n.trim().toUpperCase();
+  if (t.length != 1) return null;
+  final code = t.codeUnitAt(0);
+  return (code >= 65 && code <= 73) ? code - 65 : null;
+}
 
 /// What the highlighted Gleis means for the rider — drives the map banner
 /// wording: where you get on (Einstieg), off (Ausstieg) or change (Umstieg).
@@ -141,6 +152,11 @@ class StationMapState {
   /// Section range for the secondary (Ausstieg) Gleis, e.g. "7 G-I" → (G,I).
   final ({String start, String end})? secondarySection;
 
+  /// The boarding train's Wagenreihung, when the map was opened from a leg at
+  /// the stop this sequence belongs to — lets us draw the train to scale on the
+  /// platform. Null for a plain station lookup or an intermediate/transfer stop.
+  final CoachSequence? coachSequence;
+
   final bool isLoading;
   final String? error;
 
@@ -156,6 +172,7 @@ class StationMapState {
     this.secondaryGleis,
     this.secondaryRole = GleisRole.none,
     this.secondarySection,
+    this.coachSequence,
     this.isLoading = false,
     this.error,
   });
@@ -172,10 +189,12 @@ class StationMapState {
     String? secondaryGleis,
     GleisRole? secondaryRole,
     ({String start, String end})? secondarySection,
+    CoachSequence? coachSequence,
     bool clearHighlight = false,
     bool clearSection = false,
     bool clearTransferNote = false,
     bool clearSecondary = false,
+    bool clearCoachSequence = false,
     bool? isLoading,
     String? error,
     bool clearError = false,
@@ -204,6 +223,9 @@ class StationMapState {
       secondarySection: (clearHighlight || clearSecondary)
           ? null
           : (secondarySection ?? this.secondarySection),
+      coachSequence: clearCoachSequence
+          ? null
+          : (coachSequence ?? this.coachSequence),
       isLoading: isLoading ?? this.isLoading,
       error: clearError ? null : (error ?? this.error),
     );
@@ -256,26 +278,46 @@ class StationMapState {
 
   List<({String letter, LatLng pos})> _sectionLineFor(
       MapPoi? plat, ({String start, String end})? range, String? g) {
+    if (plat == null || range == null || g == null) return const [];
+    final start = _letterIdx(range.start);
+    final end = _letterIdx(range.end);
+    if (start == null || end == null) return const [];
+
+    final island = _resolveIsland(plat, g, start, end);
+    return [
+      for (final c in island.cubes)
+        (
+          letter: String.fromCharCode(65 + c.idx),
+          pos: LatLng(
+              c.pos.latitude + island.dLat, c.pos.longitude + island.dLon),
+        ),
+    ];
+  }
+
+  /// The boarding-Gleis platform island, resolved once: the real sector cubes
+  /// (letter index → LatLng) for letters [startIdx]…[endIdx], plus the metre
+  /// nudge (`dLat`,`dLon`) from the platform centre toward the boarding rail.
+  /// Shared by the section line/markers and the to-scale platform train so they
+  /// land on the same side of the platform.
+  ///
+  /// The `PLATFORM_SECTOR_CUBE` POIs carry NO track reference and platforms fan
+  /// out, so we group tracks into islands from the lift/escalator anchors (which
+  /// DO name the Gleise they serve), fit each island's axis, then assign every
+  /// cube to the island whose line it lies closest to. Falls back to
+  /// nearest-cube-per-letter when a station has no usable anchors.
+  ({
+    List<({int idx, LatLng pos})> cubes,
+    double dLat,
+    double dLon,
+  }) _resolveIsland(MapPoi plat, String g, int startIdx, int endIdx) {
+    const empty = (cubes: <({int idx, LatLng pos})>[], dLat: 0.0, dLon: 0.0);
     final m = map;
-    if (m == null || plat == null || range == null || g == null) {
-      return const [];
-    }
+    if (m == null) return empty;
 
     final level = plat.level ?? '';
     final cubes =
         m.poisOnLevel(level).where((p) => p.isPlatformSector).toList();
-    if (cubes.isEmpty) return const [];
-
-    int? letterIdx(String n) {
-      final t = n.trim().toUpperCase();
-      if (t.length != 1) return null;
-      final code = t.codeUnitAt(0);
-      return (code >= 65 && code <= 73) ? code - 65 : null; // A..I
-    }
-
-    final start = letterIdx(range.start);
-    final end = letterIdx(range.end);
-    if (start == null || end == null) return const [];
+    if (cubes.isEmpty) return empty;
 
     // Planar metres around the floor (equirectangular).
     final lat0 =
@@ -293,7 +335,6 @@ class StationMapState {
       gleiseByKey[key] = a.gleise;
       (ptsByKey[key] ??= []).add(xy(a.latitude, a.longitude));
     }
-    // Add each island's Gleis markers as extra line points.
     gleiseByKey.forEach((key, gleise) {
       for (final p in m.platforms) {
         if (gleise.contains(normalizeGleis(p.name))) {
@@ -314,22 +355,17 @@ class StationMapState {
       if (l != null) lines[key] = l;
     });
 
-    // 3) Pick one cube per requested letter. A letter that exists only ONCE on
-    //    the floor is unambiguous → always use it (so the far sectors G/H/I,
-    //    each a single cube up the curve, all get marked). When a letter has
-    //    several cubes (one per island), disambiguate to the boarding Gleis's
-    //    island via the fitted lines; fall back to nearest the Gleis marker.
+    // 3) Pick one cube per requested letter, disambiguating to our island.
     const dist = Distance();
     final byLetter = <int, List<MapPoi>>{};
     for (final c in cubes) {
-      final li = letterIdx(c.name);
-      if (li == null || li < start || li > end) continue;
+      final li = _letterIdx(c.name);
+      if (li == null || li < startIdx || li > endIdx) continue;
       (byLetter[li] ??= []).add(c);
     }
 
     MapPoi? pickFor(List<MapPoi> cands) {
       if (cands.length == 1) return cands.first;
-      // Prefer a cube whose closest island line is the boarding Gleis's.
       if (ourKey != null && lines[ourKey] != null) {
         MapPoi? best;
         var bd = double.infinity;
@@ -351,7 +387,6 @@ class StationMapState {
         }
         if (best != null) return best;
       }
-      // Fallback: nearest to the boarding Gleis marker.
       MapPoi? best;
       var bd = double.infinity;
       for (final c in cands) {
@@ -364,21 +399,17 @@ class StationMapState {
       return best;
     }
 
-    final out = <({String letter, LatLng pos})>[];
-    for (var i = start; i <= end; i++) {
+    final out = <({int idx, LatLng pos})>[];
+    for (var i = startIdx; i <= endIdx; i++) {
       final cands = byLetter[i];
       if (cands == null || cands.isEmpty) continue;
       final c = pickFor(cands);
-      if (c != null) {
-        out.add((letter: String.fromCharCode(65 + i), pos: c.latLng));
-      }
+      if (c != null) out.add((idx: i, pos: c.latLng));
     }
-    if (out.isEmpty) return out;
+    if (out.isEmpty) return empty;
 
-    // The cubes sit on the platform centre, between the island's two tracks
-    // (e.g. 7 and 8). Nudge the whole band toward the boarding Gleis's rail so
-    // it's visually obvious which side you board (Gleis 7 vs 8). Direction =
-    // from the partner track toward the boarding track; universal.
+    // Nudge from the platform centre toward the boarding rail.
+    var dLat = 0.0, dLon = 0.0;
     final partner = _islandPartner(m, plat, level, g, gleiseByKey, ourKey);
     if (partner != null) {
       final ex = (plat.longitude - partner.longitude) * mlon;
@@ -386,15 +417,116 @@ class StationMapState {
       final norm = math.sqrt(ex * ex + ey * ey);
       if (norm > 0.5) {
         final shift = math.min(6.0, norm * 0.45); // metres toward the Gleis
-        final dLon = ex / norm * shift / mlon;
-        final dLat = ey / norm * shift / mlat;
-        return [
-          for (final e in out)
-            (
-              letter: e.letter,
-              pos: LatLng(e.pos.latitude + dLat, e.pos.longitude + dLon),
-            ),
-        ];
+        dLon = ex / norm * shift / mlon;
+        dLat = ey / norm * shift / mlat;
+      }
+    }
+    return (cubes: out, dLat: dLat, dLon: dLon);
+  }
+
+  /// The boarding train drawn to scale, top-down, on the platform: one filled
+  /// outline polygon (LatLng) per car, with the [Coach] (for colour/number) and
+  /// whether it's the rider's portion (in [highlightSection]).
+  ///
+  /// We anchor the Wagenreihung's linear car offsets to the map by matching its
+  /// platform sectors (A–I, each with a metre offset) to the real sector cubes
+  /// (each with a LatLng) — giving ≥2 (offset → LatLng) anchors. Every car's
+  /// start/end metre offset is then interpolated along that anchor chain, so the
+  /// train sits exactly where it stops and bends with a curved platform.
+  List<({List<LatLng> outline, Coach coach, bool boarding})>
+      get boardingTrainCars {
+    final cs = coachSequence;
+    final plat = highlightPoi;
+    final g = highlightGleis;
+    if (cs == null || plat == null || g == null) return const [];
+    final coaches = cs.allCoaches
+        .where((c) =>
+            c.platformPosition != null && c.platformPosition!.length > 0)
+        .toList();
+    if (coaches.isEmpty) return const [];
+
+    final island = _resolveIsland(plat, g, 0, 8);
+    if (island.cubes.length < 2) return const [];
+    final cubeByIdx = {for (final c in island.cubes) c.idx: c.pos};
+
+    // (offset metres → LatLng) anchors from sectors present as real cubes.
+    final anchors = <({double off, LatLng pos})>[];
+    for (final s in cs.platform.sectors) {
+      final idx = _letterIdx(s.name);
+      if (idx == null) continue;
+      final pos = cubeByIdx[idx];
+      if (pos == null) continue;
+      anchors.add((off: (s.start + s.end) / 2, pos: pos));
+    }
+    if (anchors.length < 2) return const [];
+    anchors.sort((a, b) => a.off.compareTo(b.off));
+
+    final lat0 =
+        anchors.map((a) => a.pos.latitude).reduce((x, y) => x + y) /
+            anchors.length;
+    const mlat = 111320.0;
+    final mlon = 111320.0 * math.cos(lat0 * math.pi / 180);
+    final ax = [
+      for (final a in anchors)
+        math.Point(a.pos.longitude * mlon, a.pos.latitude * mlat)
+    ];
+
+    // Linear offset → planar point, piecewise linear, extrapolating past ends.
+    math.Point<double> proj(double off) {
+      final n = anchors.length;
+      if (off <= anchors.first.off) {
+        final span = anchors[1].off - anchors.first.off;
+        final t = span != 0 ? (off - anchors.first.off) / span : 0.0;
+        return ax[0] + (ax[1] - ax[0]) * t;
+      }
+      for (var i = 0; i < n - 1; i++) {
+        if (off <= anchors[i + 1].off) {
+          final span = anchors[i + 1].off - anchors[i].off;
+          final t = span != 0 ? (off - anchors[i].off) / span : 0.0;
+          return ax[i] + (ax[i + 1] - ax[i]) * t;
+        }
+      }
+      final span = anchors[n - 1].off - anchors[n - 2].off;
+      final t = span != 0 ? (off - anchors[n - 1].off) / span : 0.0;
+      return ax[n - 1] + (ax[n - 1] - ax[n - 2]) * t;
+    }
+
+    LatLng toLatLng(math.Point<double> p) =>
+        LatLng(p.y / mlat + island.dLat, p.x / mlon + island.dLon);
+
+    final highSpeed = isHighSpeedCoach(cs);
+    final hw = (highSpeed ? 2.95 : 2.85) / 2;
+    final noseLen = highSpeed ? 5.0 : 2.2;
+
+    bool inSection(Coach c) {
+      final hs = highlightSection;
+      if (hs == null) return true;
+      final s = _letterIdx(hs.start), e = _letterIdx(hs.end);
+      final ci = _letterIdx(c.platformPosition!.sector.trim());
+      if (s == null || e == null || ci == null) return true;
+      return ci >= s && ci <= e;
+    }
+
+    final out = <({List<LatLng> outline, Coach coach, bool boarding})>[];
+    for (var i = 0; i < coaches.length; i++) {
+      final c = coaches[i];
+      final pos = c.platformPosition!;
+      // A few samples across the car so it follows a curved platform.
+      final steps = math.max(2, (pos.length / 4).ceil());
+      final spine = <LatLng>[];
+      for (var k = 0; k <= steps; k++) {
+        final off = pos.start + (pos.end - pos.start) * (k / steps);
+        spine.add(toLatLng(proj(off)));
+      }
+      final outline = TrainGeometry.body(
+        spine,
+        halfWidthM: hw,
+        noseStart: i == 0,
+        noseEnd: i == coaches.length - 1,
+        noseLenM: noseLen,
+      );
+      if (outline.length >= 3) {
+        out.add((outline: outline, coach: c, boarding: inSection(c)));
       }
     }
     return out;
@@ -465,6 +597,7 @@ class StationMapNotifier extends Notifier<StationMapState> {
       String? secondaryGleis,
       GleisRole secondaryRole = GleisRole.none,
       ({String start, String end})? sectionOverride,
+      CoachSequence? coachSequence,
       Set<String>? primaryTypes}) async {
     _primaryTypes = primaryTypes ?? kDefaultPrimaryTypes;
     final raw = highlightGleis?.trim() ?? '';
@@ -486,6 +619,8 @@ class StationMapNotifier extends Notifier<StationMapState> {
       secondaryGleis: sec,
       secondaryRole: sec == null ? GleisRole.none : secondaryRole,
       secondarySection: secSection,
+      coachSequence: coachSequence,
+      clearCoachSequence: coachSequence == null,
       clearHighlight: hl == null,
       // Without an explicit section, drop any stale one from a previous train
       // (else every train would keep showing the first train's "G–I").

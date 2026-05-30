@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 
 import '../../core/tile_cache.dart';
+import '../../core/train_dimensions.dart';
+import '../../models/coach_sequence.dart';
 import '../../models/station.dart';
 import '../../models/station_map.dart';
 import '../../providers/service_providers.dart';
@@ -399,6 +401,11 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
                   ),
                 ],
               ),
+            // The boarding train drawn to scale, top-down, on the platform —
+            // one filled car per Wagen (class colour), the rider's portion
+            // bright and the rest dimmed, ICE/end cars with a rounded snout.
+            if (state.boardingTrainCars.isNotEmpty)
+              PolygonLayer(polygons: _trainCarPolygons(state.boardingTrainCars)),
             MarkerLayer(
                 markers:
                     _markers(context, state.visiblePois, state.station)),
@@ -585,6 +592,23 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
                   fontWeight: FontWeight.bold),
             ),
           ),
+        ),
+    ];
+  }
+
+  /// Filled, class-coloured car polygons for the to-scale platform train. The
+  /// rider's portion (a wing train) is opaque; other portions are dimmed.
+  List<Polygon> _trainCarPolygons(
+      List<({List<LatLng> outline, Coach coach, bool boarding})> cars) {
+    final anyOff = cars.any((c) => !c.boarding);
+    return [
+      for (final car in cars)
+        Polygon(
+          points: car.outline,
+          color: coachColor(car.coach).withValues(
+              alpha: (anyOff && !car.boarding) ? 0.35 : 0.92),
+          borderColor: Colors.white.withValues(alpha: 0.9),
+          borderStrokeWidth: 1,
         ),
     ];
   }

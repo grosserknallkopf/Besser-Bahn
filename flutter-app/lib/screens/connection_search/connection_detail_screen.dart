@@ -990,6 +990,9 @@ class _LegSectionState extends ConsumerState<_LegSection>
                   ? GleisRole.board
                   : GleisRole.none,
           sectionOverride: sectionOverride,
+          // The Wagenreihung is for this leg's boarding stop, so only hand it to
+          // the map there — drawing it on a later stop's platform would be wrong.
+          coachSequence: (coach != null && isLegBoarding) ? coach : null,
           transferNote: transferNote,
           primaryTypes: primaryPoiTypesForProduct(leg.line?.product),
         );
