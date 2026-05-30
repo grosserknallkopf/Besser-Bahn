@@ -119,16 +119,10 @@ class TileCache {
         // one to the console → the endless red error block the user saw. Swallow
         // it (log once, throttled) and drop the failed tile so it can retry.
         evictErrorTileStrategy: EvictErrorTileStrategy.notVisible,
-        errorTileCallback: (_, error, _) => _logTileError(error),
+        // Counted-collapse: identical failures fold into "… (×N)" instead of an
+        // endless wall (see AppLog.logCollapsed). The global FlutterError filter
+        // catches the framework-reported variant too.
+        errorTileCallback: (_, error, _) =>
+            AppLog.logCollapsed(error.toString().split('\n').first, tag: 'tiles'),
       );
-
-  /// Last tile-error message + when, so a burst of identical FMTC misses logs
-  /// once instead of thousands of times (one line, not an endless block).
-  static String? _lastTileError;
-  static void _logTileError(Object error) {
-    final msg = error.toString().split('\n').first;
-    if (msg == _lastTileError) return;
-    _lastTileError = msg;
-    AppLog.log('tile load failed (suppressing repeats): $msg', tag: 'map');
-  }
 }
