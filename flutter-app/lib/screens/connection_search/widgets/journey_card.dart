@@ -306,7 +306,7 @@ class _LegLengthBarState extends State<_LegLengthBar> {
                   FractionallySizedBox(
                     alignment: Alignment.centerLeft,
                     widthFactor: progress,
-                    child: Container(color: color.withAlpha(36)),
+                    child: Container(color: color.withAlpha(50)),
                   ),
                 // Line name on top of the fill.
                 Padding(
