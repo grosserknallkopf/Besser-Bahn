@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../models/coach_sequence.dart';
 import '../../../models/journey.dart' show OccupancyLevel;
 import '../../../models/trip.dart';
 import '../../../widgets/occupancy_indicator.dart';
@@ -6,6 +7,10 @@ import 'train_map_view.dart';
 
 class TrainInfoHeader extends StatelessWidget {
   final Trip trip;
+
+  /// The train's Wagenreihung, when known — lets the route map draw the train
+  /// to scale (length/width/nose) instead of a generic silhouette.
+  final CoachSequence? coachSequence;
 
   /// Optional action shown to the right of the train name (e.g. the connection
   /// view's compact "Weitere Abfahrten" button). Null on the standalone train
@@ -30,6 +35,7 @@ class TrainInfoHeader extends StatelessWidget {
   const TrainInfoHeader({
     super.key,
     required this.trip,
+    this.coachSequence,
     this.action,
     this.embedded = false,
     this.padding,
@@ -80,7 +86,8 @@ class TrainInfoHeader extends StatelessWidget {
                     icon: const Icon(Icons.map_outlined),
                     tooltip: 'Streckenverlauf',
                     visualDensity: VisualDensity.compact,
-                    onPressed: () => openTrainMap(context, trip),
+                    onPressed: () =>
+                        openTrainMap(context, trip, coachSequence: coachSequence),
                   ),
                 if (action != null) ...[
                   const SizedBox(width: 4),

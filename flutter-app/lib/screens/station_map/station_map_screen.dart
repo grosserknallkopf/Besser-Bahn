@@ -448,6 +448,10 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
               ),
               MarkerLayer(markers: [_userMarker(_userFix!.latLng)]),
             ],
+            const Scalebar(
+              alignment: Alignment.bottomRight,
+              padding: EdgeInsets.only(right: 12, bottom: 20),
+            ),
             const RichAttributionWidget(
               alignment: AttributionAlignment.bottomLeft,
               // The default flutter_map logo is a package asset that isn't

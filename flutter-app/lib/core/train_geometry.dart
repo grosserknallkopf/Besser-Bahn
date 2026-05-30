@@ -111,6 +111,33 @@ class TrainGeometry {
     return [for (final p in out) f.ll(p)];
   }
 
+  /// Arc-length (metres from the path start) of the point on [path] nearest to
+  /// [p] — used to place a moving train's head on the route polyline.
+  static double locate(List<LatLng> path, LatLng p) {
+    final pts = _dedupe(path);
+    if (pts.length < 2) return 0;
+    final f = _Frame(pts.first.latitude);
+    final v = [for (final q in pts) f.xy(q)];
+    final pp = f.xy(p);
+    var cum = 0.0, best = double.infinity, bestArc = 0.0;
+    for (var i = 0; i < v.length - 1; i++) {
+      final a = v[i], b = v[i + 1];
+      final ab = b - a;
+      final len2 = ab.x * ab.x + ab.y * ab.y;
+      final t = len2 > 0
+          ? (((pp.x - a.x) * ab.x + (pp.y - a.y) * ab.y) / len2).clamp(0.0, 1.0)
+          : 0.0;
+      final proj = a + ab * t;
+      final d = (pp - proj).magnitude;
+      if (d < best) {
+        best = d;
+        bestArc = cum + math.sqrt(len2) * t;
+      }
+      cum += math.sqrt(len2);
+    }
+    return bestArc;
+  }
+
   // Intermediate points of a half-ellipse snout, strictly between the two body
   // corners (center ± normal·hw), bulging [noseLenM] along [outward].
   static List<math.Point<double>> _arc(

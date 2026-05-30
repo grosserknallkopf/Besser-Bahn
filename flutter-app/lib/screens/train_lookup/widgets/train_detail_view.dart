@@ -96,6 +96,7 @@ class _TrainDetailViewState extends ConsumerState<TrainDetailView> {
           inlineHeader: true,
           header: TrainInfoHeader(
             trip: trip,
+            coachSequence: widget.coach,
             action: widget.headerAction,
             embedded: true,
             padding: isLeg ? EdgeInsets.zero : null,
