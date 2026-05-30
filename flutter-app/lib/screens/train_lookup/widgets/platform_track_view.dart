@@ -97,9 +97,10 @@ class PlatformTrackView extends StatelessWidget {
     final stackH = carTop + carHeight + trackH;
 
     // A rounded loco-style snout sits at each end of the train, so leave room
-    // for it on both sides and shift the whole layout right by one nose width.
-    final noseW = carHeight * 1.3;
-    final leadPad = noseW + 2;
+    // for it on both sides: the end cars themselves are shaped into the ICE
+    // snout and overhang their platform slot by this much on the outer side.
+    final overhang = carHeight * 0.9;
+    final leadPad = overhang + 2;
 
     double px(double u) => (u - ds) * scale + leadPad;
     final totalW = span * scale + leadPad * 2;
@@ -192,43 +193,59 @@ class PlatformTrackView extends StatelessWidget {
       ));
     }
 
-    // 3) Rounded loco-style snouts at both ends — the "Schnauze" up front.
-    children.add(Positioned(
-      left: px(trainStart) - noseW,
-      width: noseW,
-      top: carTop,
-      height: carHeight,
-      child: const _TrackNose(front: true),
-    ));
-    children.add(Positioned(
-      left: px(trainEnd),
-      width: noseW,
-      top: carTop,
-      height: carHeight,
-      child: const _TrackNose(front: false),
-    ));
-
-    // 4) The cars, each placed at its true platform position.
-    for (final c in coaches) {
+    // 3) The cars at their true platform positions. The FIRST and LAST car are
+    //    shaped into the ICE snout themselves (no separate nose element): their
+    //    outer end is the rounded wedge, overhanging the slot by [overhang].
+    for (var i = 0; i < coaches.length; i++) {
+      final c = coaches[i];
       final pos = c.platformPosition!;
-      final left = px(pos.start);
-      final w = math.max((pos.end - pos.start) * scale, 18.0);
-      children.add(Positioned(
-        left: left,
-        width: w,
-        top: carTop,
-        height: carHeight,
-        child: _TrackCar(
-          coach: c,
+      final slotLeft = px(pos.start);
+      final slotW = math.max((pos.end - pos.start) * scale, 18.0);
+      final isFirst = i == 0;
+      final isLast = i == coaches.length - 1;
+      final freeCount = freeByWagon[c.wagonNumber];
+      final isSel = selectedWagon != null && c.wagonNumber == selectedWagon;
+      final onTap = onCoachTap == null ? null : () => onCoachTap!(c);
+
+      if (isFirst || isLast) {
+        // Front nose on the first car (its outer end is the LEFT), rear nose on
+        // the last car (outer end RIGHT). A lone single car gets a front nose.
+        final front = isFirst;
+        final left = front ? slotLeft - overhang : slotLeft;
+        final w = slotW + overhang;
+        children.add(Positioned(
+          left: left,
           width: w,
+          top: carTop,
           height: carHeight,
-          selectable: selectable,
-          freeCount: freeByWagon[c.wagonNumber],
-          isSelected:
-              selectedWagon != null && c.wagonNumber == selectedWagon,
-          onTap: onCoachTap == null ? null : () => onCoachTap!(c),
-        ),
-      ));
+          child: _TrackEndCar(
+            coach: c,
+            front: front,
+            width: w,
+            height: carHeight,
+            selectable: selectable,
+            freeCount: freeCount,
+            isSelected: isSel,
+            onTap: onTap,
+          ),
+        ));
+      } else {
+        children.add(Positioned(
+          left: slotLeft,
+          width: slotW,
+          top: carTop,
+          height: carHeight,
+          child: _TrackCar(
+            coach: c,
+            width: slotW,
+            height: carHeight,
+            selectable: selectable,
+            freeCount: freeCount,
+            isSelected: isSel,
+            onTap: onTap,
+          ),
+        ));
+      }
     }
 
     return SingleChildScrollView(
@@ -270,55 +287,174 @@ class _TrackPainter extends CustomPainter {
   bool shouldRepaint(covariant _TrackPainter old) => old.color != color;
 }
 
-/// The ICE snout drawn as a SIDE-VIEW silhouette: a low, rounded nose tip up
-/// front, the roof sweeping up to full body height, a flat underframe and a
-/// small notch at the coupling (car) end — a wedge, like the sketch.
-/// [front] = nose points left (head of train); false mirrors it for the rear.
-class _TrackNose extends StatelessWidget {
-  final bool front;
-  const _TrackNose({required this.front});
-
-  @override
-  Widget build(BuildContext context) => CustomPaint(painter: _NosePainter(front));
+/// Class colour that fills a whole car body.
+Color _coachAccent(Coach c) {
+  if (!c.isOpen) return AppColors.closedCoach;
+  if (c.isLocomotive) return AppColors.locomotive;
+  if (c.isRestaurant) return AppColors.restaurant;
+  if (c.isFirstClass || c.isMixed) return AppColors.firstClass;
+  return AppColors.secondClass;
 }
 
-class _NosePainter extends CustomPainter {
+/// How much of an end car's width is the snout (the rest is the full-height
+/// body that carries the number).
+const double _noseFrac = 0.55;
+
+/// The wedge outline of an end car: a low, rounded nose at the OUTER end, the
+/// roof sweeping up to a full-height body at the INNER (coupling) end, flat
+/// underframe. [front] true = nose on the left, false = nose on the right.
+Path _endCarPath(Size size, {required bool front}) {
+  final w = size.width, h = size.height;
+  final nf = _noseFrac * w; // snout length in px
+  if (front) {
+    return Path()
+      ..moveTo(0.12 * nf, h) // bottom, just behind the tip
+      ..lineTo(w, h) // flat underframe to the inner end
+      ..lineTo(w, 0) // full-height inner (coupling) edge
+      ..lineTo(nf, 0) // flat roof to where the snout starts
+      ..cubicTo(0.55 * nf, 0, 0.28 * nf, 0.10 * h, 0.08 * nf, 0.46 * h)
+      ..cubicTo(0, 0.64 * h, 0, 0.86 * h, 0.12 * nf, h)
+      ..close();
+  }
+  return Path()
+    ..moveTo(w - 0.12 * nf, h)
+    ..lineTo(0, h)
+    ..lineTo(0, 0)
+    ..lineTo(w - nf, 0)
+    ..cubicTo(
+        w - 0.55 * nf, 0, w - 0.28 * nf, 0.10 * h, w - 0.08 * nf, 0.46 * h)
+    ..cubicTo(w, 0.64 * h, w, 0.86 * h, w - 0.12 * nf, h)
+    ..close();
+}
+
+/// The first/last car of an ICE: the car itself IS the snout (no separate nose
+/// element). Its outer end is the rounded wedge; the full-height inner body
+/// carries the wagon number + free-seat badge, in the car's class colour.
+class _TrackEndCar extends StatelessWidget {
+  final Coach coach;
   final bool front;
-  const _NosePainter(this.front);
+  final double width;
+  final double height;
+  final bool selectable;
+  final int? freeCount;
+  final bool isSelected;
+  final VoidCallback? onTap;
+
+  const _TrackEndCar({
+    required this.coach,
+    required this.front,
+    required this.width,
+    required this.height,
+    required this.selectable,
+    required this.freeCount,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final accent = _coachAccent(coach);
+    final fg = AppColors.onClass(accent);
+    final canSelect = selectable && !coach.isLocomotive && coach.wagonNumber > 0;
+    final compact = height < 50;
+    final bodyW = width * (1 - _noseFrac) * 0.96;
+
+    final content = Align(
+      alignment: front ? Alignment.centerRight : Alignment.centerLeft,
+      child: Padding(
+        padding: EdgeInsets.only(
+            right: front ? width * 0.06 : 0, left: front ? 0 : width * 0.06),
+        child: SizedBox(
+          width: bodyW,
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (!coach.isLocomotive)
+                Text(
+                  coach.wagonNumber > 0 ? '${coach.wagonNumber}' : '–',
+                  style: TextStyle(
+                    fontSize: compact ? 13 : 16,
+                    fontWeight: FontWeight.w800,
+                    color: fg,
+                  ),
+                )
+              else
+                Icon(Icons.train, color: fg, size: 16),
+              if (freeCount != null) ...[
+                const SizedBox(height: 3),
+                _FreeSeatBadge(free: freeCount!, big: !compact),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+
+    final car = Stack(
+      children: [
+        Positioned.fill(
+          child: CustomPaint(
+            painter: _EndCarPainter(
+                front: front, accent: accent, selected: isSelected),
+          ),
+        ),
+        Positioned.fill(child: content),
+      ],
+    );
+
+    return Tooltip(
+      message: _tooltip(coach, freeCount),
+      child: canSelect
+          ? InkWell(
+              onTap: onTap,
+              borderRadius: BorderRadius.circular(6),
+              child: car)
+          : car,
+    );
+  }
+}
+
+class _EndCarPainter extends CustomPainter {
+  final bool front;
+  final Color accent;
+  final bool selected;
+  const _EndCarPainter(
+      {required this.front, required this.accent, required this.selected});
 
   @override
   void paint(Canvas canvas, Size size) {
-    // Built nose-left; mirror for the rear car so its tip points right.
-    if (!front) {
-      canvas.translate(size.width, 0);
-      canvas.scale(-1, 1);
-    }
-    final w = size.width, h = size.height;
-
-    final body = Path()
-      ..moveTo(0.14 * w, h) // bottom, just behind the nose tip
-      ..lineTo(w, h) // flat underframe to the car end
-      ..lineTo(w, 0.14 * h) // up the full-height car-end edge
-      ..lineTo(0.90 * w, 0.14 * h) // small coupling notch in…
-      ..lineTo(0.90 * w, 0.02 * h) // …and up to the roof
-      // one smooth, rounded roof hump sweeping down to the low nose tip
-      ..cubicTo(0.55 * w, 0.0, 0.28 * w, 0.06 * h, 0.08 * w, 0.46 * h)
-      // rounded nose tip / belly back to the underframe
-      ..cubicTo(0.0, 0.64 * h, 0.0, 0.86 * h, 0.14 * w, h)
-      ..close();
-
-    canvas.drawPath(body, Paint()..color = AppColors.locomotive);
+    final body = _endCarPath(size, front: front);
+    canvas.drawPath(body, Paint()..color = accent);
     canvas.drawPath(
       body,
       Paint()
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.4
-        ..color = Colors.black.withValues(alpha: 0.30),
+        ..strokeWidth = selected ? 3 : 1.2
+        ..color = selected ? AppColors.onTime : Colors.black.withValues(alpha: 0.22),
     );
   }
 
   @override
-  bool shouldRepaint(covariant _NosePainter old) => old.front != front;
+  bool shouldRepaint(covariant _EndCarPainter old) =>
+      old.front != front || old.accent != accent || old.selected != selected;
+}
+
+/// Shared tooltip text for a car on the track.
+String _tooltip(Coach coach, int? freeCount) {
+  final parts = <String>[];
+  if (coach.wagonNumber > 0) parts.add('Wagen ${coach.wagonNumber}');
+  if (coach.isFirstClass) parts.add('1. Klasse');
+  if (coach.isSecondClass) parts.add('2. Klasse');
+  if (coach.isMixed) parts.add('1./2. Klasse');
+  if (coach.isRestaurant) parts.add('Bordrestaurant');
+  if (coach.isLocomotive) parts.add('Triebkopf');
+  if (coach.platformPosition != null &&
+      coach.platformPosition!.sector.trim().isNotEmpty) {
+    parts.add('Abschnitt ${coach.platformPosition!.sector}');
+  }
+  if (freeCount != null) parts.add('$freeCount frei');
+  if (!coach.isOpen) parts.add('Gesperrt');
+  return parts.join(' · ');
 }
 
 /// One car sized to fill its platform slot: class stripe, wagon number and a
