@@ -240,11 +240,10 @@ class _LiveTrainState extends State<_LiveTrain>
     final dims = TrainDimensions.forProduct(widget.trip.line.product);
     var lenM = dims.totalLengthM;
     var halfWM = dims.halfWidthM;
-    var noseM = dims.noseLenM;
-    var bothNose = dims.noseBothEnds;
     final cs = widget.coachSequence;
     final cars = cs?.allCoaches
-            .where((c) => c.platformPosition != null && c.platformPosition!.length > 0)
+            .where((c) =>
+                c.platformPosition != null && c.platformPosition!.length > 0)
             .toList() ??
         const [];
     final highSpeed = cs != null && isHighSpeedCoach(cs);
@@ -254,29 +253,18 @@ class _LiveTrainState extends State<_LiveTrain>
         final e = cars.map((c) => c.platformPosition!.end).reduce(math.max);
         if (e - s > 10) lenM = e - s;
       }
-      bothNose = highSpeed;
-      noseM = highSpeed ? 6 : 0;
-      halfWM = (highSpeed ? 2.95 : 2.84) / 2;
+      halfWM = (highSpeed ? 2.95 : 2.85) / 2;
     }
-
-    // ICE/IC ride in white-grey livery with a red waist stripe; regional &
-    // S-Bahn are DB red. Matches how the real trains look from above.
-    final whiteLivery = highSpeed ||
-        widget.trip.line.product == 'national' ||
-        widget.trip.line.product == 'nationalExpress';
-    final bodyColor =
-        whiteLivery ? const Color(0xFFEDEFF2) : AppColors.dbRed;
-    final borderColor =
-        whiteLivery ? const Color(0xFF8A929B) : Colors.white;
+    // The route train is the SAME train as on the platform: class colours, car
+    // divisions, real length, and rounded snouts at BOTH ends.
+    final noseM = highSpeed ? 5.0 : 2.5;
 
     // Floor the on-screen size so the train never shrinks to an invisible
     // speck; above the floor it's exactly to scale.
     final mpp = _metersPerPixel(MapCamera.of(context), head);
     final effLen = math.max(lenM, 30 * mpp);
     final effHalfW = math.max(halfWM, 4 * mpp);
-    final effNose = noseM > 0
-        ? math.min(effLen * 0.42, math.max(noseM, effLen * 0.28))
-        : 0.0;
+    final effNose = math.min(effLen * 0.42, math.max(noseM, effLen * 0.22));
 
     // Carve the body out of the route polyline: tail (min arc) → head (front,
     // direction of travel), so it bends with every curve between.
@@ -288,17 +276,19 @@ class _LiveTrainState extends State<_LiveTrain>
     final polygons = <Polygon>[];
 
     if (cars.isEmpty) {
-      // No Wagenreihung → one body.
+      // No Wagenreihung → one neutral body, rounded both ends.
       final outline = TrainGeometry.body(spine,
           halfWidthM: effHalfW,
-          noseStart: bothNose,
+          noseStart: true,
           noseEnd: true,
           noseLenM: effNose);
       if (outline.length >= 3) {
-        polygons.add(_carPolygon(outline, bodyColor, borderColor));
+        polygons.add(
+            _carPolygon(outline, AppColors.locomotive, Colors.white));
       }
     } else {
-      // One polygon per Wagen so the cars/compartments read as divisions.
+      // One polygon per Wagen, class-coloured, so the cars/compartments read as
+      // divisions — exactly like the platform train.
       final start = cars.map((c) => c.platformPosition!.start).reduce(math.min);
       final end = cars.map((c) => c.platformPosition!.end).reduce(math.max);
       final span = (end - start).abs();
@@ -306,27 +296,27 @@ class _LiveTrainState extends State<_LiveTrain>
         final pos = cars[i].platformPosition!;
         final f0 = span > 0 ? (pos.start - start) / span : 0.0;
         final f1 = span > 0 ? (pos.end - start) / span : 1.0;
-        final a0 = tailArc + f0 * effLen;
-        final a1 = tailArc + f1 * effLen;
-        final seg = TrainGeometry.slice(widget.route, a0, a1);
+        final seg = TrainGeometry.slice(
+            widget.route, tailArc + f0 * effLen, tailArc + f1 * effLen);
         if (seg.length < 2) continue;
         final outline = TrainGeometry.body(
           seg,
           halfWidthM: effHalfW,
-          noseStart: i == 0 && bothNose,
+          noseStart: i == 0,
           noseEnd: i == cars.length - 1,
           noseLenM: effNose,
         );
         if (outline.length >= 3) {
-          polygons.add(_carPolygon(outline, bodyColor, borderColor));
+          polygons.add(_carPolygon(
+              outline, coachColor(cars[i]), Colors.white.withValues(alpha: 0.9)));
         }
       }
     }
     if (polygons.isEmpty) return const SizedBox.shrink();
 
-    // Wagon-number labels, only once each car is large enough on screen to fit.
+    // Wagon-number labels, once each car is large enough on screen to fit.
     final carPx = (effLen / math.max(cars.length, 1)) / mpp;
-    final showNumbers = cars.isNotEmpty && carPx > 22;
+    final showNumbers = cars.isNotEmpty && carPx > 16;
     final numberMarkers = <Marker>[];
     if (showNumbers) {
       final start = cars.map((c) => c.platformPosition!.start).reduce(math.min);
@@ -337,21 +327,7 @@ class _LiveTrainState extends State<_LiveTrain>
         final pos = c.platformPosition!;
         final fc = span > 0 ? (pos.center - start) / span : 0.5;
         final at = TrainGeometry.pointAt(widget.route, tailArc + fc * effLen);
-        numberMarkers.add(Marker(
-          point: at,
-          width: 22,
-          height: 16,
-          child: Center(
-            child: Text(
-              '${c.wagonNumber}',
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w800,
-                color: whiteLivery ? const Color(0xFF20242A) : Colors.white,
-              ),
-            ),
-          ),
-        ));
+        numberMarkers.add(_numberMarker(at, c.wagonNumber, coachColor(c)));
       }
     }
 
@@ -362,30 +338,34 @@ class _LiveTrainState extends State<_LiveTrain>
         // a ~½px grid, making a slowly-moving train twitch between quantised
         // spots instead of gliding.
         PolygonLayer(polygons: polygons, simplificationTolerance: 0),
-        // The ICE/IC red waist stripe down the spine.
-        if (whiteLivery)
-          PolylineLayer(
-            simplificationTolerance: 0,
-            polylines: [
-              Polyline(
-                points: spine,
-                color: AppColors.dbRed,
-                strokeWidth: math.max(1.5, effHalfW / mpp * 0.5),
-              ),
-            ],
-          ),
         if (numberMarkers.isNotEmpty) MarkerLayer(markers: numberMarkers),
       ],
     );
   }
 
-  /// A single car body (smoothness comes from the layer's
-  /// `simplificationTolerance: 0`, set where the layer is built).
   Polygon _carPolygon(List<LatLng> outline, Color fill, Color border) => Polygon(
         points: outline,
         color: fill,
         borderColor: border,
         borderStrokeWidth: 1.2,
+      );
+
+  /// A wagon number centred on a car, in the colour that reads on its class.
+  static Marker _numberMarker(LatLng at, int number, Color carColor) => Marker(
+        point: at,
+        width: 22,
+        height: 16,
+        child: Center(
+          child: Text(
+            '$number',
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+              color: AppColors.onClass(carColor),
+              shadows: const [Shadow(color: Colors.black26, blurRadius: 1)],
+            ),
+          ),
+        ),
       );
 
   /// Ground metres per screen pixel near [at] — for flooring the on-screen size.

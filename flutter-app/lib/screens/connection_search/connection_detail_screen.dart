@@ -599,6 +599,22 @@ class _ConnectionDetailScreenState
                 leg.origin,
                 prev?.arrivalPlatform,
                 next?.departurePlatform,
+                // Einstieg (primary) = the departing/next train; Ausstieg
+                // (secondary) = the arriving/prev train — each drawn to scale.
+                depRef: (next?.line?.fahrtNr.isNotEmpty ?? false)
+                    ? (
+                        category: next!.line?.productName ?? '',
+                        trainNumber: next.line!.fahrtNr,
+                        time: _liveDepartureOf(next) ?? next.departure,
+                      )
+                    : null,
+                arrRef: (prev?.line?.fahrtNr.isNotEmpty ?? false)
+                    ? (
+                        category: prev!.line?.productName ?? '',
+                        trainNumber: prev.line!.fahrtNr,
+                        time: _liveArrivalOf(prev) ?? prev.arrival,
+                      )
+                    : null,
                 primaryTypes: {
                   ...primaryPoiTypesForProduct(prev?.line?.product),
                   ...primaryPoiTypesForProduct(next?.line?.product),
@@ -611,7 +627,9 @@ class _ConnectionDetailScreenState
   /// Einstieg Gleis green, Ausstieg Gleis red, both with their section bands.
   void _openTransferMap(BuildContext context, WidgetRef ref, Station station,
       String? arrGleis, String? depGleis,
-      {Set<String>? primaryTypes}) {
+      {({String category, String trainNumber, DateTime? time})? depRef,
+      ({String category, String trainNumber, DateTime? time})? arrRef,
+      Set<String>? primaryTypes}) {
     final note = (arrGleis != null && depGleis != null)
         ? 'Ausstieg Gleis $arrGleis · Einstieg Gleis $depGleis'
         : depGleis != null
@@ -625,6 +643,8 @@ class _ConnectionDetailScreenState
           role: GleisRole.board,
           secondaryGleis: arrGleis, // Ausstieg — secondary, red
           secondaryRole: GleisRole.alight,
+          coachRef: depRef, // departing train
+          secondaryCoachRef: arrRef, // arriving train
           transferNote: note,
           primaryTypes: primaryTypes,
         );
@@ -992,7 +1012,15 @@ class _LegSectionState extends ConsumerState<_LegSection>
           sectionOverride: sectionOverride,
           // The Wagenreihung is for this leg's boarding stop, so only hand it to
           // the map there — drawing it on a later stop's platform would be wrong.
-          coachSequence: (coach != null && isLegBoarding) ? coach : null,
+          // Draw the train on EVERY stop's platform (not just boarding): the
+          // map fetches this train's Wagenreihung for this stop itself.
+          coachRef: (leg.line?.fahrtNr != null && leg.line!.fahrtNr.isNotEmpty)
+              ? (
+                  category: leg.line?.productName ?? '',
+                  trainNumber: leg.line!.fahrtNr,
+                  time: stop.departure ?? stop.arrival,
+                )
+              : null,
           trainLabel: leg.line?.name,
           transferNote: transferNote,
           primaryTypes: primaryPoiTypesForProduct(leg.line?.product),

@@ -344,14 +344,6 @@ class _TrainLookupScreenState extends ConsumerState<TrainLookupScreen>
             coach: state.coachSequence,
             onStopTap: (stop) {
               if (stop.stop.name.isEmpty) return;
-              // The Wagenreihung is fetched for the train's current/next stop —
-              // only draw the to-scale train on the map of THAT stop.
-              final cs = state.coachSequence;
-              final seqStop = trip.currentStop ?? trip.stopovers.firstOrNull;
-              final atSeqStop = cs != null &&
-                  seqStop != null &&
-                  stop.stop.id.isNotEmpty &&
-                  stop.stop.id == seqStop.stop.id;
               ref.read(stationMapProvider.notifier).loadForStation(
                     stop.stop,
                     highlightGleis: stop.platform,
@@ -360,7 +352,15 @@ class _TrainLookupScreenState extends ConsumerState<TrainLookupScreen>
                         : stop.isOrigin
                             ? GleisRole.board
                             : GleisRole.none,
-                    coachSequence: atSeqStop ? cs : null,
+                    // The map fetches this train's Wagenreihung for this stop,
+                    // so the to-scale train shows at every stop.
+                    coachRef: trip.line.fahrtNr.isNotEmpty
+                        ? (
+                            category: trip.line.productName,
+                            trainNumber: trip.line.fahrtNr,
+                            time: stop.departure ?? stop.arrival,
+                          )
+                        : null,
                     trainLabel: trip.line.displayName,
                     primaryTypes:
                         primaryPoiTypesForProduct(trip.line.product),

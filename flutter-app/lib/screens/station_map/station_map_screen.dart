@@ -335,7 +335,7 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
             initialCenter: map.center,
             initialZoom: 17.5,
             minZoom: 13,
-            maxZoom: 21,
+            maxZoom: 20,
             // Tapping empty map dismisses the inline POI card.
             onTap: (_, __) {
               if (_selectedPoi != null) setState(() => _selectedPoi = null);
@@ -364,7 +364,7 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
                 tileSize: 256,
                 minNativeZoom: 14,
                 maxNativeZoom: 18,
-                maxZoom: 21,
+                maxZoom: 20,
                 tileProvider: TileCache.provider(
                   headers: {'Referer': 'https://www.bahnhof.de/'},
                 ),
@@ -373,10 +373,11 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
                 // elsewhere should just be transparent, not error pins.
                 errorTileCallback: (_, __, ___) {},
               ),
-            // Section bands: a coloured line + labelled markers along the
-            // platform for the highlighted range (e.g. G–I). Primary =
-            // Einstieg (green); on a transfer, secondary = Ausstieg (red).
-            if (state.highlightSectionLine.length >= 2)
+            // Section band stroke — ONLY as a fallback when we couldn't draw the
+            // actual train (no Wagenreihung / no cubes). When the train is
+            // drawn the thick stroke is redundant, so it's dropped.
+            if (state.boardingTrainCars.isEmpty &&
+                state.highlightSectionLine.length >= 2)
               PolylineLayer(
                 polylines: [
                   Polyline(
@@ -389,7 +390,8 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
                   ),
                 ],
               ),
-            if (state.secondarySectionLine.length >= 2)
+            if (state.secondaryTrainCars.isEmpty &&
+                state.secondarySectionLine.length >= 2)
               PolylineLayer(
                 polylines: [
                   Polyline(
@@ -402,13 +404,20 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
                   ),
                 ],
               ),
-            // The boarding train drawn to scale, top-down, on the platform —
-            // one filled car per Wagen (class colour), the rider's portion
-            // bright and the rest dimmed, ICE/end cars with a rounded snout.
+            // The train(s) drawn to scale, top-down, on the platform — one
+            // filled car per Wagen (class colour), the rider's portion bright
+            // and the rest dimmed, end cars with a rounded snout. On a transfer
+            // both the Ausstieg and Einstieg trains are shown on their Gleise.
             if (state.boardingTrainCars.isNotEmpty) ...[
               PolygonLayer(polygons: _trainCarPolygons(state.boardingTrainCars)),
               MarkerLayer(
                   markers: _trainNumberMarkers(state.boardingTrainCars)),
+            ],
+            if (state.secondaryTrainCars.isNotEmpty) ...[
+              PolygonLayer(
+                  polygons: _trainCarPolygons(state.secondaryTrainCars)),
+              MarkerLayer(
+                  markers: _trainNumberMarkers(state.secondaryTrainCars)),
             ],
             MarkerLayer(
                 markers:

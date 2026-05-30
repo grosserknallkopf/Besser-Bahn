@@ -157,6 +157,10 @@ class StationMapState {
   /// platform. Null for a plain station lookup or an intermediate/transfer stop.
   final CoachSequence? coachSequence;
 
+  /// On a transfer map, the Ausstieg (arriving) train's Wagenreihung — drawn on
+  /// the secondary Gleis. Null when not a transfer.
+  final CoachSequence? secondaryCoachSequence;
+
   /// The train this map was opened for, e.g. "RE 7" — shown in the banner so
   /// the map says which train it is. Null for a plain station lookup.
   final String? trainLabel;
@@ -177,6 +181,7 @@ class StationMapState {
     this.secondaryRole = GleisRole.none,
     this.secondarySection,
     this.coachSequence,
+    this.secondaryCoachSequence,
     this.trainLabel,
     this.isLoading = false,
     this.error,
@@ -195,6 +200,7 @@ class StationMapState {
     GleisRole? secondaryRole,
     ({String start, String end})? secondarySection,
     CoachSequence? coachSequence,
+    CoachSequence? secondaryCoachSequence,
     String? trainLabel,
     bool clearHighlight = false,
     bool clearSection = false,
@@ -233,6 +239,9 @@ class StationMapState {
       coachSequence: clearCoachSequence
           ? null
           : (coachSequence ?? this.coachSequence),
+      secondaryCoachSequence: (clearCoachSequence || clearSecondary)
+          ? null
+          : (secondaryCoachSequence ?? this.secondaryCoachSequence),
       trainLabel:
           clearTrainLabel ? null : (trainLabel ?? this.trainLabel),
       isLoading: isLoading ?? this.isLoading,
@@ -433,20 +442,33 @@ class StationMapState {
     return (cubes: out, dLat: dLat, dLon: dLon);
   }
 
-  /// The boarding train drawn to scale, top-down, on the platform: one filled
-  /// outline polygon (LatLng) per car, with the [Coach] (for colour/number) and
-  /// whether it's the rider's portion (in [highlightSection]).
+  /// The boarding (Einstieg) train drawn to scale, top-down, on its platform.
+  List<({List<LatLng> outline, Coach coach, bool boarding})>
+      get boardingTrainCars =>
+          _trainCarsFor(highlightPoi, highlightGleis, highlightSection,
+              coachSequence);
+
+  /// The Ausstieg train on a transfer map — the arriving train on its Gleis.
+  List<({List<LatLng> outline, Coach coach, bool boarding})>
+      get secondaryTrainCars => _trainCarsFor(secondaryHighlightPoi,
+          secondaryGleis, secondarySection, secondaryCoachSequence);
+
+  /// One filled outline polygon (LatLng) per car of [cs] on platform [plat],
+  /// with the [Coach] (for colour/number) and whether it's the rider's portion
+  /// (in [section]).
   ///
   /// We anchor the Wagenreihung's linear car offsets to the map by matching its
-  /// platform sectors (A–I, each with a metre offset) to the real sector cubes
-  /// (each with a LatLng) — giving ≥2 (offset → LatLng) anchors. Every car's
-  /// start/end metre offset is then interpolated along that anchor chain, so the
-  /// train sits exactly where it stops and bends with a curved platform.
-  List<({List<LatLng> outline, Coach coach, bool boarding})>
-      get boardingTrainCars {
-    final cs = coachSequence;
-    final plat = highlightPoi;
-    final g = highlightGleis;
+  /// platform sectors (A–I, each a metre offset) to the real sector cubes (each
+  /// a LatLng), then fit the platform's straight principal axis through those
+  /// anchors and place every car by a linear offset→axis regression. A straight
+  /// axis (rather than chaining noisy cube points) keeps the train clean — no
+  /// spurious kink at the far end where a single cube or an extrapolation used
+  /// to throw it off in a nonsensical direction.
+  List<({List<LatLng> outline, Coach coach, bool boarding})> _trainCarsFor(
+      MapPoi? plat,
+      String? g,
+      ({String start, String end})? section,
+      CoachSequence? cs) {
     if (cs == null || plat == null || g == null) return const [];
     final coaches = cs.allCoaches
         .where((c) =>
@@ -468,7 +490,6 @@ class StationMapState {
       anchors.add((off: (s.start + s.end) / 2, pos: pos));
     }
     if (anchors.length < 2) return const [];
-    anchors.sort((a, b) => a.off.compareTo(b.off));
 
     final lat0 =
         anchors.map((a) => a.pos.latitude).reduce((x, y) => x + y) /
@@ -480,37 +501,38 @@ class StationMapState {
         math.Point(a.pos.longitude * mlon, a.pos.latitude * mlat)
     ];
 
-    // Linear offset → planar point, piecewise linear, extrapolating past ends.
-    math.Point<double> proj(double off) {
-      final n = anchors.length;
-      if (off <= anchors.first.off) {
-        final span = anchors[1].off - anchors.first.off;
-        final t = span != 0 ? (off - anchors.first.off) / span : 0.0;
-        return ax[0] + (ax[1] - ax[0]) * t;
-      }
-      for (var i = 0; i < n - 1; i++) {
-        if (off <= anchors[i + 1].off) {
-          final span = anchors[i + 1].off - anchors[i].off;
-          final t = span != 0 ? (off - anchors[i].off) / span : 0.0;
-          return ax[i] + (ax[i + 1] - ax[i]) * t;
-        }
-      }
-      final span = anchors[n - 1].off - anchors[n - 2].off;
-      final t = span != 0 ? (off - anchors[n - 1].off) / span : 0.0;
-      return ax[n - 1] + (ax[n - 1] - ax[n - 2]) * t;
+    // Fit the platform's principal axis, then least-squares fit the anchors'
+    // metre offset → position-along-axis. Car offsets map straight onto it.
+    final line = _fitLine(ax);
+    if (line == null) return const [];
+    var sx = 0.0, sy = 0.0, sxx = 0.0, sxy = 0.0;
+    final n = anchors.length;
+    for (var i = 0; i < n; i++) {
+      final t = (ax[i].x - line.cx) * line.dx + (ax[i].y - line.cy) * line.dy;
+      final off = anchors[i].off;
+      sx += off;
+      sy += t;
+      sxx += off * off;
+      sxy += off * t;
     }
+    final denom = n * sxx - sx * sx;
+    if (denom.abs() < 1e-9) return const [];
+    final aSlope = (n * sxy - sx * sy) / denom;
+    final bIntercept = (sy - aSlope * sx) / n;
 
-    LatLng toLatLng(math.Point<double> p) =>
-        LatLng(p.y / mlat + island.dLat, p.x / mlon + island.dLon);
+    LatLng axisLatLng(double off) {
+      final t = aSlope * off + bIntercept;
+      final x = line.cx + line.dx * t, y = line.cy + line.dy * t;
+      return LatLng(y / mlat + island.dLat, x / mlon + island.dLon);
+    }
 
     final highSpeed = isHighSpeedCoach(cs);
     final hw = (highSpeed ? 2.95 : 2.85) / 2;
-    final noseLen = highSpeed ? 5.0 : 2.2;
+    final noseLen = highSpeed ? 5.0 : 2.5;
 
     bool inSection(Coach c) {
-      final hs = highlightSection;
-      if (hs == null) return true;
-      final s = _letterIdx(hs.start), e = _letterIdx(hs.end);
+      if (section == null) return true;
+      final s = _letterIdx(section.start), e = _letterIdx(section.end);
       final ci = _letterIdx(c.platformPosition!.sector.trim());
       if (s == null || e == null || ci == null) return true;
       return ci >= s && ci <= e;
@@ -520,15 +542,8 @@ class StationMapState {
     for (var i = 0; i < coaches.length; i++) {
       final c = coaches[i];
       final pos = c.platformPosition!;
-      // A few samples across the car so it follows a curved platform.
-      final steps = math.max(2, (pos.length / 4).ceil());
-      final spine = <LatLng>[];
-      for (var k = 0; k <= steps; k++) {
-        final off = pos.start + (pos.end - pos.start) * (k / steps);
-        spine.add(toLatLng(proj(off)));
-      }
       final outline = TrainGeometry.body(
-        spine,
+        [axisLatLng(pos.start), axisLatLng(pos.end)],
         halfWidthM: hw,
         noseStart: i == 0,
         noseEnd: i == coaches.length - 1,
@@ -592,6 +607,13 @@ class StationMapNotifier extends Notifier<StationMapState> {
   /// the default-hidden set once the map's categories are known.
   Set<String> _primaryTypes = kDefaultPrimaryTypes;
 
+  /// The train(s) this map was opened for — so we can fetch the Wagenreihung
+  /// for THIS stop (works at every stop, not just where the train was first
+  /// looked up) and draw it to scale on the platform. [_coachRef] is the
+  /// Einstieg train; [_coachRefSecondary] is the Ausstieg train on a transfer.
+  ({String category, String trainNumber, DateTime? time})? _coachRef;
+  ({String category, String trainNumber, DateTime? time})? _coachRefSecondary;
+
   @override
   StationMapState build() => const StationMapState();
 
@@ -606,10 +628,14 @@ class StationMapNotifier extends Notifier<StationMapState> {
       String? secondaryGleis,
       GleisRole secondaryRole = GleisRole.none,
       ({String start, String end})? sectionOverride,
-      CoachSequence? coachSequence,
+      ({String category, String trainNumber, DateTime? time})? coachRef,
+      ({String category, String trainNumber, DateTime? time})?
+          secondaryCoachRef,
       String? trainLabel,
       Set<String>? primaryTypes}) async {
     _primaryTypes = primaryTypes ?? kDefaultPrimaryTypes;
+    _coachRef = coachRef;
+    _coachRefSecondary = secondaryCoachRef;
     final raw = highlightGleis?.trim() ?? '';
     final hl = raw.isNotEmpty ? normalizeGleis(raw) : null;
     // [sectionOverride] (the boarding portion of a wing train, e.g. just "I")
@@ -629,8 +655,9 @@ class StationMapNotifier extends Notifier<StationMapState> {
       secondaryGleis: sec,
       secondaryRole: sec == null ? GleisRole.none : secondaryRole,
       secondarySection: secSection,
-      coachSequence: coachSequence,
-      clearCoachSequence: coachSequence == null,
+      // Clear any train from the previous map; this stop's Wagenreihung is
+      // fetched fresh below.
+      clearCoachSequence: true,
       trainLabel: trainLabel,
       clearTrainLabel: trainLabel == null,
       clearHighlight: hl == null,
@@ -645,8 +672,41 @@ class StationMapNotifier extends Notifier<StationMapState> {
 
   Future<void> loadBySlug(String slug) async {
     _primaryTypes = kDefaultPrimaryTypes;
-    state = state.copyWith(clearHighlight: true);
+    _coachRef = null;
+    _coachRefSecondary = null;
+    state = state.copyWith(clearHighlight: true, clearCoachSequence: true);
     await _load(() => _service.fetchBySlug(slug));
+  }
+
+  /// Fetch the Wagenreihung(en) for the train(s) at THIS stop and attach them,
+  /// so the platform train is drawn at every stop where data exists — not only
+  /// where the train was first looked up. Best-effort: failures leave no train.
+  Future<void> _loadCoachSequences(Station station) async {
+    if (station.id.isEmpty) return;
+    final svc = ref.read(coachSequenceServiceProvider);
+    Future<CoachSequence?> fetch(
+        ({String category, String trainNumber, DateTime? time})? r) async {
+      if (r == null || r.trainNumber.isEmpty) return null;
+      try {
+        return await svc.getCoachSequenceForDeparture(
+          category: r.category,
+          trainNumber: r.trainNumber,
+          stationEva: station.id,
+          departureTime: r.time,
+        );
+      } catch (_) {
+        return null;
+      }
+    }
+
+    final results = await Future.wait([fetch(_coachRef), fetch(_coachRefSecondary)]);
+    final primary = results[0];
+    final secondary = results[1];
+    if (primary == null && secondary == null) return;
+    state = state.copyWith(
+      coachSequence: primary,
+      secondaryCoachSequence: secondary,
+    );
   }
 
   Future<void> _load(Future<StationMap> Function() fetch) async {
@@ -668,6 +728,9 @@ class StationMapNotifier extends Notifier<StationMapState> {
             map.pois.map((p) => p.type).toSet().difference(_primaryTypes),
         isLoading: false,
       );
+      // Then attach the platform train(s) for this stop (non-blocking visually).
+      final st = state.station;
+      if (st != null) await _loadCoachSequences(st);
     } on StationMapException catch (e) {
       // Known/expected failure (bad slug, no map data) — message is user-safe.
       AppLog.log('map load failed (StationMapException): ${e.message}',
