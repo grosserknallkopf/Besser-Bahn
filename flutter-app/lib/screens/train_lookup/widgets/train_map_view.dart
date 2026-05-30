@@ -62,6 +62,12 @@ class _TrainMapViewState extends ConsumerState<TrainMapView> {
 
   bool _polylineStarted = false;
 
+  /// Sequential-prefetch progress, surfaced as a thin bar under the app bar so
+  /// the rider sees the stops streaming in one at a time (not a frozen screen).
+  bool _prefetching = false;
+  int _prefetchDone = 0;
+  int _prefetchTotal = 0;
+
   @override
   void initState() {
     super.initState();
@@ -70,26 +76,79 @@ class _TrainMapViewState extends ConsumerState<TrainMapView> {
     _prefetchStopTrains();
   }
 
-  /// Warm both caches for every stop while the trip is open, so the to-scale
-  /// train is ready instantly on any stop's platform — the Wagenreihung (which
-  /// car stops where) AND the station map (the Gleis the cars stand on). Both
-  /// are fire-and-forget; missing data just means no parked train there.
-  void _prefetchStopTrains() {
+  /// Warm both caches for every stop, ONE STOP FULLY AT A TIME: the rider's
+  /// boarding stop first, then expanding outward. For each stop we await its
+  /// Wagenreihung (which car stops where) AND its station map (the Gleis the
+  /// cars stand on) before even *requesting* the next stop.
+  ///
+  /// This is the fix for the "open the big map and it errors / hangs" report:
+  /// the old path fired every stop's vehicle-sequence call at once
+  /// (`Future.wait`) AND ran the station-map prefetch in parallel — a burst of
+  /// dozens of requests that timed out en masse and janked the device. Now it's
+  /// a single strict queue: at most one request in flight, the relevant stop
+  /// resolves first, the rest trickle in behind it. Best-effort throughout —
+  /// a missing map/Wagenreihung just means no parked train at that stop.
+  Future<void> _prefetchStopTrains() async {
     final line = _trip.line;
-    if (line.fahrtNr.isNotEmpty) {
-      ref.read(coachSequenceServiceProvider).prefetchTrainStops(
-            category: line.productName,
-            trainNumber: line.fahrtNr,
-            stops: _trip.stopovers
-                .map((s) => (eva: s.stop.id, time: s.departure ?? s.arrival)),
-          );
+    final stops = _trip.stopovers;
+    if (stops.isEmpty) return;
+    final coachSvc = ref.read(coachSequenceServiceProvider);
+    final mapSvc = ref.read(stationMapServiceProvider);
+    final order = _prefetchOrder(stops);
+
+    if (mounted) {
+      setState(() {
+        _prefetching = true;
+        _prefetchDone = 0;
+        _prefetchTotal = order.length;
+      });
     }
-    // The station-map scrape is heavier (~230 KB per stop), so it streams in a
-    // bounded window inside the service rather than all at once — long ICE
-    // routes warm in the background without stalling the device.
-    ref.read(stationMapServiceProvider).prefetch(
-          _trip.stopovers.map((s) => s.stop.name),
+
+    for (final i in order) {
+      if (!mounted) return;
+      final s = stops[i];
+      // 1) Wagenreihung for this stop (cheap JSON; null on S-Bahn/bus etc.).
+      if (line.fahrtNr.isNotEmpty) {
+        await coachSvc.getCoachSequenceForDeparture(
+          category: line.productName,
+          trainNumber: line.fahrtNr,
+          stationEva: s.stop.id,
+          departureTime: s.departure ?? s.arrival,
         );
+      }
+      if (!mounted) return;
+      // 2) Station map for this stop (heavy ~230 KB scrape) — background mode:
+      // short timeout, no alt-slug retry, failures swallowed.
+      try {
+        await mapSvc.fetchByStationName(s.stop.name, background: true);
+      } catch (_) {/* missing map → just no parked train there */}
+      if (!mounted) return;
+      setState(() => _prefetchDone++);
+    }
+    if (mounted) setState(() => _prefetching = false);
+  }
+
+  /// Stop indices in fetch priority: the rider's boarding stop first (its
+  /// platform train is what they want to see), then alternating outward so the
+  /// stops nearest the boarding stop warm before the far ends of a long route.
+  List<int> _prefetchOrder(List<Stopover> stops) {
+    final n = stops.length;
+    var start = 0;
+    final id = widget.boardingId;
+    if (id != null && id.isNotEmpty) {
+      for (var i = 0; i < n; i++) {
+        if (stops[i].stop.id == id || stops[i].stop.name == id) {
+          start = i;
+          break;
+        }
+      }
+    }
+    final order = <int>[start];
+    for (var d = 1; d < n; d++) {
+      if (start + d < n) order.add(start + d);
+      if (start - d >= 0) order.add(start - d);
+    }
+    return order;
   }
 
   /// Kick off the (network) route-geometry fetch only once the map is actually
@@ -115,7 +174,22 @@ class _TrainMapViewState extends ConsumerState<TrainMapView> {
   Widget build(BuildContext context) {
     final hasStops = _trip.stopovers.any((s) => s.stop.hasLocation);
     return Scaffold(
-      appBar: AppBar(title: Text(_trip.line.displayName)),
+      appBar: AppBar(
+        title: Text(_trip.line.displayName),
+        // While the stops stream in one at a time, a thin determinate bar shows
+        // progress (e.g. "loading 3/12") instead of the screen looking frozen.
+        bottom: _prefetching
+            ? PreferredSize(
+                preferredSize: const Size.fromHeight(3),
+                child: LinearProgressIndicator(
+                  value: _prefetchTotal > 0
+                      ? _prefetchDone / _prefetchTotal
+                      : null,
+                  minHeight: 3,
+                ),
+              )
+            : null,
+      ),
       body: hasStops
           ? TrainMap(
               trip: _trip,

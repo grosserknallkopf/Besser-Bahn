@@ -117,15 +117,17 @@ class CoachSequenceService {
     required String trainNumber,
     required Iterable<({String eva, DateTime? time})> stops,
   }) async {
-    await Future.wait([
-      for (final s in stops)
-        if (s.eva.isNotEmpty && s.time != null)
-          getCoachSequenceForDeparture(
-            category: category,
-            trainNumber: trainNumber,
-            stationEva: s.eva,
-            departureTime: s.time,
-          ),
-    ]);
+    // SEQUENTIAL, one request in flight at a time. The old `Future.wait` fired
+    // every stop's vehicle-sequence call at once; on a long route that burst
+    // of requests timed out en masse and janked the device.
+    for (final s in stops) {
+      if (s.eva.isEmpty || s.time == null) continue;
+      await getCoachSequenceForDeparture(
+        category: category,
+        trainNumber: trainNumber,
+        stationEva: s.eva,
+        departureTime: s.time,
+      );
+    }
   }
 }
