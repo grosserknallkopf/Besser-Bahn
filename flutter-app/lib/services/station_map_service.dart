@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'package:flutter/foundation.dart' show compute;
+import 'package:flutter/foundation.dart' show compute, visibleForTesting;
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 import '../core/app_log.dart';
@@ -147,7 +147,10 @@ class StationMapService {
     final hit = _cache[slug];
     if (hit != null) return hit;
     final uri = Uri.parse('https://www.bahnhof.de/$slug/karte');
-    final timeout = Duration(seconds: background ? 5 : 12);
+    // 8s in background: a slow-but-reachable stop (Kiel needed ~8s on a
+    // congested connection) should still succeed, not get cut at 5s and show no
+    // train. With bounded concurrency the wait overlaps across stops anyway.
+    final timeout = Duration(seconds: background ? 8 : 12);
     final sw = Stopwatch()..start();
 
     // Fast path: ask for the raw RSC flight stream. ~15-20 % smaller than the
@@ -239,6 +242,13 @@ class _ParseInput {
 /// [StationMapException] when the body carries no poi data (caller then retries
 /// via the HTML fallback).
 StationMap _parseInIsolate(_ParseInput input) => _parseBody(input.slug, input.body);
+
+/// Parse a raw bahnhof.de RSC/HTML body into a [StationMap] — the same routine
+/// the service runs, exposed so tests can verify parsing against a saved
+/// fixture deterministically (no network).
+@visibleForTesting
+StationMap parseStationMapBody(String slug, String body) =>
+    _parseBody(slug, body);
 
 StationMap _parseBody(String slug, String body) {
   // The body is either the raw RSC flight stream (from the `RSC: 1` fetch — the

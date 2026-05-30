@@ -1,0 +1,30 @@
+import 'dart:io';
+
+import 'package:besser_bahn/services/station_map_service.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+/// Deterministic parse test for the bahnhof.de station-map scrape, using a
+/// SAVED Kiel Hbf RSC fixture (no network) so it can't flake in CI.
+///
+/// Kiel Hbf is the station that "showed no train" in the app: this proves the
+/// data IS in the payload (8 platforms / 16 sector cubes) and our parser pulls
+/// it out — so if a train fails to render there, the bug is in placement
+/// (platform_train), not the scrape. See [station_map_live_test] for the
+/// network round-trip.
+void main() {
+  test('parses Kiel Hbf RSC fixture: platforms, sector cubes, levels', () {
+    final body =
+        File('test/fixtures/kiel-hbf.rsc.txt').readAsStringSync();
+    final map = parseStationMapBody('kiel-hbf', body);
+
+    final cubes = map.pois.where((p) => p.isPlatformSector).length;
+
+    // The numbers we verified by hand from the live payload.
+    expect(map.platforms.length, 8, reason: 'PLATFORM POIs (Gleise)');
+    expect(cubes, 16, reason: 'PLATFORM_SECTOR_CUBE POIs (A/B/C…)');
+    expect(map.levels, contains('GROUND_FLOOR'));
+    expect(map.center.latitude, closeTo(54.315, 0.05));
+    expect(map.center.longitude, closeTo(10.132, 0.05));
+    expect(map.pois, isNotEmpty);
+  });
+}
