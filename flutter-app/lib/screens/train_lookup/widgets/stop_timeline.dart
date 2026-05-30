@@ -141,7 +141,11 @@ class _StopTimelineState extends State<StopTimeline> {
       // board endpoint (big Gleis) → train card on the spine → (expanded
       // intermediate stops) → alight endpoint (big Gleis).
       rows.add(_stopRow(board, board, alight,
-          hasTop: beforeCount > 0 && _expandedBefore, hasBottom: true));
+          hasTop: beforeCount > 0 && _expandedBefore,
+          hasBottom: true,
+          // Connector into the train-card block: full the moment the ride has
+          // started, so the block below picks the fill up seamlessly (no gap).
+          belowFillOverride: _blockFill(board, alight) > 0 ? 1.0 : 0.0));
       // Train card + Wagenreihung in ONE spine block, so the leg duration in the
       // gutter sits vertically centred across the whole thing (between the board
       // departure above and the alight arrival below), and the route line runs
@@ -168,9 +172,12 @@ class _StopTimelineState extends State<StopTimeline> {
       // train lookup every stop stays visible.
       final collapseMiddle = isLeg && middleCount > 0;
       if (collapseMiddle) {
-        // board endpoint
+        // board endpoint — connector full once the ride has started, so the
+        // middle block below continues the fill with no gap.
         rows.add(_stopRow(board, board, alight,
-            hasTop: beforeCount > 0 && _expandedBefore, hasBottom: true));
+            hasTop: beforeCount > 0 && _expandedBefore,
+            hasBottom: true,
+            belowFillOverride: _blockFill(board, alight) > 0 ? 1.0 : 0.0));
         // collapsible middle — continuous spine line + duration
         rows.add(_middleHeader(
           context,
@@ -330,8 +337,15 @@ class _StopTimelineState extends State<StopTimeline> {
   }
 
   /// One real stop row, wired into the timeline.
+  ///
+  /// [belowFillOverride] forces the fill of the line LEAVING this stop — used
+  /// for an endpoint that connects into the train-card block: that short
+  /// connector must be FULL as soon as the block has any progress, so the rail
+  /// reads as one continuous bar instead of "partial, gap, then the block".
   Widget _stopRow(int i, int board, int alight,
-      {required bool hasTop, required bool hasBottom}) {
+      {required bool hasTop,
+      required bool hasBottom,
+      double? belowFillOverride}) {
     final s = widget.stopovers[i];
     final inSegment = i >= board && i <= alight;
     final isEndpoint = i == board || i == alight;
@@ -347,7 +361,7 @@ class _StopTimelineState extends State<StopTimeline> {
         // the next row) shares ONE basis and the fill flows continuously
         // through all of them instead of stopping at each boundary.
         dotReached: _reachedStop(i),
-        belowFill: _segFill(i),
+        belowFill: belowFillOverride ?? _segFill(i),
         emphasize: isEndpoint,
         // The alight endpoint shows YOUR arrival as its one time, not the
         // train's onward departure; board/intermediate are departure-first.
