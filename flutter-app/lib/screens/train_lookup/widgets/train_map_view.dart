@@ -95,15 +95,22 @@ class _TrainMapViewState extends ConsumerState<TrainMapView> {
     final coachSvc = ref.read(coachSequenceServiceProvider);
     final mapSvc = ref.read(stationMapServiceProvider);
     final order = _prefetchOrder(stops);
+    // The progress bar tracks only the PRIORITY window (boarding stop + nearest
+    // few). Once those are warm the map already shows the train where the rider
+    // is looking, so the bar disappears — the remaining stops keep warming
+    // silently in the background instead of holding a "still loading" bar up for
+    // the whole minute a long route takes to fetch end-to-end.
+    final eager = order.length <= 6 ? order.length : 6;
 
     if (mounted) {
       setState(() {
         _prefetching = true;
         _prefetchDone = 0;
-        _prefetchTotal = order.length;
+        _prefetchTotal = eager;
       });
     }
 
+    var done = 0;
     for (final i in order) {
       if (!mounted) return;
       final s = stops[i];
@@ -123,9 +130,14 @@ class _TrainMapViewState extends ConsumerState<TrainMapView> {
         await mapSvc.fetchByStationName(s.stop.name, background: true);
       } catch (_) {/* missing map → just no parked train there */}
       if (!mounted) return;
-      setState(() => _prefetchDone++);
+      done++;
+      // Drive the bar through the priority window, then hide it and keep going.
+      if (done <= eager) {
+        setState(() => _prefetchDone = done);
+        if (done == eager) setState(() => _prefetching = false);
+      }
     }
-    if (mounted) setState(() => _prefetching = false);
+    if (mounted && _prefetching) setState(() => _prefetching = false);
   }
 
   /// Stop indices in fetch priority: the rider's boarding stop first (its
