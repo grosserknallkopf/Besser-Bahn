@@ -114,50 +114,63 @@ class _TrainMapViewState extends ConsumerState<TrainMapView> {
     AppLog.log('route prefetch start: ${order.length} stops '
         '($eager priority)', tag: 'route');
     final overall = Stopwatch()..start();
+    // Bounded concurrency: up to 3 stops in flight at once. Strict one-at-a-time
+    // made a long route crawl (a single 8 s stop like Kiel stalled the whole
+    // queue); firing ALL at once was the original request storm that errored
+    // out. 3 workers pulling from the priority-ordered queue is the middle
+    // ground — ~3× faster, still gentle on the network.
+    const concurrency = 3;
+    final queue = List<int>.of(order);
     var done = 0, ok = 0, slowest = 0;
     String slowStop = '';
-    for (final i in order) {
-      if (!mounted) return;
-      final s = stops[i];
-      final sw = Stopwatch()..start();
-      // 1) Wagenreihung for this stop (cheap JSON; null on S-Bahn/bus etc.).
-      if (line.fahrtNr.isNotEmpty) {
-        await coachSvc.getCoachSequenceForDeparture(
-          category: line.productName,
-          trainNumber: line.fahrtNr,
-          stationEva: s.stop.id,
-          departureTime: s.departure ?? s.arrival,
-        );
-      }
-      if (!mounted) return;
-      // 2) Station map for this stop (heavy ~230 KB scrape) — background mode:
-      // short timeout, no alt-slug retry, failures swallowed.
-      var failed = false;
-      try {
-        await mapSvc.fetchByStationName(s.stop.name, background: true);
-        ok++;
-      } catch (_) {
-        failed = true; // missing map → just no parked train there
-      }
-      if (!mounted) return;
-      final ms = sw.elapsedMilliseconds;
-      if (ms > slowest) {
-        slowest = ms;
-        slowStop = s.stop.name;
-      }
-      // Surface only the SLOW or failed stops individually — that's the "why is
-      // it lahm" signal — without a line per stop flooding the log.
-      if (ms > 1500 || failed) {
-        AppLog.log('  ${failed ? "✗" : "slow"} ${s.stop.name}: ${ms}ms',
-            tag: 'route');
-      }
-      done++;
-      // Drive the bar through the priority window, then hide it and keep going.
-      if (done <= eager) {
-        setState(() => _prefetchDone = done);
-        if (done == eager) setState(() => _prefetching = false);
+
+    Future<void> worker() async {
+      while (queue.isNotEmpty) {
+        if (!mounted) return;
+        final i = queue.removeAt(0); // front = highest priority
+        final s = stops[i];
+        final sw = Stopwatch()..start();
+        // 1) Wagenreihung for this stop (cheap JSON; null on S-Bahn/bus etc.).
+        if (line.fahrtNr.isNotEmpty) {
+          await coachSvc.getCoachSequenceForDeparture(
+            category: line.productName,
+            trainNumber: line.fahrtNr,
+            stationEva: s.stop.id,
+            departureTime: s.departure ?? s.arrival,
+          );
+        }
+        if (!mounted) return;
+        // 2) Station map (heavy ~230 KB scrape) — background mode: short
+        // timeout, no alt-slug retry, failures swallowed.
+        var failed = false;
+        try {
+          await mapSvc.fetchByStationName(s.stop.name, background: true);
+          ok++;
+        } catch (_) {
+          failed = true; // missing map → just no parked train there
+        }
+        if (!mounted) return;
+        final ms = sw.elapsedMilliseconds;
+        if (ms > slowest) {
+          slowest = ms;
+          slowStop = s.stop.name;
+        }
+        // Surface only the SLOW or failed stops — the "why is it lahm" signal —
+        // without a line per stop flooding the log.
+        if (ms > 1500 || failed) {
+          AppLog.log('  ${failed ? "✗" : "slow"} ${s.stop.name}: ${ms}ms',
+              tag: 'route');
+        }
+        done++;
+        // Drive the bar through the priority window, then hide it and keep going.
+        if (done <= eager) {
+          setState(() => _prefetchDone = done);
+          if (done >= eager) setState(() => _prefetching = false);
+        }
       }
     }
+
+    await Future.wait([for (var w = 0; w < concurrency; w++) worker()]);
     AppLog.log('route prefetch done: $ok/${order.length} maps in '
         '${overall.elapsedMilliseconds}ms, slowest "$slowStop" ${slowest}ms',
         tag: 'route');
