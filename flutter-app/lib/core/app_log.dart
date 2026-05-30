@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 /// Lightweight global debug log.
@@ -51,6 +53,53 @@ class AppLog {
   /// our per-layer `errorTileCallback`), so the only place to catch them all is
   /// here. Without this a flaky/offline connection floods the console with the
   /// identical FMTCBrowsingError, drowning out everything useful.
+  // --- Tile-health timeline ------------------------------------------------
+  static int _tileTotal = 0;
+  static int _tileWindow = 0;
+  static String _tileHost = '';
+  static Timer? _tileTimer;
+  static int _tileBurstStartMs = 0;
+  static final Stopwatch _tileClock = Stopwatch()..start();
+
+  /// Record one map-tile fetch failure on a 2-second TIMELINE instead of per
+  /// tile. This is the diagnostic that shows the burst-then-recover pattern:
+  ///   [tiles] 412 failed in 2s (tiles.openfreemap.org) — 412 total
+  ///   [tiles] 380 failed in 2s (tiles.openfreemap.org) — 792 total
+  ///   [tiles] recovered after 792 failures over 6s
+  /// A burst that clears the moment the prefetch finishes = the connection is
+  /// being starved by the scrape, not slow internet.
+  static void tileError(String raw) {
+    _tileTotal++;
+    _tileWindow++;
+    final h = _hostOf(raw);
+    if (h.isNotEmpty) _tileHost = h;
+    if (_tileBurstStartMs == 0) _tileBurstStartMs = _tileClock.elapsedMilliseconds;
+    _tileTimer ??= Timer.periodic(const Duration(seconds: 2), (_) => _tileTick());
+  }
+
+  static void _tileTick() {
+    if (_tileWindow > 0) {
+      log('$_tileWindow failed in 2s '
+          '(${_tileHost.isEmpty ? "?" : _tileHost}) — $_tileTotal total',
+          tag: 'tiles');
+      _tileWindow = 0;
+    } else {
+      final secs =
+          ((_tileClock.elapsedMilliseconds - _tileBurstStartMs) / 1000).round();
+      log('recovered after $_tileTotal failures over ${secs}s', tag: 'tiles');
+      _tileTimer?.cancel();
+      _tileTimer = null;
+      _tileTotal = 0;
+      _tileBurstStartMs = 0;
+    }
+  }
+
+  /// Pull the host out of a socket/FMTC error string for the timeline label.
+  static String _hostOf(String s) {
+    final m = RegExp(r'(?:address = |uri=https?://)([^,:/\s]+)').firstMatch(s);
+    return m?.group(1) ?? '';
+  }
+
   /// True for the noisy map-tile / tile-network errors we collapse (FMTC misses
   /// plus the raw socket/host-lookup failures vector_map_tiles throws when a
   /// tile host is unreachable). Kept narrow so real errors still surface.
@@ -73,7 +122,7 @@ class AppLog {
     FlutterError.onError = (details) {
       final ex = details.exceptionAsString();
       if (_isTileNoise(ex)) {
-        logCollapsed(ex.split('\n').first.trim(), tag: 'tiles');
+        tileError(ex);
         return;
       }
       (prev ?? FlutterError.presentError)(details);
@@ -89,7 +138,7 @@ class AppLog {
     PlatformDispatcher.instance.onError = (error, stack) {
       final s = error.toString();
       if (_isTileNoise(s)) {
-        logCollapsed(s.split('\n').first.trim(), tag: 'tiles');
+        tileError(s);
         return true; // handled — don't dump the stack
       }
       return prevPlatform?.call(error, stack) ?? false;

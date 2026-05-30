@@ -155,7 +155,6 @@ class TileCache {
         // Counted-collapse: identical failures fold into "… (×N)" instead of an
         // endless wall (see AppLog.logCollapsed). The global FlutterError filter
         // catches the framework-reported variant too.
-        errorTileCallback: (_, error, _) =>
-            AppLog.logCollapsed(error.toString().split('\n').first, tag: 'tiles'),
+        errorTileCallback: (_, error, _) => AppLog.tileError(error.toString()),
       );
 }

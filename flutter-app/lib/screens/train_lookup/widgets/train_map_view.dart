@@ -74,7 +74,14 @@ class _TrainMapViewState extends ConsumerState<TrainMapView> {
     super.initState();
     _trip = widget.trip;
     _ensurePolyline();
-    _prefetchStopTrains();
+    // Defer the heavy bahnhof.de prefetch so the MAP TILES win the network
+    // first. Firing the scrape burst at open time starved the connection — the
+    // whole network (bahn.de, bahnhof.de, the tile host) went 'unreachable' for
+    // ~18 s, then recovered the instant the prefetch ended. Let the initial
+    // tiles + route geometry load, THEN warm the parked trains gently.
+    Future.delayed(const Duration(seconds: 3), () {
+      if (mounted) _prefetchStopTrains();
+    });
   }
 
   /// Warm both caches for every stop, ONE STOP FULLY AT A TIME: the rider's
@@ -114,12 +121,12 @@ class _TrainMapViewState extends ConsumerState<TrainMapView> {
     AppLog.log('route prefetch start: ${order.length} stops '
         '($eager priority)', tag: 'route');
     final overall = Stopwatch()..start();
-    // Bounded concurrency: up to 3 stops in flight at once. Strict one-at-a-time
-    // made a long route crawl (a single 8 s stop like Kiel stalled the whole
-    // queue); firing ALL at once was the original request storm that errored
-    // out. 3 workers pulling from the priority-ordered queue is the middle
-    // ground — ~3× faster, still gentle on the network.
-    const concurrency = 3;
+    // SEQUENTIAL (1 connection). The diagnostics proved the long per-stop times
+    // weren't slow servers — concurrent connections (scrapes + vector tiles +
+    // sprites) choked the connection so everything timed out. Uncontended, each
+    // scrape is ~250 ms (see the live test), so 9 stops finish in ~2-3 s. One
+    // request at a time mirrors the (working) single-station Karte tab.
+    const concurrency = 1;
     final queue = List<int>.of(order);
     var done = 0, ok = 0, slowest = 0;
     String slowStop = '';
