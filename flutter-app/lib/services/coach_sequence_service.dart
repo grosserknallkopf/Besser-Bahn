@@ -7,6 +7,11 @@ class CoachSequenceService {
   final ApiClient _client = ApiClient();
   static const _base = ApiConstants.dbWebApiBaseUrl;
 
+  /// Session cache of resolved sequences, keyed by train + station + time, so a
+  /// stop's platform train is drawn instantly once fetched and a whole trip's
+  /// stops can be prefetched and kept warm while the journey is open.
+  static final Map<String, CoachSequence> _cache = {};
+
   /// Get coach sequence for a train at a specific station
   ///
   /// [category] - Train category: ICE, IC, EC, etc.
@@ -66,16 +71,42 @@ class CoachSequenceService {
     final number = int.tryParse(trainNumber.trim());
     if (number == null || !_coachCategories.contains(cat)) return null;
 
+    final key = '$cat|$number|$stationEva|${departureTime.toUtc().toIso8601String()}';
+    final cached = _cache[key];
+    if (cached != null) return cached;
+
     try {
-      return await getCoachSequence(
+      final cs = await getCoachSequence(
         category: cat,
         number: number,
         stationEva: stationEva,
         date: departureTime,
         time: departureTime,
       );
+      _cache[key] = cs;
+      return cs;
     } catch (_) {
       return null;
     }
+  }
+
+  /// Warm the cache for every stop of one train (fire-and-forget) so opening any
+  /// stop's platform map shows the to-scale train instantly — and it stays
+  /// cached for the whole session while the journey is open.
+  Future<void> prefetchTrainStops({
+    required String category,
+    required String trainNumber,
+    required Iterable<({String eva, DateTime? time})> stops,
+  }) async {
+    await Future.wait([
+      for (final s in stops)
+        if (s.eva.isNotEmpty && s.time != null)
+          getCoachSequenceForDeparture(
+            category: category,
+            trainNumber: trainNumber,
+            stationEva: s.eva,
+            departureTime: s.time,
+          ),
+    ]);
   }
 }

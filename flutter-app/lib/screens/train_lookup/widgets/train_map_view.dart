@@ -49,6 +49,20 @@ class _TrainMapViewState extends ConsumerState<TrainMapView> {
     super.initState();
     _trip = widget.trip;
     _ensurePolyline();
+    _prefetchStopTrains();
+  }
+
+  /// Warm the Wagenreihung cache for every stop while the trip is open, so the
+  /// to-scale train is ready instantly on any stop's platform map.
+  void _prefetchStopTrains() {
+    final line = _trip.line;
+    if (line.fahrtNr.isEmpty) return;
+    ref.read(coachSequenceServiceProvider).prefetchTrainStops(
+          category: line.productName,
+          trainNumber: line.fahrtNr,
+          stops: _trip.stopovers
+              .map((s) => (eva: s.stop.id, time: s.departure ?? s.arrival)),
+        );
   }
 
   /// Kick off the (network) route-geometry fetch only once the map is actually
@@ -113,6 +127,11 @@ class TrainMap extends StatelessWidget {
 
     return AppMap(
       interactive: interactive,
+      // Show the real DB station floor plans when you zoom into a stop, so the
+      // gliding train reads as pulling into each platform. (Indoor tiles only
+      // appear at high zoom over stations; ground floor covers most platforms.)
+      indoorLevel: 'GROUND_FLOOR',
+      dbAttribution: true,
       initialCameraFit: CameraFit.bounds(
         bounds: LatLngBounds.fromPoints(points),
         padding: const EdgeInsets.all(40),
