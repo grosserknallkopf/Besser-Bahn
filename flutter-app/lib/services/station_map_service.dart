@@ -26,6 +26,17 @@ class StationMapService {
         'Accept-Language': 'de-DE,de;q=0.9',
       };
 
+  /// The already-cached map for a station [name], if [prefetch]/[fetchByStationName]
+  /// has resolved it this session — else null. Lets a map widget read a stop's
+  /// parked-train geometry from the warm cache without re-triggering a fetch on
+  /// every rebuild.
+  StationMap? cachedByName(String name) {
+    final hit = _cache[slugify(name)];
+    if (hit != null) return hit;
+    final alt = _altSlug(slugify(name));
+    return alt != null ? _cache[alt] : null;
+  }
+
   /// Fetch the indoor map for a DB station name, resolving the bahnhof.de slug.
   ///
   /// bahnhof.de slugs are mostly the umlaut-expanded, hyphenated name
@@ -47,6 +58,46 @@ class StationMapService {
       rethrow;
     }
   }
+
+  /// Warm the session cache for a list of station [names] (fire-and-forget), so
+  /// the to-scale parked train on every stop of a route is ready the moment the
+  /// rider zooms into that stop. Each station is fetched at most once (the slug
+  /// cache dedups re-opens) and failures are swallowed — a missing map just
+  /// means no parked train there.
+  ///
+  /// We fetch a few at a time (the bahnhof.de `/karte` pages are ~230 KB each,
+  /// so blasting a 30-stop ICE route at once would hammer the network and the
+  /// RSC parser); the bounded window keeps a long route from stalling the
+  /// device while still warming the whole trip in the background.
+  Future<void> prefetch(Iterable<String> names) async {
+    // De-dup by resolved slug so two labels for the same station fetch once.
+    final seen = <String>{};
+    final todo = <String>[];
+    for (final n in names) {
+      final s = n.trim();
+      if (s.isEmpty) continue;
+      final slug = slugify(s);
+      if (seen.add(slug)) todo.add(s);
+    }
+    const window = 4; // concurrent in-flight fetches
+    for (var i = 0; i < todo.length; i += window) {
+      final batch = todo.skip(i).take(window);
+      await Future.wait([
+        for (final name in batch)
+          fetchByStationName(name).catchError((_) => _emptyMap(name)),
+      ]);
+    }
+  }
+
+  /// A placeholder map used only so a failed prefetch resolves instead of
+  /// throwing — never cached, so a real load can still succeed later.
+  StationMap _emptyMap(String name) => StationMap(
+        slug: slugify(name),
+        center: const LatLng(51.0, 10.0),
+        levels: const [],
+        levelInit: '',
+        pois: const [],
+      );
 
   /// hbf <-> hauptbahnhof slug variant, or null if not applicable.
   static String? _altSlug(String slug) {

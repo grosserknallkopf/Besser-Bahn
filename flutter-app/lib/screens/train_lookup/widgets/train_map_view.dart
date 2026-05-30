@@ -52,16 +52,25 @@ class _TrainMapViewState extends ConsumerState<TrainMapView> {
     _prefetchStopTrains();
   }
 
-  /// Warm the Wagenreihung cache for every stop while the trip is open, so the
-  /// to-scale train is ready instantly on any stop's platform map.
+  /// Warm both caches for every stop while the trip is open, so the to-scale
+  /// train is ready instantly on any stop's platform — the Wagenreihung (which
+  /// car stops where) AND the station map (the Gleis the cars stand on). Both
+  /// are fire-and-forget; missing data just means no parked train there.
   void _prefetchStopTrains() {
     final line = _trip.line;
-    if (line.fahrtNr.isEmpty) return;
-    ref.read(coachSequenceServiceProvider).prefetchTrainStops(
-          category: line.productName,
-          trainNumber: line.fahrtNr,
-          stops: _trip.stopovers
-              .map((s) => (eva: s.stop.id, time: s.departure ?? s.arrival)),
+    if (line.fahrtNr.isNotEmpty) {
+      ref.read(coachSequenceServiceProvider).prefetchTrainStops(
+            category: line.productName,
+            trainNumber: line.fahrtNr,
+            stops: _trip.stopovers
+                .map((s) => (eva: s.stop.id, time: s.departure ?? s.arrival)),
+          );
+    }
+    // The station-map scrape is heavier (~230 KB per stop), so it streams in a
+    // bounded window inside the service rather than all at once — long ICE
+    // routes warm in the background without stalling the device.
+    ref.read(stationMapServiceProvider).prefetch(
+          _trip.stopovers.map((s) => s.stop.name),
         );
   }
 
