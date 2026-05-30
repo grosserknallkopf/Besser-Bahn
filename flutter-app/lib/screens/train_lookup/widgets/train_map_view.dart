@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -6,6 +7,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../../../core/platform_train.dart' as pt;
 import '../../../core/train_dimensions.dart';
 import '../../../core/train_geometry.dart';
 import '../../../models/coach_sequence.dart';
@@ -108,9 +110,21 @@ class _TrainMapViewState extends ConsumerState<TrainMapView> {
   }
 }
 
-/// The actual flutter_map for a trip: route polyline, stops, the live train,
-/// and a metric scale bar.
-class TrainMap extends StatelessWidget {
+/// One stop's pre-computed parked-train cars (static map geometry) plus the
+/// per-car centre point + wagon number for the on-zoom number labels.
+class _ParkedStop {
+  final List<({List<LatLng> outline, Coach coach, bool boarding})> cars;
+  const _ParkedStop(this.cars);
+}
+
+/// The actual flutter_map for a trip: route polyline, stops, the parked trains
+/// standing on every stop's platform, the live moving train, and a scale bar.
+///
+/// A [ConsumerStatefulWidget] so it can re-read the warm StationMap +
+/// Wagenreihung session caches as the background prefetch fills them, and
+/// recompute the (static) parked-train geometry ONCE per stop when its data
+/// lands — never per frame.
+class TrainMap extends ConsumerStatefulWidget {
   final Trip trip;
   final CoachSequence? coachSequence;
   final bool interactive;
@@ -123,7 +137,106 @@ class TrainMap extends StatelessWidget {
   });
 
   @override
+  ConsumerState<TrainMap> createState() => _TrainMapState();
+}
+
+class _TrainMapState extends ConsumerState<TrainMap> {
+  /// The parked train per stop index, computed once its caches are warm.
+  final Map<int, _ParkedStop> _parked = {};
+
+  /// Stop indices we've already resolved (success OR confirmed no-data), so we
+  /// don't recompute the same stop on every poll.
+  final Set<int> _done = {};
+
+  Timer? _poll;
+
+  @override
+  void initState() {
+    super.initState();
+    // The prefetch streams the per-stop StationMaps + Wagenreihungen in over a
+    // few seconds; poll the warm caches a handful of times and build each stop's
+    // static parked train as its data arrives, then stop. This is the ONLY
+    // place the parked geometry is computed — it never runs per frame.
+    _refreshParked();
+    _poll = Timer.periodic(const Duration(milliseconds: 800), (t) {
+      _refreshParked();
+      if (_done.length >= widget.trip.stopovers.length) t.cancel();
+    });
+  }
+
+  @override
+  void dispose() {
+    _poll?.cancel();
+    super.dispose();
+  }
+
+  /// For every stop not yet resolved, if BOTH its StationMap and Wagenreihung
+  /// are now cached, compute its parked-train cars once and keep them.
+  void _refreshParked() {
+    if (!mounted) return;
+    final mapSvc = ref.read(stationMapServiceProvider);
+    final coachSvc = ref.read(coachSequenceServiceProvider);
+    final line = widget.trip.line;
+    var changed = false;
+    final stops = widget.trip.stopovers;
+    for (var i = 0; i < stops.length; i++) {
+      if (_done.contains(i)) continue;
+      final s = stops[i];
+      final gleisRaw = s.platform?.trim() ?? '';
+      final map = mapSvc.cachedByName(s.stop.name);
+      // No map yet → keep polling. A map with no platforms means the scrape
+      // failed/placeholder → give up on this stop.
+      if (map == null) continue;
+      if (gleisRaw.isEmpty || map.platforms.isEmpty) {
+        _done.add(i);
+        continue;
+      }
+      final cs = coachSvc.cachedForDeparture(
+        category: line.productName,
+        trainNumber: line.fahrtNr,
+        stationEva: s.stop.id,
+        departureTime: s.departure ?? s.arrival,
+      );
+      if (cs == null) continue; // Wagenreihung not in yet (or never will be).
+      _done.add(i);
+      final cars = pt.platformTrainCars(
+        map,
+        gleis: pt.normalizeGleis(gleisRaw),
+        // Only the rider's boarding stop dims the non-boarding portion; at the
+        // other stops the whole standing train is shown lit.
+        section: i == _boardingIndex ? _boardingSection : null,
+        cs: cs,
+      );
+      if (cars.isNotEmpty) {
+        _parked[i] = _ParkedStop(cars);
+        changed = true;
+      }
+    }
+    if (changed && mounted) setState(() {});
+  }
+
+  /// The stop the rider boards at (first stop with a departure), or -1.
+  int get _boardingIndex {
+    final stops = widget.trip.stopovers;
+    for (var i = 0; i < stops.length; i++) {
+      if (stops[i].departure != null || stops[i].plannedDeparture != null) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  /// The boarding section parsed from the boarding stop's track label, if any.
+  ({String start, String end})? get _boardingSection {
+    final i = _boardingIndex;
+    if (i < 0) return null;
+    final g = widget.trip.stopovers[i].platform?.trim() ?? '';
+    return g.isEmpty ? null : pt.parseGleisSection(g);
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final trip = widget.trip;
     final stops = trip.stopovers.where((s) => s.stop.hasLocation).toList();
     if (stops.isEmpty) return const SizedBox.shrink();
 
@@ -134,11 +247,33 @@ class TrainMap extends StatelessWidget {
         ? trip.polyline!.map((p) => LatLng(p['lat']!, p['lng']!)).toList()
         : points;
 
+    // Flatten every stop's parked-train cars into one polygon layer. They're
+    // to scale, so they only become visible (more than a speck) once the rider
+    // zooms into a stop — intended.
+    final parkedPolygons = <Polygon>[];
+    final parkedCars = <({List<LatLng> outline, Coach coach, bool boarding})>[];
+    for (final p in _parked.values) {
+      for (final car in p.cars) {
+        if (car.outline.length < 3) continue;
+        parkedCars.add(car);
+        final fill = car.boarding
+            ? coachColor(car.coach)
+            : coachColor(car.coach).withValues(alpha: 0.45);
+        parkedPolygons.add(Polygon(
+          points: car.outline,
+          color: fill,
+          borderColor: Colors.white.withValues(alpha: 0.9),
+          borderStrokeWidth: 1.2,
+        ));
+      }
+    }
+
     return AppMap(
-      interactive: interactive,
+      interactive: widget.interactive,
       // Show the real DB station floor plans when you zoom into a stop, so the
-      // gliding train reads as pulling into each platform. (Indoor tiles only
-      // appear at high zoom over stations; ground floor covers most platforms.)
+      // gliding/parked train reads as pulling into each platform. (Indoor tiles
+      // only fetch at high zoom — minNativeZoom 14 — so the overview costs
+      // nothing; ground floor covers most platforms.)
       indoorLevel: 'GROUND_FLOOR',
       dbAttribution: true,
       initialCameraFit: CameraFit.bounds(
@@ -172,22 +307,102 @@ class TrainMap extends StatelessWidget {
               ),
           ],
         ),
+        // Static parked trains, one polygon per Wagen on every stop's platform.
+        // Drawn under the live train so the moving train wins where they meet.
+        if (parkedPolygons.isNotEmpty)
+          PolygonLayer(polygons: parkedPolygons, simplificationTolerance: 0),
+        // Wagon-number labels, only once a car is large enough on screen — i.e.
+        // when the rider has zoomed into a stop (gated by metres/pixel, like the
+        // live train), so they don't clutter the overview.
+        if (parkedCars.isNotEmpty) _ParkedNumbers(cars: parkedCars),
         // The live train: a top-down body that hugs the rails and slides
-        // continuously (its own per-frame ticker) instead of jumping.
-        _LiveTrain(trip: trip, route: routePoints, coachSequence: coachSequence),
+        // continuously (its own throttled ticker) instead of jumping.
+        _LiveTrain(
+            trip: trip,
+            route: routePoints,
+            coachSequence: widget.coachSequence),
       ],
     );
   }
+
+}
+
+/// Wagon-number labels for the parked trains, drawn inside the map so it can
+/// read the live camera: a number sits at each car's centre only once that car
+/// is wide enough on screen (the rider has zoomed into a stop), so the labels
+/// stay hidden over the route overview. Rebuilds on camera change via
+/// flutter_map's own listenable — no ticker, this is static geometry.
+class _ParkedNumbers extends StatelessWidget {
+  final List<({List<LatLng> outline, Coach coach, bool boarding})> cars;
+  const _ParkedNumbers({required this.cars});
+
+  @override
+  Widget build(BuildContext context) {
+    final cam = MapCamera.of(context);
+    final markers = <Marker>[];
+    for (final car in cars) {
+      if (car.coach.wagonNumber <= 0 || car.outline.length < 3) continue;
+      // Car width on screen: the longest screen span between ring points. Show
+      // the number only when it comfortably fits (≈ a zoomed-in platform).
+      final pts = [for (final p in car.outline) cam.latLngToScreenOffset(p)];
+      var maxSpan = 0.0;
+      for (var i = 0; i < pts.length; i++) {
+        for (var j = i + 1; j < pts.length; j++) {
+          final d = (pts[i] - pts[j]).distance;
+          if (d > maxSpan) maxSpan = d;
+        }
+      }
+      if (maxSpan < 22) continue;
+      markers.add(_numberMarker(
+          _centroid(car.outline), car.coach.wagonNumber, coachColor(car.coach)));
+    }
+    if (markers.isEmpty) return const SizedBox.shrink();
+    return MarkerLayer(markers: markers);
+  }
+
+  static LatLng _centroid(List<LatLng> ring) {
+    var lat = 0.0, lon = 0.0;
+    for (final p in ring) {
+      lat += p.latitude;
+      lon += p.longitude;
+    }
+    return LatLng(lat / ring.length, lon / ring.length);
+  }
+
+  static Marker _numberMarker(LatLng at, int number, Color carColor) => Marker(
+        point: at,
+        width: 22,
+        height: 16,
+        child: Center(
+          child: Text(
+            '$number',
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+              color: AppColors.onClass(carColor),
+              shadows: const [Shadow(color: Colors.black26, blurRadius: 1)],
+            ),
+          ),
+        ),
+      );
 }
 
 /// The moving train, drawn as a to-scale top-down body on the route polyline.
 ///
 /// It carries its own frame ticker and recomputes the head position from the
-/// wall clock every frame, so the train glides smoothly along the track and
-/// rounds curves — rather than hopping every few seconds. When zoomed out far
-/// enough that the real body would be sub-pixel, it's floored to a small
-/// on-screen size so it stays a visible train; once the real length exceeds
-/// that floor (zoomed in) it is exactly to scale.
+/// wall clock, so the train glides smoothly along the track and rounds curves —
+/// rather than hopping every few seconds. When zoomed out far enough that the
+/// real body would be sub-pixel, it's floored to a small on-screen size so it
+/// stays a visible train; once the real length exceeds that floor (zoomed in)
+/// it is exactly to scale.
+///
+/// Performance: the route polyline is projected to metres + cumulative
+/// arc-lengths ONCE into a [RoutePath] (rebuilt only when the route changes),
+/// so the per-tick `locate`/`slice`/`pointAt` are cheap cached lookups instead
+/// of re-projecting the whole (possibly thousands-of-points) line 60×/s. And
+/// the ticker only triggers a rebuild when the head has actually moved more
+/// than ~0.3 px on screen since the last frame — a train crawls, so this stays
+/// perfectly smooth while leaving the CPU idle between meaningful moves.
 class _LiveTrain extends StatefulWidget {
   final Trip trip;
   final List<LatLng> route;
@@ -204,16 +419,59 @@ class _LiveTrainState extends State<_LiveTrain>
     with SingleTickerProviderStateMixin {
   late final Ticker _ticker;
 
+  /// The route projected + arc-length-indexed once; rebuilt only on route change.
+  RoutePath? _path;
+
+  /// Head position + ground metres/pixel at the last rebuild — to decide whether
+  /// the next tick has moved enough on screen to be worth another rebuild.
+  LatLng? _lastHead;
+  double _lastMpp = 1;
+
+  static const _distance = Distance();
+
   @override
   void initState() {
     super.initState();
-    _ticker = createTicker((_) => setState(() {}))..start();
+    _path = RoutePath.build(widget.route);
+    _ticker = createTicker(_onTick)..start();
+  }
+
+  @override
+  void didUpdateWidget(covariant _LiveTrain old) {
+    super.didUpdateWidget(old);
+    // Reproject only when the polyline identity/length actually changes (it
+    // snaps from straight-line to real geometry once, then stays put).
+    if (!identical(old.route, widget.route) ||
+        old.route.length != widget.route.length) {
+      _path = RoutePath.build(widget.route);
+      _lastHead = null; // force a rebuild against the new geometry
+    }
   }
 
   @override
   void dispose() {
     _ticker.dispose();
     super.dispose();
+  }
+
+  /// Throttle rebuilds: only when the head moved > ~0.3 px on screen since the
+  /// last frame (or there's no previous frame yet). A moving train covers a
+  /// fraction of a pixel per frame, so without this we'd rebuild 60×/s for a
+  /// sub-pixel change and peg the CPU on long routes.
+  void _onTick(Duration _) {
+    final head = _head();
+    if (head == null) {
+      if (_lastHead != null) setState(() => _lastHead = null);
+      return;
+    }
+    final prev = _lastHead;
+    if (prev == null) {
+      setState(() {});
+      return;
+    }
+    // metres moved → pixels via the last frame's metres/pixel.
+    final movedM = _distance(prev, head);
+    if (movedM / (_lastMpp <= 0 ? 1 : _lastMpp) > 0.3) setState(() {});
   }
 
   /// Where the train's head is right now: the live-interpolated position while
@@ -240,7 +498,8 @@ class _LiveTrainState extends State<_LiveTrain>
   @override
   Widget build(BuildContext context) {
     final head = _head();
-    if (head == null || widget.route.length < 2) {
+    final path = _path;
+    if (head == null || path == null) {
       return const SizedBox.shrink();
     }
 
@@ -271,15 +530,18 @@ class _LiveTrainState extends State<_LiveTrain>
     // Floor the on-screen size so the train never shrinks to an invisible
     // speck; above the floor it's exactly to scale.
     final mpp = _metersPerPixel(MapCamera.of(context), head);
+    // Remember this frame's head + scale so the ticker can throttle the next one.
+    _lastHead = head;
+    _lastMpp = mpp;
     final effLen = math.max(lenM, 30 * mpp);
     final effHalfW = math.max(halfWM, 4 * mpp);
     final effNose = math.min(effLen * 0.42, math.max(noseM, effLen * 0.22));
 
-    // Carve the body out of the route polyline: tail (min arc) → head (front,
-    // direction of travel), so it bends with every curve between.
-    final headArc = TrainGeometry.locate(widget.route, head);
+    // Carve the body out of the (precomputed) route path: tail (min arc) → head
+    // (front, direction of travel), so it bends with every curve between.
+    final headArc = path.locate(head);
     final tailArc = headArc - effLen;
-    final spine = TrainGeometry.slice(widget.route, tailArc, headArc);
+    final spine = path.slice(tailArc, headArc);
     if (spine.length < 2) return const SizedBox.shrink();
 
     final polygons = <Polygon>[];
@@ -305,8 +567,7 @@ class _LiveTrainState extends State<_LiveTrain>
         final pos = cars[i].platformPosition!;
         final f0 = span > 0 ? (pos.start - start) / span : 0.0;
         final f1 = span > 0 ? (pos.end - start) / span : 1.0;
-        final seg = TrainGeometry.slice(
-            widget.route, tailArc + f0 * effLen, tailArc + f1 * effLen);
+        final seg = path.slice(tailArc + f0 * effLen, tailArc + f1 * effLen);
         if (seg.length < 2) continue;
         final outline = TrainGeometry.body(
           seg,
@@ -335,7 +596,7 @@ class _LiveTrainState extends State<_LiveTrain>
         if (c.wagonNumber <= 0) continue;
         final pos = c.platformPosition!;
         final fc = span > 0 ? (pos.center - start) / span : 0.5;
-        final at = TrainGeometry.pointAt(widget.route, tailArc + fc * effLen);
+        final at = path.pointAt(tailArc + fc * effLen);
         numberMarkers.add(_numberMarker(at, c.wagonNumber, coachColor(c)));
       }
     }

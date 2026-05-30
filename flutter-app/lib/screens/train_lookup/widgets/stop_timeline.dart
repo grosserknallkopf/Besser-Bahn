@@ -152,6 +152,7 @@ class _StopTimelineState extends State<StopTimeline> {
         duration: _legDuration(stops, board, alight),
         expandable: middleCount > 0,
         extra: widget.trainExtra,
+        fill: _blockFill(board, alight),
       ));
       if (_expandedMiddle && middleCount > 0) {
         for (var i = board + 1; i < alight; i++) {
@@ -176,6 +177,7 @@ class _StopTimelineState extends State<StopTimeline> {
           expanded: _expandedMiddle,
           count: middleCount,
           duration: _legDuration(stops, board, alight),
+          fill: _blockFill(board, alight),
           onTap: () => setState(() => _expandedMiddle = !_expandedMiddle),
         ));
         if (_expandedMiddle) {
@@ -281,6 +283,37 @@ class _StopTimelineState extends State<StopTimeline> {
     return (stops.length - 1).toDouble();
   }
 
+  /// Progress fill (0…1) for the leg's middle block. Collapsed, the block
+  /// stands for the whole board→alight ride, so it fills by the ride fraction;
+  /// expanded, it's only the board→first-intermediate connector (the per-stop
+  /// rows below carry the rest), so it fills by that one segment.
+  double _blockFill(int board, int alight) {
+    final pos = _trainPos();
+    if (_expandedMiddle) return (pos - board).clamp(0.0, 1.0);
+    final span = alight - board;
+    return span > 0 ? ((pos - board) / span).clamp(0.0, 1.0) : 0.0;
+  }
+
+  /// A vertical timeline rail filled solid (brand colour) for [fill] of its
+  /// height from the top, the rest a muted track — the shared progress look.
+  Widget _progressSpine(BuildContext context, double fill) {
+    final theme = Theme.of(context);
+    final done = theme.colorScheme.primary;
+    final faint = theme.colorScheme.outlineVariant;
+    final ff = (fill.clamp(0.0, 1.0) * 1000).round();
+    return SizedBox(
+      width: 20,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          if (ff > 0) Expanded(flex: ff, child: Container(width: 4, color: done)),
+          if (ff < 1000)
+            Expanded(flex: 1000 - ff, child: Container(width: 2, color: faint)),
+        ],
+      ),
+    );
+  }
+
   /// One real stop row, wired into the timeline.
   Widget _stopRow(int i, int board, int alight,
       {required bool hasTop, required bool hasBottom}) {
@@ -360,10 +393,10 @@ class _StopTimelineState extends State<StopTimeline> {
       {required bool expanded,
       required int count,
       required String? duration,
+      required double fill,
       required VoidCallback onTap}) {
     final theme = Theme.of(context);
     final primary = theme.colorScheme.primary;
-    final lineColor = theme.colorScheme.outlineVariant;
     final amenities = widget.legAmenities;
     return InkWell(
       onTap: onTap,
@@ -393,15 +426,8 @@ class _StopTimelineState extends State<StopTimeline> {
                       ),
               ),
               const SizedBox(width: 12),
-              // continuous timeline line
-              SizedBox(
-                width: 20,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [Container(width: 2, color: lineColor)],
-                ),
-              ),
+              // Progress timeline line — fills as far as the train has come.
+              _progressSpine(context, fill),
               const SizedBox(width: 12),
               // content: expander row + (optional) leg-wide amenities below
               Expanded(
@@ -478,10 +504,10 @@ class _StopTimelineState extends State<StopTimeline> {
       {required int middleCount,
       required String? duration,
       required bool expandable,
+      required double fill,
       Widget? extra}) {
     final theme = Theme.of(context);
     final primary = theme.colorScheme.primary;
-    final lineColor = theme.colorScheme.outlineVariant;
     final amenities = widget.legAmenities;
     final expanded = _expandedMiddle;
 
@@ -568,15 +594,9 @@ class _StopTimelineState extends State<StopTimeline> {
                     ),
             ),
             const SizedBox(width: 12),
-            // continuous timeline line down the whole block's left side
-            SizedBox(
-              width: 20,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [Container(width: 2, color: lineColor)],
-              ),
-            ),
+            // Progress timeline line down the whole block's left side — fills
+            // solid as far as the live train has come through the ride.
+            _progressSpine(context, fill),
             // No extra gap here: trainPart's left:12 and the Wagenreihung's own
             // inner 12 both land the content at the same column as the stops.
             Expanded(

@@ -90,6 +90,25 @@ class CoachSequenceService {
     }
   }
 
+  /// The already-resolved sequence for this train at this stop, if it's in the
+  /// session cache (e.g. warmed by [prefetchTrainStops]) — else null. Lets the
+  /// route map read a stop's parked train from the warm cache synchronously,
+  /// without re-triggering a fetch on every rebuild.
+  CoachSequence? cachedForDeparture({
+    required String category,
+    required String trainNumber,
+    required String stationEva,
+    required DateTime? departureTime,
+  }) {
+    if (departureTime == null) return null;
+    final cat = category.toUpperCase().trim();
+    final number = int.tryParse(trainNumber.trim());
+    if (number == null || !_coachCategories.contains(cat)) return null;
+    final key =
+        '$cat|$number|$stationEva|${departureTime.toUtc().toIso8601String()}';
+    return _cache[key];
+  }
+
   /// Warm the cache for every stop of one train (fire-and-forget) so opening any
   /// stop's platform map shows the to-scale train instantly — and it stays
   /// cached for the whole session while the journey is open.

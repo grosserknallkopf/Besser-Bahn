@@ -219,6 +219,103 @@ class TrainGeometry {
   }
 }
 
+/// A route polyline with its planar projection and cumulative arc-lengths
+/// precomputed ONCE, so a per-frame moving train can `locate`/`slice`/`pointAt`
+/// without re-projecting and re-summing the whole (long) polyline every tick.
+///
+/// [TrainGeometry.slice]/`pointAt`/`locate` redo that O(n) trig work on each
+/// call; on a long-distance route (thousands of points) that ran ~60×/s and
+/// pegged the CPU. [RoutePath] does it once and the per-tick lookups become a
+/// cheap linear scan over cached metres.
+class RoutePath {
+  final List<LatLng> points;
+  final _Frame _frame;
+  final List<math.Point<double>> _v;
+  final List<double> _cum;
+
+  RoutePath._(this.points, this._frame, this._v, this._cum);
+
+  /// Build (and cache the projection of) [path]. Returns null when there aren't
+  /// enough distinct points to form a line.
+  static RoutePath? build(List<LatLng> path) {
+    final pts = TrainGeometry._dedupe(path);
+    if (pts.length < 2) return null;
+    final f = _Frame(pts.first.latitude);
+    final v = [for (final p in pts) f.xy(p)];
+    final cum = <double>[0];
+    for (var i = 0; i < v.length - 1; i++) {
+      cum.add(cum.last + (v[i + 1] - v[i]).magnitude);
+    }
+    return RoutePath._(pts, f, v, cum);
+  }
+
+  /// Total track length, metres.
+  double get length => _cum.last;
+
+  math.Point<double> _at(double d) {
+    if (d <= 0) return _v.first;
+    if (d >= _cum.last) return _v.last;
+    // Binary search the cumulative array for the segment containing [d].
+    var lo = 0, hi = _cum.length - 1;
+    while (lo + 1 < hi) {
+      final mid = (lo + hi) >> 1;
+      if (_cum[mid] <= d) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+    final segLen = _cum[hi] - _cum[lo];
+    final t = segLen > 0 ? (d - _cum[lo]) / segLen : 0.0;
+    return _v[lo] + (_v[hi] - _v[lo]) * t;
+  }
+
+  /// Arc-length (metres from the start) of the point nearest [p]. O(n) but over
+  /// the cached projection only — no re-projection.
+  double locate(LatLng p) {
+    final pp = _frame.xy(p);
+    var best = double.infinity, bestArc = 0.0;
+    for (var i = 0; i < _v.length - 1; i++) {
+      final a = _v[i], b = _v[i + 1];
+      final ab = b - a;
+      final len2 = ab.x * ab.x + ab.y * ab.y;
+      final t = len2 > 0
+          ? (((pp.x - a.x) * ab.x + (pp.y - a.y) * ab.y) / len2).clamp(0.0, 1.0)
+          : 0.0;
+      final proj = a + ab * t;
+      final d = (pp - proj).magnitude;
+      if (d < best) {
+        best = d;
+        bestArc = _cum[i] + math.sqrt(len2) * t;
+      }
+    }
+    return bestArc;
+  }
+
+  /// The slice between arc-lengths [startM]…[endM] (clamped), as LatLng with
+  /// interpolated end points — every bend in between preserved.
+  List<LatLng> slice(double startM, double endM) {
+    if (endM < startM) {
+      final t = startM;
+      startM = endM;
+      endM = t;
+    }
+    final total = _cum.last;
+    if (total <= 0) return [points.first, points.last];
+    startM = startM.clamp(0.0, total);
+    endM = endM.clamp(0.0, total);
+    final out = <math.Point<double>>[_at(startM)];
+    for (var i = 0; i < _cum.length; i++) {
+      if (_cum[i] > startM && _cum[i] < endM) out.add(_v[i]);
+    }
+    out.add(_at(endM));
+    return [for (final q in out) _frame.ll(q)];
+  }
+
+  /// The point at arc-length [distM] (clamped) — for a wagon-number label.
+  LatLng pointAt(double distM) => _frame.ll(_at(distM));
+}
+
 /// Local equirectangular metre frame around a reference latitude.
 class _Frame {
   final double mlat, mlon;

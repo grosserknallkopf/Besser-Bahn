@@ -349,11 +349,13 @@ List<({List<LatLng> outline, Coach coach, bool boarding})> platformTrainCars(
       math.Point(a.pos.longitude * mlon, a.pos.latitude * mlat)
   ];
 
-  // Use the platform island's robust axis (from anchors + Gleis markers); it
-  // gives the true platform direction so the train sits parallel to the track
-  // instead of tilting to the scatter of a few cubes. Then least-squares fit
-  // the anchors' metre offset → position-along-axis; cars map straight onto it.
-  final line = island.axis ?? fitLine(ax);
+  // Direction = the best-fit line through THIS platform's own sector cubes
+  // (A,B,C,D…). That makes the train parallel to the cube row — exactly the
+  // line the rider reads on the map. (The island anchor axis can sit at a
+  // slightly different angle than the cubes, which looked tilted; use it only
+  // as a fallback when there are too few cubes to fit.) Then least-squares fit
+  // the cubes' metre offset → position-along-axis; cars map straight onto it.
+  final line = fitLine(ax) ?? island.axis;
   if (line == null) return const [];
   var sx = 0.0, sy = 0.0, sxx = 0.0, sxy = 0.0;
   final n = anchors.length;
