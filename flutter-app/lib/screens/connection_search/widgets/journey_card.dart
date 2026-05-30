@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -195,21 +197,34 @@ class JourneyCard extends ConsumerWidget {
     // Floor so even a short leg keeps enough width for its line label.
     final minFlex = (total * 0.16).round().clamp(1, total);
 
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        for (var i = 0; i < legs.length; i++) ...[
-          if (i > 0) const SizedBox(width: 4),
-          Expanded(
-            flex: mins[i] < minFlex ? minFlex : mins[i],
-            child: _legSegment(
-              context,
-              legs[i].line?.displayName ?? '–',
-              _productColor(context, legs[i]),
-              legs[i].occupancy?.level,
-            ),
-          ),
-        ],
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (var i = 0; i < legs.length; i++) ...[
+              if (i > 0) const SizedBox(width: 4),
+              Expanded(
+                flex: mins[i] < minFlex ? minFlex : mins[i],
+                child: _legSegment(
+                  context,
+                  legs[i].line?.displayName ?? '–',
+                  _productColor(context, legs[i]),
+                  legs[i].occupancy?.level,
+                ),
+              ),
+            ],
+          ],
+        ),
+        // A second bar spanning the WHOLE width (across both legs) that fills
+        // left→right with how far the journey has progressed overall (elapsed
+        // time vs total) — independent of the per-leg width split above.
+        const SizedBox(height: 5),
+        _JourneyProgressBar(
+          start: journey.departure ?? journey.plannedDeparture,
+          end: journey.arrival ?? journey.plannedArrival,
+        ),
       ],
     );
   }
@@ -261,4 +276,80 @@ class JourneyCard extends ConsumerWidget {
     return Theme.of(context).colorScheme.primary;
   }
 
+}
+
+/// A thin full-width bar that fills left→right with the journey's OVERALL
+/// progress (elapsed wall-clock time vs the whole departure→arrival span),
+/// drawn under the per-leg length bars. 0 before departure, full after arrival.
+///
+/// It self-ticks only WHILE the journey is in progress (so the bar visibly
+/// creeps forward); a future or finished journey holds a static value and runs
+/// no timer, so a long list of saved trips costs nothing.
+class _JourneyProgressBar extends StatefulWidget {
+  final DateTime? start;
+  final DateTime? end;
+  const _JourneyProgressBar({this.start, this.end});
+
+  @override
+  State<_JourneyProgressBar> createState() => _JourneyProgressBarState();
+}
+
+class _JourneyProgressBarState extends State<_JourneyProgressBar> {
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncTimer();
+  }
+
+  @override
+  void didUpdateWidget(covariant _JourneyProgressBar old) {
+    super.didUpdateWidget(old);
+    if (old.start != widget.start || old.end != widget.end) _syncTimer();
+  }
+
+  /// Run a slow ticker only while the journey is actually under way — the bar
+  /// advances over hours, so 20 s is plenty and keeps the list idle otherwise.
+  void _syncTimer() {
+    _timer?.cancel();
+    final f = _fraction();
+    if (f != null && f > 0 && f < 1) {
+      _timer = Timer.periodic(const Duration(seconds: 20), (_) {
+        if (mounted) setState(() {});
+      });
+    }
+  }
+
+  /// Elapsed fraction in [0,1], or null when the times are unusable.
+  double? _fraction() {
+    final s = widget.start, e = widget.end;
+    if (s == null || e == null) return null;
+    final total = e.difference(s).inSeconds;
+    if (total <= 0) return null;
+    final elapsed = DateTime.now().difference(s).inSeconds;
+    return (elapsed / total).clamp(0.0, 1.0);
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final f = _fraction();
+    if (f == null) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(3),
+      child: LinearProgressIndicator(
+        value: f,
+        minHeight: 5,
+        backgroundColor: theme.colorScheme.surfaceContainerHighest,
+        valueColor: AlwaysStoppedAnimation(theme.colorScheme.primary),
+      ),
+    );
+  }
 }
