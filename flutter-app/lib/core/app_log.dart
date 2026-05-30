@@ -61,6 +61,14 @@ class AppLog {
   static int _tileBurstStartMs = 0;
   static final Stopwatch _tileClock = Stopwatch()..start();
 
+  /// True while the base map is PAUSED because the tile host(s) are
+  /// hammering-unreachable. Every map watches this and drops its tile layers
+  /// (vector AND raster) so neither can keep firing thousands of doomed
+  /// requests/sec and choke the whole connection. It flips back after a short
+  /// cooldown to probe whether the host has recovered.
+  static final ValueNotifier<bool> tilesPaused = ValueNotifier<bool>(false);
+  static Timer? _pauseTimer;
+
   /// Record one map-tile fetch failure on a 2-second TIMELINE instead of per
   /// tile. This is the diagnostic that shows the burst-then-recover pattern:
   ///   [tiles] 412 failed in 2s (tiles.openfreemap.org) — 412 total
@@ -75,6 +83,16 @@ class AppLog {
     if (h.isNotEmpty) _tileHost = h;
     if (_tileBurstStartMs == 0) _tileBurstStartMs = _tileClock.elapsedMilliseconds;
     _tileTimer ??= Timer.periodic(const Duration(seconds: 2), (_) => _tileTick());
+    // Burst → pause the base map so the storm can't form. Probe again in 10s.
+    if (!tilesPaused.value && _tileWindow >= 30) {
+      tilesPaused.value = true;
+      log('tile host(s) unreachable → pausing base map 10s', tag: 'tiles');
+      _pauseTimer?.cancel();
+      _pauseTimer = Timer(const Duration(seconds: 10), () {
+        _tileWindow = 0;
+        tilesPaused.value = false; // probe whether tiles are back
+      });
+    }
   }
 
   static void _tileTick() {

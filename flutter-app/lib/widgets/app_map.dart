@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 
+import '../core/app_log.dart';
 import '../core/tile_cache.dart';
 import '../models/station_map.dart';
 import '../services/location_service.dart';
@@ -81,19 +82,31 @@ class AppMap extends StatelessWidget {
         ),
       ),
       children: [
-        TileCache.outdoorLayer(),
+        // Base + indoor tiles are dropped while AppLog.tilesPaused is true (a
+        // tile host went hammering-unreachable) so neither layer can keep firing
+        // doomed requests and choke the connection; they remount when it clears.
+        ValueListenableBuilder<bool>(
+          valueListenable: AppLog.tilesPaused,
+          builder: (_, paused, child) =>
+              paused ? const SizedBox.shrink() : TileCache.outdoorLayer(),
+        ),
         if (showIndoor)
-          TileLayer(
-            urlTemplate: StationMap.indoorTileUrl(indoorLevel!),
-            tileDimension: 256,
-            minNativeZoom: 14,
-            maxNativeZoom: 18,
-            maxZoom: 20,
-            tileProvider: TileCache.provider(
-              headers: {'Referer': 'https://www.bahnhof.de/'},
-            ),
-            userAgentPackageName: 'de.chuk.besserebahn',
-            errorTileCallback: (_, _, _) {},
+          ValueListenableBuilder<bool>(
+            valueListenable: AppLog.tilesPaused,
+            builder: (_, paused, child) => paused
+                ? const SizedBox.shrink()
+                : TileLayer(
+                    urlTemplate: StationMap.indoorTileUrl(indoorLevel!),
+                    tileDimension: 256,
+                    minNativeZoom: 14,
+                    maxNativeZoom: 18,
+                    maxZoom: 20,
+                    tileProvider: TileCache.provider(
+                      headers: {'Referer': 'https://www.bahnhof.de/'},
+                    ),
+                    userAgentPackageName: 'de.chuk.besserebahn',
+                    errorTileCallback: (_, _, _) {},
+                  ),
           ),
         ...children,
         const Scalebar(
