@@ -1,15 +1,26 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter_timezone/flutter_timezone.dart';
+import 'package:timezone/data/latest_all.dart' as tzdata;
+import 'package:timezone/timezone.dart' as tz;
 
 import '../core/app_log.dart';
 
-/// Thin wrapper around flutter_local_notifications for the few one-shot OS
-/// notifications the app fires (e.g. "Split-Ticket-Analyse fertig"). Android +
-/// iOS only; every call is best-effort and never throws into app code.
+/// Thin wrapper around flutter_local_notifications for the OS notifications the
+/// app fires: one-shot results (e.g. "Split-Ticket-Analyse fertig"), live trip
+/// alerts, and tz-aware *scheduled* trip reminders ("In 30 Min fährt dein
+/// Zug"). Android + iOS only; every call is best-effort and never throws into
+/// app code.
 class NotificationService {
   NotificationService._();
 
   static final _plugin = FlutterLocalNotificationsPlugin();
   static bool _ready = false;
+  static bool _exactAlarms = false;
+
+  /// Lowest notification id used for *scheduled* trip reminders. Reserved range
+  /// so [cancelReminders] can reconcile them without touching the one-shot
+  /// notifications (Split-Ticket id 1001, live-alert ids 2000-2999).
+  static const int reminderIdBase = 100000;
 
   /// Android notification channel for finished background analyses.
   static const _channel = AndroidNotificationChannel(
@@ -19,11 +30,21 @@ class NotificationService {
     importance: Importance.high,
   );
 
-  /// Initialise the plugin and create the Android channel. Call once at startup.
-  /// Permission is requested lazily on first [showSplitResult].
+  /// Channel for trip reminders & live delay alerts ("Zug fährt in 30 Min",
+  /// "Gleiswechsel", "Anschluss gefährdet").
+  static const _tripChannel = AndroidNotificationChannel(
+    'trip_alerts',
+    'Reise-Hinweise',
+    description: 'Abfahrts-Erinnerungen, Verspätungen und Umstiege',
+    importance: Importance.high,
+  );
+
+  /// Initialise the plugin, tz database and the Android channels. Call once at
+  /// startup. Permission is requested lazily on first post.
   static Future<void> init() async {
     if (_ready) return;
     try {
+      await _initTimeZone();
       const android = AndroidInitializationSettings('@mipmap/ic_launcher');
       // iOS perms are requested on demand (below), not at init.
       const darwin = DarwinInitializationSettings(
@@ -36,13 +57,28 @@ class NotificationService {
         iOS: darwin,
         macOS: darwin,
       ));
-      await _plugin
-          .resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin>()
-          ?.createNotificationChannel(_channel);
+      final android_ = _plugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+      await android_?.createNotificationChannel(_channel);
+      await android_?.createNotificationChannel(_tripChannel);
       _ready = true;
     } catch (e) {
       AppLog.log('notification init failed ($e)', tag: 'notify');
+    }
+  }
+
+  /// Load the tz database and pin the local zone to the device's. Reminders are
+  /// scheduled as wall-clock times in this zone, so a DST change or travel
+  /// keeps "30 min before 14:05" firing at the right instant. Falls back to
+  /// Europe/Berlin (this is a German rail app) if the device zone is unknown.
+  static Future<void> _initTimeZone() async {
+    tzdata.initializeTimeZones();
+    try {
+      tz.setLocalLocation(tz.getLocation(await FlutterTimezone.getLocalTimezone()));
+    } catch (_) {
+      try {
+        tz.setLocalLocation(tz.getLocation('Europe/Berlin'));
+      } catch (_) {/* leave UTC */}
     }
   }
 
@@ -54,6 +90,11 @@ class NotificationService {
           AndroidFlutterLocalNotificationsPlugin>();
       if (android != null) {
         await android.requestNotificationsPermission();
+        // Exact alarms (Android 13+): needed so "30 min vorher" lands on the
+        // minute, not whenever Doze feels like it. Revocable — track the grant
+        // so scheduling can fall back to inexact instead of silently dropping.
+        _exactAlarms =
+            await android.requestExactAlarmsPermission() ?? _exactAlarms;
         return;
       }
       final ios = _plugin.resolvePlatformSpecificImplementation<
@@ -91,4 +132,85 @@ class NotificationService {
       AppLog.log('notification show failed ($e)', tag: 'notify');
     }
   }
+
+  // ---- Live trip alerts (fired immediately by the live-tracking controller) ----
+
+  /// Post a live trip alert right now (delay jump, platform change, connection
+  /// at risk). [id] in 2000-2999 so repeated alerts about the same thing
+  /// replace rather than stack.
+  static Future<void> showTripAlert({
+    required int id,
+    required String title,
+    required String body,
+  }) async {
+    if (!_ready) await init();
+    await _ensurePermission();
+    try {
+      await _plugin.show(2000 + (id % 1000), title, body, _tripDetails());
+    } catch (e) {
+      AppLog.log('trip alert show failed ($e)', tag: 'notify');
+    }
+  }
+
+  // ---- Scheduled trip reminders (planned offline from the timetable) ----
+
+  /// Schedule a reminder to fire at [when] (a wall-clock instant in the local
+  /// zone). [id] must be >= [reminderIdBase]. No-op if [when] is in the past.
+  static Future<void> scheduleReminder({
+    required int id,
+    required DateTime when,
+    required String title,
+    required String body,
+  }) async {
+    if (!_ready) await init();
+    final at = tz.TZDateTime.from(when, tz.local);
+    if (!at.isAfter(tz.TZDateTime.now(tz.local))) return;
+    try {
+      await _plugin.zonedSchedule(
+        id,
+        title,
+        body,
+        at,
+        _tripDetails(),
+        androidScheduleMode: _exactAlarms
+            ? AndroidScheduleMode.exactAllowWhileIdle
+            : AndroidScheduleMode.inexactAllowWhileIdle,
+      );
+    } catch (e) {
+      AppLog.log('schedule reminder failed ($e)', tag: 'notify');
+    }
+  }
+
+  /// Cancel every pending reminder in the reserved id range. The scheduler
+  /// calls this before re-scheduling so removed/changed trips don't linger,
+  /// even across process restarts (it reconciles the OS's pending list, not an
+  /// in-memory set).
+  static Future<void> cancelReminders() async {
+    if (!_ready) await init();
+    try {
+      final pending = await _plugin.pendingNotificationRequests();
+      for (final p in pending) {
+        if (p.id >= reminderIdBase) await _plugin.cancel(p.id);
+      }
+    } catch (e) {
+      AppLog.log('cancel reminders failed ($e)', tag: 'notify');
+    }
+  }
+
+  /// Ask for notification + exact-alarm permission up front (e.g. when the user
+  /// flips the reminders toggle on). Returns nothing; grant state is tracked
+  /// internally for scheduling.
+  static Future<void> requestPermissions() => _ensurePermission();
+
+  static NotificationDetails _tripDetails() => const NotificationDetails(
+        android: AndroidNotificationDetails(
+          'trip_alerts',
+          'Reise-Hinweise',
+          channelDescription: 'Abfahrts-Erinnerungen, Verspätungen und Umstiege',
+          importance: Importance.high,
+          priority: Priority.high,
+        ),
+        iOS: DarwinNotificationDetails(),
+        macOS: DarwinNotificationDetails(),
+      );
 }

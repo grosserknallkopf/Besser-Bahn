@@ -7,6 +7,7 @@ import '../../models/split_ticket.dart';
 import '../../models/traewelling_models.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/traewelling_provider.dart';
+import '../../services/notification_service.dart';
 import '../../widgets/traewelling_logo.dart';
 
 class SettingsScreen extends ConsumerWidget {
@@ -55,6 +56,58 @@ class SettingsScreen extends ConsumerWidget {
                   ),
                 ],
               ),
+            ),
+          ),
+
+          _sectionHeader(context, 'Benachrichtigungen'),
+
+          Card(
+            margin: const EdgeInsets.symmetric(horizontal: 16),
+            child: Column(
+              children: [
+                SwitchListTile(
+                  secondary: const Icon(Icons.notifications_active_outlined),
+                  title: const Text('Reise-Erinnerungen'),
+                  subtitle: const Text(
+                      'Vor Abfahrt & Umstieg erinnern — offline geplant, '
+                      'für deine gespeicherten Reisen.'),
+                  value: settings.remindersEnabled,
+                  onChanged: (v) {
+                    notifier.setRemindersEnabled(v);
+                    if (v) NotificationService.requestPermissions();
+                  },
+                ),
+                if (settings.remindersEnabled) ...[
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.timer_outlined),
+                    title: const Text('Vorlaufzeit'),
+                    subtitle: const Text('Wie früh vor Abfahrt erinnern'),
+                    trailing: DropdownButton<int>(
+                      value: settings.reminderLeadMinutes,
+                      underline: const SizedBox.shrink(),
+                      items: const [10, 15, 20, 30, 45, 60]
+                          .map((m) => DropdownMenuItem(
+                                value: m,
+                                child: Text('$m Min'),
+                              ))
+                          .toList(),
+                      onChanged: (m) {
+                        if (m != null) notifier.setReminderLeadMinutes(m);
+                      },
+                    ),
+                  ),
+                  const Divider(height: 1),
+                  SwitchListTile(
+                    secondary: const Icon(Icons.transfer_within_a_station),
+                    title: const Text('Umstiegs-Hinweise'),
+                    subtitle: const Text(
+                        'Kurz bevor dein Anschluss abfährt — mit Gleis & Übergang.'),
+                    value: settings.transferAlerts,
+                    onChanged: (v) => notifier.setTransferAlerts(v),
+                  ),
+                ],
+              ],
             ),
           ),
 

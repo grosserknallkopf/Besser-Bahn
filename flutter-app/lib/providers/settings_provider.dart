@@ -24,6 +24,16 @@ class AppSettings {
   /// private — check-ins stay between you and Träwelling unless you opt out.
   final int trwlVisibility;
 
+  /// Whether to schedule offline trip reminders ("In 30 Min fährt dein Zug",
+  /// boarding & Umstieg pings) for saved upcoming trips.
+  final bool remindersEnabled;
+
+  /// Lead time in minutes for the "mach dich bereit" reminder before departure.
+  final int reminderLeadMinutes;
+
+  /// Whether to also ping shortly before each connecting train departs.
+  final bool transferAlerts;
+
   const AppSettings({
     this.bahnCard = BahnCardType.none,
     this.hasDeutschlandTicket = false,
@@ -31,6 +41,9 @@ class AppSettings {
     this.apiDelayMs = 400,
     this.trwlAutoCheckin = false,
     this.trwlVisibility = 3,
+    this.remindersEnabled = true,
+    this.reminderLeadMinutes = 30,
+    this.transferAlerts = true,
     this.searchParty = const SearchParty(),
   });
 
@@ -41,6 +54,9 @@ class AppSettings {
     int? apiDelayMs,
     bool? trwlAutoCheckin,
     int? trwlVisibility,
+    bool? remindersEnabled,
+    int? reminderLeadMinutes,
+    bool? transferAlerts,
     SearchParty? searchParty,
   }) {
     return AppSettings(
@@ -50,6 +66,9 @@ class AppSettings {
       apiDelayMs: apiDelayMs ?? this.apiDelayMs,
       trwlAutoCheckin: trwlAutoCheckin ?? this.trwlAutoCheckin,
       trwlVisibility: trwlVisibility ?? this.trwlVisibility,
+      remindersEnabled: remindersEnabled ?? this.remindersEnabled,
+      reminderLeadMinutes: reminderLeadMinutes ?? this.reminderLeadMinutes,
+      transferAlerts: transferAlerts ?? this.transferAlerts,
       searchParty: searchParty ?? this.searchParty,
     );
   }
@@ -73,6 +92,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
       apiDelayMs: prefs.getInt('apiDelayMs') ?? 400,
       trwlAutoCheckin: prefs.getBool('trwlAutoCheckin') ?? false,
       trwlVisibility: prefs.getInt('trwlVisibility') ?? 3,
+      remindersEnabled: prefs.getBool('remindersEnabled') ?? true,
+      reminderLeadMinutes: prefs.getInt('reminderLeadMinutes') ?? 30,
+      transferAlerts: prefs.getBool('transferAlerts') ?? true,
       // First run (no stored party): seed from the single-card settings so the
       // search behaves exactly as before until the user customises the party.
       searchParty: SearchParty.tryDecode(prefs.getString('searchParty')) ??
@@ -88,6 +110,9 @@ class SettingsNotifier extends Notifier<AppSettings> {
     await prefs.setInt('apiDelayMs', state.apiDelayMs);
     await prefs.setBool('trwlAutoCheckin', state.trwlAutoCheckin);
     await prefs.setInt('trwlVisibility', state.trwlVisibility);
+    await prefs.setBool('remindersEnabled', state.remindersEnabled);
+    await prefs.setInt('reminderLeadMinutes', state.reminderLeadMinutes);
+    await prefs.setBool('transferAlerts', state.transferAlerts);
     await prefs.setString('searchParty', state.searchParty.encode());
   }
 
@@ -132,6 +157,21 @@ class SettingsNotifier extends Notifier<AppSettings> {
 
   void setTrwlVisibility(int value) {
     state = state.copyWith(trwlVisibility: value);
+    _save();
+  }
+
+  void setRemindersEnabled(bool value) {
+    state = state.copyWith(remindersEnabled: value);
+    _save();
+  }
+
+  void setReminderLeadMinutes(int value) {
+    state = state.copyWith(reminderLeadMinutes: value);
+    _save();
+  }
+
+  void setTransferAlerts(bool value) {
+    state = state.copyWith(transferAlerts: value);
     _save();
   }
 }

@@ -5,6 +5,7 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   desktop_webview_window
   flutter_secure_storage_windows
+  flutter_timezone
   geolocator_windows
   objectbox_flutter_libs
   share_plus
