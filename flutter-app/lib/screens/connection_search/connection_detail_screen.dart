@@ -19,13 +19,10 @@ import '../../providers/service_providers.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/split_ticket_provider.dart';
 import '../../providers/station_map_provider.dart';
-import '../../providers/train_lookup_provider.dart';
 import '../../services/db_api_service.dart';
 import '../../widgets/prediction_badge.dart';
-import '../../widgets/traewelling_logo.dart';
 import '../../widgets/trwl_checkin_sheet.dart';
 import '../train_lookup/widgets/train_detail_view.dart';
-import 'widgets/leg_alternatives.dart';
 import 'widgets/leg_switcher.dart';
 
 /// In-memory cache (app session) so a leg's train data is fetched once and
@@ -958,48 +955,6 @@ class _LegSectionState extends ConsumerState<_LegSection>
     }
   }
 
-  /// Open the "Weitere Abfahrten" sheet for this leg. Replace is offered only
-  /// when the parent wired a swap callback.
-  void _openAlternatives() {
-    showWeitereAbfahrtenSheet(
-      context,
-      leg: widget.leg,
-      onOpenDetails: _openAltDetails,
-      onReplace: widget.onReplaceLeg == null
-          ? null
-          : (alt) {
-              final newLeg = alt.legs.firstOrNull;
-              if (newLeg != null) {
-                widget.onReplaceLeg!(widget.index, newLeg);
-              }
-            },
-    );
-  }
-
-  /// Open a tapped alternative's full Zugdetails — directly by its tripId
-  /// (never a by-number search, which would re-prompt for info we already have).
-  void _openAltDetails(Journey alt) {
-    final l = alt.legs.firstOrNull;
-    if (l == null) return;
-    final tripId = l.tripId;
-    if (tripId != null && tripId.isNotEmpty) {
-      ref.read(trainLookupProvider.notifier).lookupByTripId(
-            tripId,
-            lineLabel: l.line?.displayName,
-          );
-      context.push('/train-run');
-      return;
-    }
-    final number = (l.line?.fahrtNr.isNotEmpty ?? false)
-        ? l.line!.fahrtNr
-        : l.line?.displayName ?? '';
-    if (number.isEmpty) return;
-    ref.read(trainLookupProvider.notifier).lookupTrain(
-          number,
-          fromStationId: l.origin.id.isNotEmpty ? l.origin.id : null,
-        );
-    context.push('/train-run');
-  }
 
   void _openStopMap(Stopover stop) {
     if (stop.stop.name.isEmpty) return;
@@ -1071,28 +1026,9 @@ class _LegSectionState extends ConsumerState<_LegSection>
         alightingId: leg.destination.id.isNotEmpty
             ? leg.destination.id
             : leg.destination.name,
-        headerAction: (!leg.isWalking && leg.line != null)
-            ? Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    icon: const TraewellingLogo(size: 20),
-                    tooltip: 'In Träwelling einchecken',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: () => startTrwlCheckin(
-                      context,
-                      ref,
-                      trip,
-                      boardingName: leg.origin.name,
-                      boardingDeparture:
-                          leg.plannedDeparture ?? leg.departure,
-                      alightingName: leg.destination.name,
-                    ),
-                  ),
-                  WeitereAbfahrtenButton(onTap: _openAlternatives),
-                ],
-              )
-            : null,
+        // No header buttons: the alternative-departure arrows live in the
+        // switcher bar below (no doubled "Weitere Abfahrten" button), and
+        // Träwelling check-in is automatic on save for every train leg.
         predictionStrip: (!leg.isWalking && leg.line != null)
             ? LegPredictionBadge(leg: leg, nextLeg: widget.nextTransitLeg)
             : null,

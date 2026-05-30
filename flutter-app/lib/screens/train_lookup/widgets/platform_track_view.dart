@@ -99,7 +99,7 @@ class PlatformTrackView extends StatelessWidget {
     // A rounded loco-style snout sits at each end of the train, so leave room
     // for it on both sides: the end cars themselves are shaped into the ICE
     // snout and overhang their platform slot by this much on the outer side.
-    final overhang = carHeight * 0.9;
+    final overhang = carHeight * 0.6;
     final leadPad = overhang + 2;
 
     double px(double u) => (u - ds) * scale + leadPad;
@@ -307,23 +307,26 @@ Path _endCarPath(Size size, {required bool front}) {
   final w = size.width, h = size.height;
   final nf = _noseFrac * w; // snout length in px
   if (front) {
+    // Small rounded tip at the front, then a near-straight, aggressive diagonal
+    // up to the roof; short flat roof to the full-height coupling end.
     return Path()
-      ..moveTo(0.12 * nf, h) // bottom, just behind the tip
+      ..moveTo(0.16 * nf, h) // bottom, just behind the tip
       ..lineTo(w, h) // flat underframe to the inner end
       ..lineTo(w, 0) // full-height inner (coupling) edge
-      ..lineTo(nf, 0) // flat roof to where the snout starts
-      ..cubicTo(0.55 * nf, 0, 0.28 * nf, 0.10 * h, 0.08 * nf, 0.46 * h)
-      ..cubicTo(0, 0.64 * h, 0, 0.86 * h, 0.12 * nf, h)
+      ..lineTo(0.96 * nf, 0) // short flat roof, then…
+      ..lineTo(0.12 * nf, 0.30 * h) // …the aggressive near-straight diagonal
+      ..quadraticBezierTo(0, 0.46 * h, 0.03 * nf, 0.64 * h) // small round tip
+      ..quadraticBezierTo(0.06 * nf, 0.86 * h, 0.16 * nf, h) // belly to bottom
       ..close();
   }
   return Path()
-    ..moveTo(w - 0.12 * nf, h)
+    ..moveTo(w - 0.16 * nf, h)
     ..lineTo(0, h)
     ..lineTo(0, 0)
-    ..lineTo(w - nf, 0)
-    ..cubicTo(
-        w - 0.55 * nf, 0, w - 0.28 * nf, 0.10 * h, w - 0.08 * nf, 0.46 * h)
-    ..cubicTo(w, 0.64 * h, w, 0.86 * h, w - 0.12 * nf, h)
+    ..lineTo(w - 0.96 * nf, 0)
+    ..lineTo(w - 0.12 * nf, 0.30 * h)
+    ..quadraticBezierTo(w, 0.46 * h, w - 0.03 * nf, 0.64 * h)
+    ..quadraticBezierTo(w - 0.06 * nf, 0.86 * h, w - 0.16 * nf, h)
     ..close();
 }
 
