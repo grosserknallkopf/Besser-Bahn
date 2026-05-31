@@ -52,6 +52,16 @@ double _dist(math.Point<double> a, math.Point<double> b) {
   return math.sqrt(dx * dx + dy * dy);
 }
 
+/// The app's official per-coach colour (1. Klasse gold, 2. Klasse DB-blue,
+/// Bistro terracotta, Triebkopf graphite, closed grey).
+Color _coachColor(Coach c) {
+  if (!c.isOpen) return AppColors.closedCoach;
+  if (c.isRestaurant) return AppColors.restaurant;
+  if (c.isLocomotive) return AppColors.locomotive;
+  if (c.type.hasFirstClass) return AppColors.firstClass;
+  return AppColors.secondClass;
+}
+
 /// PEEL the floor's sector cubes into one chain per platform island, then return
 /// Gleis 7's chain as (letter, position) in A→I order. Cubes carry the sector
 /// LETTERS but no track id and several islands interleave, so we extract greedily
@@ -155,10 +165,6 @@ class _PreviewPageState extends State<_PreviewPage> {
 
   /// Real Wagenreihung for a Gleis-7 train (fixture), if present.
   CoachSequence? _cs;
-
-  /// Manual nudge of the whole train ALONG the rail, metres — to correct any
-  /// residual DB-metre ↔ OSM-rail offset (the "shift left/right").
-  double _shiftM = 0;
 
   @override
   void initState() {
@@ -386,7 +392,7 @@ class _PreviewPageState extends State<_PreviewPage> {
         if (den.abs() > 1e-9) {
           final slope = (n * sxy - sx * sy) / den;
           final icpt = (sy - slope * sx) / n;
-          arcOf = (m) => slope * m + icpt + _shiftM;
+          arcOf = (m) => slope * m + icpt;
         }
       }
     }
@@ -410,12 +416,7 @@ class _PreviewPageState extends State<_PreviewPage> {
             noseEnd: i == cs.length - 1,
             noseLenM: 2.5);
         if (outline.length >= 3) {
-          coaches.add((
-            outline: outline,
-            color: cs[i].isFirstClass
-                ? Colors.amber.shade600
-                : AppColors.secondClass,
-          ));
+          coaches.add((outline: outline, color: _coachColor(cs[i])));
         }
       }
       for (final s in _cs!.platform.sectors) {
@@ -435,8 +436,7 @@ class _PreviewPageState extends State<_PreviewPage> {
         ? 'keine Wagenreihung-Fixture'
         : '${_cs!.groups.map((g) => g.transport.category).toSet().join("/")} '
             '· ${coaches.length} Wagen · Sektoren '
-            '${_cs!.platform.sectors.map((s) => s.name).join("")} '
-            '· Shift ${_shiftM.toStringAsFixed(0)} m';
+            '${_cs!.platform.sectors.map((s) => s.name).join("")}';
 
     return Scaffold(
       appBar: AppBar(
@@ -515,24 +515,6 @@ class _PreviewPageState extends State<_PreviewPage> {
                 ]),
               ],
             ),
-          ),
-          // Shift the whole train left/right along the rail (DB↔OSM offset).
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(children: [
-              const Text('◀ Shift'),
-              Expanded(
-                child: Slider(
-                  value: _shiftM,
-                  min: -60,
-                  max: 60,
-                  divisions: 120,
-                  label: '${_shiftM.toStringAsFixed(0)} m',
-                  onChanged: (v) => setState(() => _shiftM = v),
-                ),
-              ),
-              const Text('▶'),
-            ]),
           ),
         ],
       ),
