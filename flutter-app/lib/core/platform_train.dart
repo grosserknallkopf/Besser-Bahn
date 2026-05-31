@@ -483,43 +483,20 @@ List<({List<LatLng> outline, Coach coach, bool boarding})> platformTrainCars(
 }
 
 /// Ordered points down a platform island's sector cubes — each nudged onto the
-/// boarding rail — forming the platform's real curved centreline (the spine for
-/// the per-car, composition and generic bodies).
+/// boarding rail — forming the platform's real centreline (the spine for the
+/// per-car, composition and generic bodies).
 ///
-/// Robustness matters: a sector cube occasionally gets assigned to the WRONG
-/// track island (the cubes carry no track id), and chaining their raw positions
-/// in letter order yanks the curve 90° across to a neighbouring Gleis (the "ICE
-/// jumps to Gleis A" bug) or folds it into a thin zig-zag.
-///
-/// So we DON'T chain raw cubes. We work in the platform's own axis frame
-/// (project each cube to a distance `t` ALONG the best-fit axis and a signed
-/// offset `perp` across it), then fit BOTH a least-squares LINE
-/// `perp = B·t + C` and a parabola `perp = A·t² + B·t + C`, and pick between
-/// them on EVIDENCE — never letting the parabola overfit noise:
-///   * follows real platform curvature (Hamburg bends hard) — and stays curved
-///     all the way to the last sector, since nothing is dropped;
-///   * collapses to a straight line when the platform is straight (Kiel),
-///     even when the cube set is contaminated by a neighbouring track's cubes
-///     (Kiel has 0 lift/escalator anchors → its island can mix cubes from
-///     several parallel straight platforms, which a naïve parabola turns into
-///     a phantom bend);
-///   * is sampled densely so the body bends smoothly, and extended past both
-///     end sectors so a train longer than the cube span keeps going straight.
-///
-/// Curvature is accepted as REAL only when it is well-supported:
-///   1. ≥4 cubes (a parabola through 3 noisy points is meaningless), AND
-///   2. the parabola's sagitta (max deviation from its own chord over the
-///      t-span) exceeds a few metres — a tiny bow is indistinguishable from
-///      noise, AND
-///   3. the parabola actually FITS: its RMS residual is small in absolute
-///      terms (cubes lie on the smooth curve) AND clearly smaller than the
-///      line's. This — NOT the perp spread — is what separates a real curve
-///      (cubes hug the parabola) from a multi-track-contaminated set (Kiel,
-///      0 anchors: cubes from parallel tracks scatter, so no parabola fits).
-///      Gating on perp spread instead would reject real curves, whose bow IS a
-///      large spread.
-/// If any test fails we use the straight line (a=0): a robust LS line through a
-/// noisy multi-track set still yields a sane, straight platform.
+/// MEASURED REALITY (Kiel + Hamburg fixtures): the bahnhof.de sector cubes are
+/// badly mis-assigned per letter — a single Abschnitt sits 28 m (Kiel) to 60 m
+/// (Hamburg) off the platform line, which is physically impossible for one
+/// sector. So we CANNOT draw a trustworthy curve by connecting the cubes: every
+/// attempt (raw chaining, axis-projection, parabola fit, spike removal)
+/// zig-zagged, folded, or gave wildly different shapes per Gleis. Instead we lay
+/// the train STRAIGHT along the platform's best-fit axis: that axis is dominated
+/// by the platform's LENGTH, so the cross-track contamination barely rotates it,
+/// giving a stable, correctly-placed straight body. A genuinely curved body
+/// would need a clean geometry source (e.g. the track polyline), not these
+/// cubes.
 List<LatLng> _cubeCurvePts(
     ({List<({int idx, LatLng pos})> cubes, double dLat, double dLon, PlatformLine? axis})
         island) {
@@ -535,144 +512,33 @@ List<LatLng> _cubeCurvePts(
   math.Point<double> xy(LatLng p) => math.Point(p.longitude * mlon, p.latitude * mlat);
   LatLng ll(math.Point<double> p) => LatLng(p.y / mlat, p.x / mlon);
 
-  final line = fitLine([for (final c in cubes) xy(c.pos)]);
-  if (line == null) return [for (final c in cubes) nud(c.pos)];
-  // Axis unit direction + its left normal, both in the metre frame.
-  final dx = line.dx, dy = line.dy;
-  final nx = -dy, ny = dx;
+  // Place the train STRAIGHT along the platform's principal axis. We measured
+  // the bahnhof.de sector cubes and they are badly MIS-ASSIGNED: a single
+  // sector "jumps" 28 m (Kiel) to 60 m (Hamburg) sideways off the platform line
+  // — physically impossible for one Abschnitt, so the per-letter cube positions
+  // can't be trusted to draw a curve (every attempt zig-zagged or folded). The
+  // best-fit axis through the cubes, by contrast, is dominated by the platform's
+  // LENGTH, so the cross-track contamination barely tilts it — a robust, stable
+  // straight line at the right place. (A true curve needs a clean source, e.g.
+  // the track polyline; the cubes aren't it.)
+  final pts = [for (final c in cubes) xy(c.pos)];
+  final axis = fitLine(pts);
+  if (axis == null) return [for (final c in cubes) nud(c.pos)];
 
-  // Project every cube: t along the axis, perp across it.
-  final ts = <double>[], ps = <double>[];
-  for (final c in cubes) {
-    final m = xy(c.pos);
-    final rx = m.x - line.cx, ry = m.y - line.cy;
-    ts.add(rx * dx + ry * dy);
-    ps.add(rx * nx + ry * ny);
+  // Project the cubes onto the axis to get the platform's extent, then extend
+  // past both ends so a train longer than the cube span keeps going.
+  var tMin = double.infinity, tMax = -double.infinity;
+  for (final p in pts) {
+    final t = (p.x - axis.cx) * axis.dx + (p.y - axis.cy) * axis.dy;
+    if (t < tMin) tMin = t;
+    if (t > tMax) tMax = t;
   }
-
-  var tMin = ts.reduce(math.min), tMax = ts.reduce(math.max);
-
-  // Fit BOTH shapes and measure how well each explains the cube perp values.
-  final lineCoef = _fitLine(ts, ps);
-  final quadCoef = _fitPerp(ts, ps);
-  double lineAt(double t) => lineCoef.b * t + lineCoef.c;
-  double quadAt(double t) => quadCoef.a * t * t + quadCoef.b * t + quadCoef.c;
-  final n = ts.length;
-  var lineSq = 0.0, quadSq = 0.0;
-  for (var i = 0; i < n; i++) {
-    final lr = ps[i] - lineAt(ts[i]);
-    final qr = ps[i] - quadAt(ts[i]);
-    lineSq += lr * lr;
-    quadSq += qr * qr;
-  }
-  final lineRms = math.sqrt(lineSq / n);
-  final quadRms = math.sqrt(quadSq / n);
-
-  // Parabola sagitta over the cube span: max gap between the quadratic and the
-  // straight chord joining its endpoint values — the real depth of the bow.
-  final qLo = quadAt(tMin), qHi = quadAt(tMax);
-  final tSpan = tMax - tMin;
-  var sagitta = 0.0;
-  if (tSpan > 1e-6) {
-    for (var i = 0; i <= 20; i++) {
-      final t = tMin + tSpan * i / 20;
-      final chord = qLo + (qHi - qLo) * (t - tMin) / tSpan;
-      sagitta = math.max(sagitta, (quadAt(t) - chord).abs());
-    }
-  }
-
-  // Curvature is trustworthy only when every guard agrees; otherwise straight.
-  // NOTE: do NOT gate on perp SPREAD — a genuinely curved platform's bow IS a
-  // large perp spread (its sagitta), so that would reject exactly the curves we
-  // want. The honest discriminator is the parabola's FIT: a real curve's cubes
-  // sit close to the smooth parabola (small residual), whereas cubes mixed from
-  // parallel tracks (Kiel, 0 anchors) scatter and the parabola can't fit them.
-  const minCubesForCurve = 4;
-  const minSagittaM = 2.5; // a few metres of genuine bow, else it's noise
-  const maxFitResidualM = 2.5; // parabola must actually pass near the cubes
-  final fitsWell = quadRms < maxFitResidualM;
-  final betterThanLine = quadRms < lineRms * 0.7;
-  final curved = n >= minCubesForCurve &&
-      sagitta >= minSagittaM &&
-      fitsWell &&
-      betterThanLine;
-
-  double perpAt(double t) => curved ? quadAt(t) : lineAt(t);
-
-  // Sample the smooth curve from before the first sector to past the last, so
-  // the body bends gradually and a long train continues straight off the ends.
   const ext = 60.0;
   tMin -= ext;
   tMax += ext;
-  final span = tMax - tMin;
-  final steps = math.max(2, (span / 5.0).ceil());
-  final out = <LatLng>[];
-  for (var i = 0; i <= steps; i++) {
-    final t = tMin + span * i / steps;
-    final p = perpAt(t);
-    final mx = line.cx + dx * t + nx * p;
-    final my = line.cy + dy * t + ny * p;
-    out.add(nud(ll(math.Point(mx, my))));
-  }
-  return out;
-}
-
-/// Least-squares straight line `perp = b·t + c` (a=0) through the cube perp
-/// values — the conservative shape we fall back to whenever curvature isn't
-/// well-supported. Degenerates to a constant when the t's are collinear.
-({double a, double b, double c}) _fitLine(List<double> t, List<double> p) {
-  final n = t.length;
-  var st = 0.0, sp = 0.0, stt = 0.0, stp = 0.0;
-  for (var i = 0; i < n; i++) {
-    st += t[i];
-    sp += p[i];
-    stt += t[i] * t[i];
-    stp += t[i] * p[i];
-  }
-  final den = n * stt - st * st;
-  final b = den.abs() < 1e-9 ? 0.0 : (n * stp - st * sp) / den;
-  return (a: 0.0, b: b, c: (sp - b * st) / n);
-}
-
-/// Least-squares fit of `perp = a·t² + b·t + c`. Falls back to a line (a=0)
-/// for <3 points or a near-singular system (collinear t's).
-({double a, double b, double c}) _fitPerp(List<double> t, List<double> p) {
-  final n = t.length;
-  // Least-squares LINE perp = b·t + c — the fallback shape.
-  ({double a, double b, double c}) linear() => _fitLine(t, p);
-
-  if (n < 3) return linear();
-
-  var s0 = n.toDouble(),
-      s1 = 0.0,
-      s2 = 0.0,
-      s3 = 0.0,
-      s4 = 0.0,
-      sp0 = 0.0,
-      sp1 = 0.0,
-      sp2 = 0.0;
-  for (var i = 0; i < n; i++) {
-    final ti = t[i], pi = p[i];
-    final t2 = ti * ti;
-    s1 += ti;
-    s2 += t2;
-    s3 += t2 * ti;
-    s4 += t2 * t2;
-    sp0 += pi;
-    sp1 += pi * ti;
-    sp2 += pi * t2;
-  }
-  // Solve the 3×3 normal equations [[s4,s3,s2],[s3,s2,s1],[s2,s1,s0]]·[a,b,c]
-  // = [sp2,sp1,sp0] by Cramer's rule.
-  double det3(double a, double b, double c, double d, double e, double f,
-          double g, double h, double i) =>
-      a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
-  final det = det3(s4, s3, s2, s3, s2, s1, s2, s1, s0);
-  if (det.abs() < 1e-6) return linear();
-  final a = det3(sp2, s3, s2, sp1, s2, s1, sp0, s1, s0) / det;
-  final b = det3(s4, sp2, s2, s3, sp1, s1, s2, sp0, s0) / det;
-  final c = det3(s4, s3, sp2, s3, s2, sp1, s2, s1, sp0) / det;
-  return (a: a, b: b, c: c);
+  math.Point<double> at(double t) =>
+      math.Point(axis.cx + axis.dx * t, axis.cy + axis.dy * t);
+  return [nud(ll(at(tMin))), nud(ll(at(tMax)))];
 }
 
 /// The boarding-rail-nudged LatLng of a resolved sector cube.

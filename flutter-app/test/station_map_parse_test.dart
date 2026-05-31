@@ -111,4 +111,41 @@ void main() {
     expect(maxDev, lessThan(4.0),
         reason: 'Kiel platform is straight; body deviates $maxDev m from chord');
   });
+
+  test('Hamburg Hbf body stays straight despite mis-assigned cubes', () {
+    // Hamburg Hbf is strongly curved, BUT the bahnhof.de sector cubes are
+    // mis-assigned per letter (measured: a single Abschnitt sits up to ~60 m
+    // off the platform line — physically impossible). Connecting them would
+    // zig-zag, so we lay the train straight on the platform's best-fit axis.
+    // This locks that: every body vertex stays near its own chord.
+    final body = File('test/fixtures/hamburg-hbf.rsc.txt').readAsStringSync();
+    final map = parseStationMapBody('hamburg-hbf', body);
+    final dirty = map.platforms
+        .map((p) => pt.normalizeGleis(p.name))
+        .where((g) => pt.platformSectors(map, g).length >= 2)
+        .toList();
+    expect(dirty, isNotEmpty);
+    const dist = Distance();
+    for (final g in dirty) {
+      final outline = pt.platformGenericBody(map, gleis: g, lengthM: 200);
+      if (outline.length < 3) continue;
+      var ai = 0, bi = 0, best = -1.0;
+      for (var i = 0; i < outline.length; i++) {
+        for (var j = i + 1; j < outline.length; j++) {
+          final d = dist.as(LengthUnit.Meter, outline[i], outline[j]);
+          if (d > best) {
+            best = d;
+            ai = i;
+            bi = j;
+          }
+        }
+      }
+      var maxDev = 0.0;
+      for (final p in outline) {
+        maxDev = math.max(maxDev, _perpMetres(p, outline[ai], outline[bi]));
+      }
+      expect(maxDev, lessThan(4.0),
+          reason: 'Gleis $g body should be straight, deviates $maxDev m');
+    }
+  });
 }
