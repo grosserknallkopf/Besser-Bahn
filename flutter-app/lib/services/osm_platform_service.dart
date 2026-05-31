@@ -93,9 +93,15 @@ class OsmPlatformService {
       final bbox = '$s,$w,$n,$e';
       // platform AREAS carrying a ref (the Gleis pair) + every rail way; `out
       // geom` inlines each way's node coordinates so we don't resolve nodes.
+      // Platforms are mapped two ways across stations: as a single tagged WAY
+      // (Hamburg: ref "7;8") or as a multipolygon RELATION whose member ways
+      // hold the geometry and whose `ref` carries the Gleis pair (Kiel: "3;4",
+      // while the member ways only carry section labels like "A1"/"6b"). Fetch
+      // both; relation members come inlined with `out geom`.
       final ql = '[out:json][timeout:25];'
           '('
           'way["public_transport"="platform"]["ref"]($bbox);'
+          'relation["public_transport"="platform"]["ref"]($bbox);'
           'way["railway"="rail"]($bbox);'
           ');'
           'out geom;';
@@ -131,20 +137,22 @@ class OsmPlatformService {
       final rails = <List<LatLng>>[];
       for (final el in elements) {
         if (el is! Map) continue;
-        final geom = el['geometry'] as List?;
-        if (geom == null || geom.isEmpty) continue;
-        final pts = [
-          for (final g in geom)
-            if (g is Map && g['lat'] != null && g['lon'] != null)
-              LatLng((g['lat'] as num).toDouble(), (g['lon'] as num).toDouble())
-        ];
-        if (pts.length < 2) continue;
         final tags = (el['tags'] as Map?) ?? const {};
         final ref = tags['ref'];
-        if (tags['public_transport'] == 'platform' && ref is String) {
-          platforms.add((ref: ref, pts: pts));
-        } else if (tags['railway'] == 'rail') {
-          rails.add(pts);
+        if (tags['railway'] == 'rail') {
+          final pts = _coords(el['geometry'] as List?);
+          if (pts.length >= 2) rails.add(pts);
+        } else if (tags['public_transport'] == 'platform' && ref is String) {
+          // A way carries its own geometry; a relation's geometry is its member
+          // ways stitched end-to-end into one ring.
+          final pts = el['type'] == 'relation'
+              ? _stitchRing([
+                  for (final m in (el['members'] as List?) ?? const [])
+                    if (m is Map && m['type'] == 'way')
+                      _coords(m['geometry'] as List?)
+                ])
+              : _coords(el['geometry'] as List?);
+          if (pts.length >= 2) platforms.add((ref: ref, pts: pts));
         }
       }
       final geometry = OsmPlatformGeometry(platforms: platforms, rails: rails);
@@ -167,4 +175,46 @@ class OsmPlatformService {
     _cache[slug] = g;
     return g;
   }
+}
+
+/// Overpass `geometry` array ([{lat,lon}, …]) → LatLng list.
+List<LatLng> _coords(List? geom) => [
+      for (final g in geom ?? const [])
+        if (g is Map && g['lat'] != null && g['lon'] != null)
+          LatLng((g['lat'] as num).toDouble(), (g['lon'] as num).toDouble())
+    ];
+
+/// Stitch a multipolygon relation's member [ways] into one ordered ring by
+/// chaining ways that share an endpoint (handling reversed direction). OSM
+/// shares node coordinates exactly between connected ways; we compare with a
+/// tiny epsilon. Returns the longest chain we can assemble from the first way.
+List<LatLng> _stitchRing(List<List<LatLng>> ways) {
+  final segs = [for (final w in ways) if (w.length >= 2) List<LatLng>.from(w)];
+  if (segs.isEmpty) return const [];
+  bool near(LatLng a, LatLng b) =>
+      (a.latitude - b.latitude).abs() < 1e-7 &&
+      (a.longitude - b.longitude).abs() < 1e-7;
+  final chain = segs.removeAt(0);
+  var changed = true;
+  while (segs.isNotEmpty && changed) {
+    changed = false;
+    for (var i = 0; i < segs.length; i++) {
+      final w = segs[i];
+      if (near(w.first, chain.last)) {
+        chain.addAll(w.skip(1));
+      } else if (near(w.last, chain.last)) {
+        chain.addAll(w.reversed.skip(1));
+      } else if (near(w.last, chain.first)) {
+        chain.insertAll(0, w.take(w.length - 1));
+      } else if (near(w.first, chain.first)) {
+        chain.insertAll(0, w.reversed.skip(1).toList().reversed);
+      } else {
+        continue;
+      }
+      segs.removeAt(i);
+      changed = true;
+      break;
+    }
+  }
+  return chain;
 }

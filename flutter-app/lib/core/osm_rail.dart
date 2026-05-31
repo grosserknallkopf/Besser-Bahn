@@ -179,13 +179,18 @@ List<LatLng> osmRailForGleis({
   required String gleis,
   required List<LatLng> cubeSide,
 }) {
-  // OSM tags double-track island platforms with the track pair ("7;8"); match
-  // the wanted Gleis against either member.
-  final plat = platforms.where((p) => p.ref.split(';').contains(gleis)).toList();
-  if (plat.isEmpty) return const [];
-  final rail = _railFromEdge(_trackSideEdge(plat.first.pts, cubeSide), rails);
-  // _railFromEdge returns the edge itself when it can't find ≥4 nearby rail
-  // vertices; treat "couldn't recover a rail" as unavailable so we fall back.
-  if (rail.length < 2) return const [];
-  return rail;
+  // OSM tags a platform island with its track pair, sometimes with section
+  // suffixes ("7;8", "3;4", or "1;2a;2b"). Match the wanted Gleis against each
+  // token's numeric part so "2" matches "2a" and "6" matches "6b".
+  bool refHasGleis(String ref) => ref.split(';').any((t) {
+        final digits = t.replaceAll(RegExp(r'[^0-9]'), '');
+        return digits == gleis;
+      });
+  // Several platforms can match (e.g. a section way mis-tagged with the Gleis);
+  // return the first that actually yields a rail, so a dud doesn't block us.
+  for (final p in platforms.where((p) => refHasGleis(p.ref))) {
+    final rail = _railFromEdge(_trackSideEdge(p.pts, cubeSide), rails);
+    if (rail.length >= 2) return rail;
+  }
+  return const [];
 }

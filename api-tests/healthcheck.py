@@ -951,8 +951,11 @@ def check_osm_platform_geometry() -> str:
     d_lat = r / 111320.0
     d_lon = r / (111320.0 * math.cos(math.radians(lat)))
     bbox = f"{lat - d_lat},{lon - d_lon},{lat + d_lat},{lon + d_lon}"
+    # Platforms come as tagged WAYS (Hamburg "7;8") or multipolygon RELATIONS
+    # whose ref holds the Gleis pair (Kiel "3;4"); the app fetches both.
     ql = ("[out:json][timeout:25];("
           f'way["public_transport"="platform"]["ref"]({bbox});'
+          f'relation["public_transport"="platform"]["ref"]({bbox});'
           f'way["railway"="rail"]({bbox});'
           ");out geom;")
     # Same mirror fallthrough as the app (services/osm_platform_service.dart):
@@ -981,14 +984,20 @@ def check_osm_platform_geometry() -> str:
         raise CheckError("Overpass returned no elements near Hamburg Hbf")
     platforms, rails = [], 0
     for el in elements:
-        geom = el.get("geometry") or []
-        if len(geom) < 2 or "lat" not in geom[0] or "lon" not in geom[0]:
-            continue
         tags = el.get("tags") or {}
-        if tags.get("public_transport") == "platform" and tags.get("ref"):
-            platforms.append(tags["ref"])
-        elif tags.get("railway") == "rail":
-            rails += 1
+        if tags.get("railway") == "rail":
+            geom = el.get("geometry") or []
+            if len(geom) >= 2 and "lat" in geom[0] and "lon" in geom[0]:
+                rails += 1
+        elif tags.get("public_transport") == "platform" and tags.get("ref"):
+            # A relation's geometry lives in its member ways, not at top level.
+            if el.get("type") == "relation":
+                if el.get("members"):
+                    platforms.append(tags["ref"])
+            else:
+                geom = el.get("geometry") or []
+                if len(geom) >= 2 and "lat" in geom[0] and "lon" in geom[0]:
+                    platforms.append(tags["ref"])
     if not platforms:
         raise CheckError("no public_transport=platform ways with a ref (Gleis)")
     if rails < 1:

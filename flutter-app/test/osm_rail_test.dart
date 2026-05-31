@@ -88,6 +88,54 @@ void main() {
         reason: 'recovered rail should run alongside the Gleis-7 cube side');
   });
 
+  test('osmRailForGleis recovers a rail for a RELATION-mapped Gleis (Kiel)', () {
+    // Kiel maps platforms as multipolygon RELATIONS whose `ref` carries the
+    // Gleis pair ("3;4") while the member ways only carry section labels
+    // ("A1"/"6b"). The fixture's "3;4" platform is the stitched relation ring.
+    // Matching Gleis "3" must hit that ring (not a "D3" section way) and recover
+    // a rail — the bug was it returned empty → train fell back beside the track.
+    final osm = json.decode(
+        File('test/fixtures/kiel-osm.json').readAsStringSync()) as Map;
+    final platforms = [
+      for (final p in (osm['platforms'] as List))
+        (
+          ref: p['ref'] as String,
+          pts: [
+            for (final q in (p['pts'] as List))
+              LatLng((q['lat'] as num).toDouble(), (q['lng'] as num).toDouble())
+          ],
+        ),
+    ];
+    final rails = [
+      for (final r in (osm['rails'] as List))
+        [
+          for (final q in (r['pts'] as List))
+            LatLng((q['lat'] as num).toDouble(), (q['lng'] as num).toDouble())
+        ],
+    ];
+    // The "3;4" island ring stands in for the cube side reference here.
+    final ring =
+        platforms.firstWhere((p) => p.ref == '3;4', orElse: () => platforms.first);
+
+    final rail = osmRailForGleis(
+      platforms: platforms,
+      rails: rails,
+      gleis: '3',
+      cubeSide: ring.pts,
+    );
+
+    expect(rail.length, greaterThanOrEqualTo(2),
+        reason: 'Gleis 3 must match the "3;4" relation ring and find its rail');
+    final mlon = 111320.0 * math.cos(rail.first.latitude * math.pi / 180);
+    var len = 0.0;
+    for (var i = 0; i < rail.length - 1; i++) {
+      final dx = (rail[i + 1].longitude - rail[i].longitude) * mlon;
+      final dy = (rail[i + 1].latitude - rail[i].latitude) * 111320.0;
+      len += math.sqrt(dx * dx + dy * dy);
+    }
+    expect(len, greaterThan(100.0));
+  });
+
   test('osmRailForGleis returns empty for an unknown Gleis', () {
     final osm = loadOsm();
     final rail = osmRailForGleis(
