@@ -130,6 +130,8 @@ class _ConnectionDetailScreenState
             onSelected: (v) {
               if (v == 0) {
                 _shareJourney(context, ref);
+              } else if (v == 2) {
+                _shareEta(context, ref);
               } else {
                 _openOnBahn(context, ref);
               }
@@ -141,6 +143,14 @@ class _ConnectionDetailScreenState
                   contentPadding: EdgeInsets.zero,
                   leading: Icon(Icons.ios_share),
                   title: Text('Reise teilen'),
+                ),
+              ),
+              PopupMenuItem(
+                value: 2,
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.pin_drop_outlined),
+                  title: Text('Ankunft für Abholer teilen'),
                 ),
               ),
               PopupMenuItem(
@@ -282,6 +292,30 @@ class _ConnectionDetailScreenState
       ShareParams(
         text: journeyShareText(journey, link),
         subject: o.isNotEmpty && d.isNotEmpty ? '$o → $d' : 'Bahn-Reise',
+      ),
+    );
+  }
+
+  /// Share a short arrival ETA for whoever's picking you up: destination, live
+  /// arrival time + platform + delay, and the live `vbid` link to follow the
+  /// train. Falls back to the search link if no recon context exists.
+  Future<void> _shareEta(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    String? link;
+    try {
+      link = await ref.read(vendoServiceProvider).shareJourney(journey);
+    } catch (_) {/* fall back below */}
+    link ??= _searchLink(ref);
+    if (link == null) {
+      messenger.showSnackBar(
+        const SnackBar(content: Text('Ankunft lässt sich nicht teilen.')),
+      );
+      return;
+    }
+    await SharePlus.instance.share(
+      ShareParams(
+        text: etaShareText(journey, link),
+        subject: 'Meine Ankunft — ${journey.destination?.name ?? 'Ziel'}',
       ),
     );
   }

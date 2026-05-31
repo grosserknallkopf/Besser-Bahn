@@ -69,3 +69,31 @@ String journeyShareText(Journey journey, String link) {
   b..writeln()..write('Verbindung ansehen: $link');
   return b.toString();
 }
+
+/// Arrival-focused "ETA für Abholer" message: where to, when you arrive (with
+/// platform + delay) and a live link to follow the train. Short and skimmable —
+/// meant for the person picking you up, not a full itinerary.
+///
+///   🚆 Ich komme nach Berlin Hbf
+///   Ankunft ~20:22, Gleis 7 (ICE 705)
+///   +6 Min später als geplant
+///   Live verfolgen: https://www.bahn.de/buchung/start?vbid=…
+String etaShareText(Journey journey, String link) {
+  final d = journey.destination?.name ?? 'Ziel';
+  final transit = journey.legs.where((l) => !l.isWalking).toList();
+  final last = transit.isEmpty ? null : transit.last;
+  final arr = last?.arrival ?? last?.plannedArrival;
+  final plat = last?.arrivalPlatform ?? last?.plannedArrivalPlatform;
+  final line = last?.line?.displayName;
+  final delay = last?.arrivalDelayMinutes ?? 0;
+
+  final b = StringBuffer()..writeln('🚆 Ich komme nach $d');
+  if (arr != null) {
+    b.writeln('Ankunft ~${_hhmm(arr)}'
+        '${plat != null ? ', Gleis $plat' : ''}'
+        '${line != null ? ' ($line)' : ''}');
+  }
+  if (delay > 0) b.writeln('+$delay Min später als geplant');
+  b.write('Live verfolgen: $link');
+  return b.toString();
+}
