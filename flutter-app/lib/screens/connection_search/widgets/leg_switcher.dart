@@ -42,10 +42,10 @@ class LegAlternativeSwitcher extends ConsumerStatefulWidget {
 
   @override
   ConsumerState<LegAlternativeSwitcher> createState() =>
-      _LegAlternativeSwitcherState();
+      LegAlternativeSwitcherState();
 }
 
-class _LegAlternativeSwitcherState
+class LegAlternativeSwitcherState
     extends ConsumerState<LegAlternativeSwitcher> {
   final List<Journey> _alts = [];
   String? _laterRef;
@@ -67,8 +67,8 @@ class _LegAlternativeSwitcherState
   }
 
   @override
-  void didUpdateWidget(LegAlternativeSwitcher old) {
-    super.didUpdateWidget(old);
+  void didUpdateWidget(LegAlternativeSwitcher oldWidget) {
+    super.didUpdateWidget(oldWidget);
     // A live delay just turned a comfortable transfer into a tight one → load
     // the alternatives now so the offer can appear.
     if (_tight && !_loaded && !_loading) _ensureLoaded();
@@ -225,6 +225,18 @@ class _LegAlternativeSwitcherState
     }
   }
 
+  /// Map a horizontal fling velocity to a departure step. Public so the whole
+  /// leg block (not just this bar) can hand its swipe over to the same logic.
+  /// Vertical list scroll still wins (different axis), so this only fires on a
+  /// deliberate sideways swipe.
+  void handleHorizontalFling(double velocity) {
+    if (velocity < -120) {
+      _step(1); // swipe left → next (later) train
+    } else if (velocity > 120) {
+      _step(-1); // swipe right → previous (earlier) train
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -249,26 +261,18 @@ class _LegAlternativeSwitcherState
             : null,
       ),
       clipBehavior: Clip.antiAlias,
-      child: GestureDetector(
-        // Deliberate horizontal fling cycles departures. Vertical list scroll
-        // still wins (different axis), so this only fires on a sideways swipe.
-        onHorizontalDragEnd: (d) {
-          final v = d.primaryVelocity ?? 0;
-          if (v < -120) {
-            _step(1); // swipe left → next (later) train
-          } else if (v > 120) {
-            _step(-1); // swipe right → previous (earlier) train
-          }
-        },
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (showRiskOffer) _riskOffer(theme, best),
-              _stepper(theme),
-            ],
-          ),
+      // No own swipe handler here: the whole leg block ([_LegSection]) wraps
+      // this bar in a single horizontal-drag gesture that hands the fling to
+      // [handleHorizontalFling]. Keeping a second handler here would just be a
+      // competing detector on the same area. The chevrons still step manually.
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (showRiskOffer) _riskOffer(theme, best),
+            _stepper(theme),
+          ],
         ),
       ),
     );
@@ -355,7 +359,7 @@ class _LegAlternativeSwitcherState
                 : Text(
                     _error ??
                         'Diese Abfahrt${dep != null ? ' · ab ${dep.hhmm}' : ''}'
-                            '$position   ·   wischen für andere',
+                            '$position   ·   Block wischen für andere',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall

@@ -890,6 +890,11 @@ class _LegSectionState extends ConsumerState<_LegSection>
   CoachSequence? _coach;
   bool _loading = true;
 
+  /// Lets the whole-block swipe hand its fling to the switcher's step logic,
+  /// so grabbing the Fahrtblock anywhere cycles departures the same way the
+  /// little switcher bar does.
+  final _switcherKey = GlobalKey<LegAlternativeSwitcherState>();
+
   /// One-shot timer that re-fetches this leg's live data shortly before the
   /// train's next stop, then re-arms itself. Stop-aligned beats constant polling:
   /// the data only changes around stops, so that's when we refresh.
@@ -1086,6 +1091,7 @@ class _LegSectionState extends ConsumerState<_LegSection>
               !leg.isWalking &&
               leg.line != null)
           ? LegAlternativeSwitcher(
+              key: _switcherKey,
               leg: leg,
               index: widget.index,
               onReplace: widget.onReplaceLeg!,
@@ -1113,9 +1119,18 @@ class _LegSectionState extends ConsumerState<_LegSection>
             leg.destination.name.isNotEmpty ? leg.destination.name : null,
       );
       if (switcher == null) return detail;
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [switcher, detail],
+      // The ENTIRE Fahrtblock is the swipe surface: grab anywhere on the block
+      // and fling sideways to cycle this segment's other departures (left →
+      // later, right → earlier). The handler reuses the switcher's own step
+      // logic. onHorizontalDragEnd yields to vertical list scroll (other axis),
+      // so paging the connection still works untouched.
+      return GestureDetector(
+        onHorizontalDragEnd: (d) => _switcherKey.currentState
+            ?.handleHorizontalFling(d.primaryVelocity ?? 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [switcher, detail],
+        ),
       );
     }
     // Loading / fallback: still show the leg summary so the user sees the train.
