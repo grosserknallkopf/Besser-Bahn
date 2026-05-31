@@ -365,32 +365,73 @@ class _ConnectionSearchScreenState
     }
 
     final journeys = state.sortedJourneys;
-    if (journeys.isEmpty) {
-      return const Center(child: Text('Keine Verbindungen gefunden.'));
-    }
+    return Column(
+      children: [
+        _productFilterBar(context, state, notifier),
+        Expanded(
+          child: journeys.isEmpty
+              ? const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Text(
+                        'Keine Verbindungen — ggf. einen Verkehrsmittel-Filter lockern.',
+                        textAlign: TextAlign.center),
+                  ),
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.only(top: 8, bottom: 32),
+                  itemCount: journeys.length + 2,
+                  itemBuilder: (context, index) {
+                    if (index == 0) {
+                      return _paginationButton(
+                        context,
+                        'Früher',
+                        Icons.keyboard_arrow_up,
+                        state.result?.earlierRef != null
+                            ? notifier.loadEarlier
+                            : null,
+                      );
+                    }
+                    if (index == journeys.length + 1) {
+                      return _paginationButton(
+                        context,
+                        'Später',
+                        Icons.keyboard_arrow_down,
+                        state.result?.laterRef != null
+                            ? notifier.loadLater
+                            : null,
+                      );
+                    }
+                    return JourneyCard(journey: journeys[index - 1]);
+                  },
+                ),
+        ),
+      ],
+    );
+  }
 
-    return ListView.builder(
-      padding: const EdgeInsets.only(top: 8, bottom: 32),
-      itemCount: journeys.length + 2,
-      itemBuilder: (context, index) {
-        if (index == 0) {
-          return _paginationButton(
-            context,
-            'Früher',
-            Icons.keyboard_arrow_up,
-            state.result?.earlierRef != null ? notifier.loadEarlier : null,
-          );
-        }
-        if (index == journeys.length + 1) {
-          return _paginationButton(
-            context,
-            'Später',
-            Icons.keyboard_arrow_down,
-            state.result?.laterRef != null ? notifier.loadLater : null,
-          );
-        }
-        return JourneyCard(journey: journeys[index - 1]);
-      },
+  /// Horizontal multimodal filter: one chip per transport category. The search
+  /// already returns all modes; tapping a chip hides/shows that mode locally.
+  Widget _productFilterBar(BuildContext context, JourneySearchState state,
+      JourneySearchNotifier notifier) {
+    return SizedBox(
+      height: 48,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        children: [
+          for (final cat in ProductCategory.values)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: FilterChip(
+                label: Text(cat.label),
+                selected: state.products.contains(cat),
+                visualDensity: VisualDensity.compact,
+                onSelected: (_) => notifier.toggleProduct(cat),
+              ),
+            ),
+        ],
+      ),
     );
   }
 

@@ -7,6 +7,42 @@ import 'settings_provider.dart';
 
 enum JourneySortMode { departure, arrival, duration, transfers }
 
+/// Coarse transport categories for the multimodal filter. The journey search
+/// already returns every mode (bus, tram, U-/S-Bahn, regional, long-distance);
+/// this lets the user hide modes client-side without re-querying.
+enum ProductCategory {
+  fern('Fernverkehr'),
+  regional('Regional'),
+  sbahn('S-Bahn'),
+  ubahn('U-Bahn'),
+  tram('Tram'),
+  bus('Bus & Fähre');
+
+  final String label;
+  const ProductCategory(this.label);
+
+  /// Map a HAFAS/Vendo product string to its category.
+  static ProductCategory of(String? product) {
+    switch (product) {
+      case 'nationalExpress':
+      case 'national':
+        return ProductCategory.fern;
+      case 'suburban':
+        return ProductCategory.sbahn;
+      case 'subway':
+        return ProductCategory.ubahn;
+      case 'tram':
+        return ProductCategory.tram;
+      case 'bus':
+      case 'ferry':
+        return ProductCategory.bus;
+      case 'regional':
+      default:
+        return ProductCategory.regional;
+    }
+  }
+}
+
 class JourneySearchState {
   final Station? from;
   final Station? to;
@@ -17,7 +53,11 @@ class JourneySearchState {
   final String? error;
   final JourneySortMode sortMode;
 
-  const JourneySearchState({
+  /// Which transport categories to show. All enabled by default (full
+  /// multimodal); the user can hide modes (e.g. only Fernverkehr).
+  final Set<ProductCategory> products;
+
+  JourneySearchState({
     this.from,
     this.to,
     this.dateTime,
@@ -26,7 +66,8 @@ class JourneySearchState {
     this.isLoading = false,
     this.error,
     this.sortMode = JourneySortMode.departure,
-  });
+    Set<ProductCategory>? products,
+  }) : products = products ?? ProductCategory.values.toSet();
 
   /// Whether the search should be by arrival. Only meaningful with a chosen
   /// time — "arrive now" is nonsense, so "Jetzt" (no time) always means
@@ -42,6 +83,7 @@ class JourneySearchState {
     bool? isLoading,
     String? error,
     JourneySortMode? sortMode,
+    Set<ProductCategory>? products,
     bool clearDateTime = false,
   }) {
     return JourneySearchState(
@@ -53,12 +95,23 @@ class JourneySearchState {
       isLoading: isLoading ?? this.isLoading,
       error: error,
       sortMode: sortMode ?? this.sortMode,
+      products: products ?? this.products,
     );
+  }
+
+  /// True when [journey] uses only currently-enabled transport categories
+  /// (walking legs ignored).
+  bool _passesProductFilter(Journey journey) {
+    if (products.length == ProductCategory.values.length) return true;
+    return journey.legs
+        .where((l) => !l.isWalking)
+        .every((l) => products.contains(ProductCategory.of(l.line?.product)));
   }
 
   List<Journey> get sortedJourneys {
     if (result == null) return [];
-    final journeys = List<Journey>.from(result!.journeys);
+    final journeys =
+        result!.journeys.where(_passesProductFilter).toList();
     switch (sortMode) {
       case JourneySortMode.departure:
         journeys.sort((a, b) =>
@@ -78,7 +131,7 @@ class JourneySearchState {
 
 class JourneySearchNotifier extends Notifier<JourneySearchState> {
   @override
-  JourneySearchState build() => const JourneySearchState();
+  JourneySearchState build() => JourneySearchState();
 
   void setFrom(Station? station) => state = state.copyWith(from: station);
   void setTo(Station? station) => state = state.copyWith(to: station);
@@ -91,6 +144,19 @@ class JourneySearchNotifier extends Notifier<JourneySearchState> {
       state = state.copyWith(clearDateTime: true, isArrival: false);
   void setSortMode(JourneySortMode mode) =>
       state = state.copyWith(sortMode: mode);
+
+  /// Toggle a transport category in the multimodal filter. Never lets the user
+  /// deselect the last category (that would hide everything) — re-enabling all
+  /// instead.
+  void toggleProduct(ProductCategory cat) {
+    final next = Set<ProductCategory>.from(state.products);
+    if (!next.remove(cat)) next.add(cat);
+    if (next.isEmpty) next.addAll(ProductCategory.values);
+    state = state.copyWith(products: next);
+  }
+
+  void setAllProducts() =>
+      state = state.copyWith(products: ProductCategory.values.toSet());
 
   void swapStations() {
     state = state.copyWith(from: state.to, to: state.from);
@@ -220,7 +286,7 @@ class JourneySearchNotifier extends Notifier<JourneySearchState> {
           '|${j.legs.firstOrNull?.line?.name ?? ''}';
 
   void clear() {
-    state = const JourneySearchState();
+    state = JourneySearchState();
   }
 }
 
