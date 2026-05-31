@@ -1,8 +1,25 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:besser_bahn/core/platform_train.dart' as pt;
 import 'package:besser_bahn/services/station_map_service.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:latlong2/latlong.dart';
+
+/// Perpendicular distance (metres) from [p] to the line through [a]–[b], in a
+/// local equirectangular metre frame (fine over a single platform).
+double _perpMetres(LatLng p, LatLng a, LatLng b) {
+  const mlat = 111320.0;
+  final mlon = 111320.0 * math.cos(a.latitude * math.pi / 180);
+  math.Point<double> xy(LatLng q) =>
+      math.Point(q.longitude * mlon, q.latitude * mlat);
+  final pa = xy(a), pb = xy(b), pp = xy(p);
+  final ex = pb.x - pa.x, ey = pb.y - pa.y;
+  final len = math.sqrt(ex * ex + ey * ey);
+  if (len < 1e-9) return 0;
+  // |cross(b-a, p-a)| / |b-a|
+  return ((pp.x - pa.x) * ey - (pp.y - pa.y) * ex).abs() / len;
+}
 
 /// Deterministic parse test for the bahnhof.de station-map scrape, using a
 /// SAVED Kiel Hbf RSC fixture (no network) so it can't flake in CI.
@@ -49,5 +66,49 @@ void main() {
         pt.platformGenericBody(map, gleis: gleis, lengthM: 140);
     expect(outline.length, greaterThanOrEqualTo(3),
         reason: 'generic body is a closed ring');
+  });
+
+  test('Kiel Hbf generic body centreline is essentially straight', () {
+    final body = File('test/fixtures/kiel-hbf.rsc.txt').readAsStringSync();
+    final map = parseStationMapBody('kiel-hbf', body);
+
+    // Kiel is a terminus of parallel STRAIGHT platforms and has 0 lift/escalator
+    // anchors, so its island resolution can mix cubes from several tracks. The
+    // body must still come out straight (no phantom parabola bend).
+    final gleis = map.platforms
+        .map((p) => pt.normalizeGleis(p.name))
+        .firstWhere(
+          (g) => pt.platformSectors(map, g).length >= 2,
+          orElse: () => '',
+        );
+    expect(gleis, isNotEmpty, reason: 'expected a Gleis with ≥2 sector cubes');
+
+    final outline = pt.platformGenericBody(map, gleis: gleis, lengthM: 140);
+    expect(outline.length, greaterThanOrEqualTo(3));
+
+    // Chord between the two most-distant vertices (the body's long axis). On a
+    // straight platform every vertex sits within ~half the body width (≈1.4 m,
+    // plus a little for the rounded snouts) of that chord; a parabola bend
+    // would push the mid vertices several metres off it. Allow ~4 m.
+    const dist = Distance();
+    var ai = 0, bi = 0;
+    var best = -1.0;
+    for (var i = 0; i < outline.length; i++) {
+      for (var j = i + 1; j < outline.length; j++) {
+        final d = dist.as(LengthUnit.Meter, outline[i], outline[j]);
+        if (d > best) {
+          best = d;
+          ai = i;
+          bi = j;
+        }
+      }
+    }
+    final a = outline[ai], b = outline[bi];
+    var maxDev = 0.0;
+    for (final p in outline) {
+      maxDev = math.max(maxDev, _perpMetres(p, a, b));
+    }
+    expect(maxDev, lessThan(4.0),
+        reason: 'Kiel platform is straight; body deviates $maxDev m from chord');
   });
 }

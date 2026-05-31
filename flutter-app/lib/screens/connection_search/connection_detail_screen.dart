@@ -663,6 +663,24 @@ class _ConnectionDetailScreenState
                         time: _liveArrivalOf(prev) ?? prev.arrival,
                       )
                     : null,
+                // ORIGIN refs → each train's real composition, fetched at its
+                // origin departure (a stop the sequence endpoint always serves).
+                depFallbackRef: (next?.line?.fahrtNr.isNotEmpty ?? false)
+                    ? (
+                        category: next!.line?.productName ?? '',
+                        trainNumber: next.line!.fahrtNr,
+                        originEva: next.origin.id,
+                        departureTime: next.departure,
+                      )
+                    : null,
+                arrFallbackRef: (prev?.line?.fahrtNr.isNotEmpty ?? false)
+                    ? (
+                        category: prev!.line?.productName ?? '',
+                        trainNumber: prev.line!.fahrtNr,
+                        originEva: prev.origin.id,
+                        departureTime: prev.departure,
+                      )
+                    : null,
                 product: next?.line?.product, // Einstieg (primary)
                 secondaryProduct: prev?.line?.product, // Ausstieg (secondary)
                 primaryTypes: {
@@ -679,6 +697,10 @@ class _ConnectionDetailScreenState
       String? arrGleis, String? depGleis,
       {({String category, String trainNumber, DateTime? time})? depRef,
       ({String category, String trainNumber, DateTime? time})? arrRef,
+      ({String category, String trainNumber, String originEva, DateTime? departureTime})?
+          depFallbackRef,
+      ({String category, String trainNumber, String originEva, DateTime? departureTime})?
+          arrFallbackRef,
       String? product,
       String? secondaryProduct,
       Set<String>? primaryTypes}) {
@@ -697,6 +719,11 @@ class _ConnectionDetailScreenState
           secondaryRole: GleisRole.alight,
           coachRef: depRef, // departing train
           secondaryCoachRef: arrRef, // arriving train
+          // ORIGIN refs → real per-car compositions for the Einstieg (primary)
+          // and Ausstieg (secondary) trains, fetched at each train's origin so
+          // they draw to scale even where this stop's Wagenreihung 404s.
+          fallbackRef: depFallbackRef, // departing train (Einstieg)
+          secondaryFallbackRef: arrFallbackRef, // arriving train (Ausstieg)
           // Products → a realistically-sized generic body where a train has no
           // per-stop Wagenreihung (best-effort, vs a too-long bare line).
           product: product,
@@ -746,6 +773,25 @@ class _ConnectionDetailScreenState
                 station,
                 arrGleis,
                 depGleis,
+                // ORIGIN refs → real per-car compositions for both trains,
+                // fetched at each train's origin so the Ausstieg train draws to
+                // scale even where this transfer stop's Wagenreihung 404s.
+                depFallbackRef: (next.line?.fahrtNr.isNotEmpty ?? false)
+                    ? (
+                        category: next.line?.productName ?? '',
+                        trainNumber: next.line!.fahrtNr,
+                        originEva: next.origin.id,
+                        departureTime: next.departure,
+                      )
+                    : null,
+                arrFallbackRef: (prev.line?.fahrtNr.isNotEmpty ?? false)
+                    ? (
+                        category: prev.line?.productName ?? '',
+                        trainNumber: prev.line!.fahrtNr,
+                        originEva: prev.origin.id,
+                        departureTime: prev.departure,
+                      )
+                    : null,
                 product: next.line?.product, // Einstieg (primary)
                 secondaryProduct: prev.line?.product, // Ausstieg (secondary)
                 primaryTypes: {
@@ -1088,6 +1134,17 @@ class _LegSectionState extends ConsumerState<_LegSection>
           // can still draw the train at a stop the per-station Wagenreihung
           // endpoint doesn't serve (a regional train's terminus/Ausstieg 404s).
           fallbackCoachSequence: coach,
+          // Also hand the leg's ORIGIN ref so the map can fetch the composition
+          // itself even when [coach] wasn't preloaded — the origin departure is
+          // a stop the vehicle-sequence endpoint always serves.
+          fallbackRef: (leg.line?.fahrtNr != null && leg.line!.fahrtNr.isNotEmpty)
+              ? (
+                  category: leg.line?.productName ?? '',
+                  trainNumber: leg.line!.fahrtNr,
+                  originEva: leg.origin.id,
+                  departureTime: leg.departure,
+                )
+              : null,
           product: leg.line?.product,
           trainLabel: leg.line?.name,
           transferNote: transferNote,

@@ -493,15 +493,31 @@ List<({List<LatLng> outline, Coach coach, bool boarding})> platformTrainCars(
 ///
 /// So we DON'T chain raw cubes. We work in the platform's own axis frame
 /// (project each cube to a distance `t` ALONG the best-fit axis and a signed
-/// offset `perp` across it), then LEAST-SQUARES fit a gentle parabola
-/// `perp = A·t² + B·t + C`. That single smooth curve:
+/// offset `perp` across it), then fit BOTH a least-squares LINE
+/// `perp = B·t + C` and a parabola `perp = A·t² + B·t + C`, and pick between
+/// them on EVIDENCE — never letting the parabola overfit noise:
 ///   * follows real platform curvature (Hamburg bends hard) — and stays curved
 ///     all the way to the last sector, since nothing is dropped;
-///   * collapses to a straight line when the platform is straight (Kiel);
-///   * is barely moved by a stray cube on another track (least-squares damps a
-///     lone outlier to ~1/n of its offset) — no 90° jump, no fold;
+///   * collapses to a straight line when the platform is straight (Kiel),
+///     even when the cube set is contaminated by a neighbouring track's cubes
+///     (Kiel has 0 lift/escalator anchors → its island can mix cubes from
+///     several parallel straight platforms, which a naïve parabola turns into
+///     a phantom bend);
 ///   * is sampled densely so the body bends smoothly, and extended past both
 ///     end sectors so a train longer than the cube span keeps going straight.
+///
+/// Curvature is accepted as REAL only when it is well-supported:
+///   1. ≥4 cubes (a parabola through 3 noisy points is meaningless), AND
+///   2. the parabola's sagitta (max deviation from its own chord over the
+///      t-span) exceeds a few metres — a tiny bow is indistinguishable from
+///      noise, AND
+///   3. the parabola's RMS residual is meaningfully smaller than the line's
+///      (the curve explains structure the line can't), AND
+///   4. the cubes' perp spread isn't so large that the set is obviously
+///      multi-track contaminated (parallel platforms sit ~10 m apart across,
+///      so a single platform's cubes cluster much tighter than that).
+/// If any test fails we use the straight line (a=0): a robust LS line through a
+/// noisy multi-track set still yields a sane, straight platform.
 List<LatLng> _cubeCurvePts(
     ({List<({int idx, LatLng pos})> cubes, double dLat, double dLon, PlatformLine? axis})
         island) {
@@ -532,13 +548,56 @@ List<LatLng> _cubeCurvePts(
     ps.add(rx * nx + ry * ny);
   }
 
-  // Least-squares perp(t): quadratic when ≥3 cubes, else linear.
-  final coef = _fitPerp(ts, ps);
-  double perpAt(double t) => coef.a * t * t + coef.b * t + coef.c;
+  var tMin = ts.reduce(math.min), tMax = ts.reduce(math.max);
+
+  // Fit BOTH shapes and measure how well each explains the cube perp values.
+  final lineCoef = _fitLine(ts, ps);
+  final quadCoef = _fitPerp(ts, ps);
+  double lineAt(double t) => lineCoef.b * t + lineCoef.c;
+  double quadAt(double t) => quadCoef.a * t * t + quadCoef.b * t + quadCoef.c;
+  final n = ts.length;
+  var lineSq = 0.0, quadSq = 0.0;
+  for (var i = 0; i < n; i++) {
+    final lr = ps[i] - lineAt(ts[i]);
+    final qr = ps[i] - quadAt(ts[i]);
+    lineSq += lr * lr;
+    quadSq += qr * qr;
+  }
+  final lineRms = math.sqrt(lineSq / n);
+  final quadRms = math.sqrt(quadSq / n);
+
+  // Parabola sagitta over the cube span: max gap between the quadratic and the
+  // straight chord joining its endpoint values — the real depth of the bow.
+  final qLo = quadAt(tMin), qHi = quadAt(tMax);
+  final tSpan = tMax - tMin;
+  var sagitta = 0.0;
+  if (tSpan > 1e-6) {
+    for (var i = 0; i <= 20; i++) {
+      final t = tMin + tSpan * i / 20;
+      final chord = qLo + (qHi - qLo) * (t - tMin) / tSpan;
+      sagitta = math.max(sagitta, (quadAt(t) - chord).abs());
+    }
+  }
+
+  // Perp spread of the cubes around the axis: tight (≲ a coach width) for one
+  // platform, large (≳10 m) when cubes from 2+ parallel tracks are mixed in.
+  final pMin = ps.reduce(math.min), pMax = ps.reduce(math.max);
+  final perpSpread = pMax - pMin;
+
+  // Curvature is trustworthy only when every guard agrees; otherwise straight.
+  const minCubesForCurve = 4;
+  const minSagittaM = 3.0; // a few metres of genuine bow
+  const maxPerpSpreadM = 6.0; // wider ⇒ multi-track contamination ⇒ straight
+  final residualImproves = quadRms < lineRms * 0.6;
+  final curved = n >= minCubesForCurve &&
+      sagitta >= minSagittaM &&
+      residualImproves &&
+      perpSpread <= maxPerpSpreadM;
+
+  double perpAt(double t) => curved ? quadAt(t) : lineAt(t);
 
   // Sample the smooth curve from before the first sector to past the last, so
   // the body bends gradually and a long train continues straight off the ends.
-  var tMin = ts.reduce(math.min), tMax = ts.reduce(math.max);
   const ext = 60.0;
   tMin -= ext;
   tMax += ext;
@@ -555,23 +614,29 @@ List<LatLng> _cubeCurvePts(
   return out;
 }
 
+/// Least-squares straight line `perp = b·t + c` (a=0) through the cube perp
+/// values — the conservative shape we fall back to whenever curvature isn't
+/// well-supported. Degenerates to a constant when the t's are collinear.
+({double a, double b, double c}) _fitLine(List<double> t, List<double> p) {
+  final n = t.length;
+  var st = 0.0, sp = 0.0, stt = 0.0, stp = 0.0;
+  for (var i = 0; i < n; i++) {
+    st += t[i];
+    sp += p[i];
+    stt += t[i] * t[i];
+    stp += t[i] * p[i];
+  }
+  final den = n * stt - st * st;
+  final b = den.abs() < 1e-9 ? 0.0 : (n * stp - st * sp) / den;
+  return (a: 0.0, b: b, c: (sp - b * st) / n);
+}
+
 /// Least-squares fit of `perp = a·t² + b·t + c`. Falls back to a line (a=0)
 /// for <3 points or a near-singular system (collinear t's).
 ({double a, double b, double c}) _fitPerp(List<double> t, List<double> p) {
   final n = t.length;
   // Least-squares LINE perp = b·t + c — the fallback shape.
-  ({double a, double b, double c}) linear() {
-    var st = 0.0, sp = 0.0, stt = 0.0, stp = 0.0;
-    for (var i = 0; i < n; i++) {
-      st += t[i];
-      sp += p[i];
-      stt += t[i] * t[i];
-      stp += t[i] * p[i];
-    }
-    final den = n * stt - st * st;
-    final b = den.abs() < 1e-9 ? 0.0 : (n * stp - st * sp) / den;
-    return (a: 0.0, b: b, c: (sp - b * st) / n);
-  }
+  ({double a, double b, double c}) linear() => _fitLine(t, p);
 
   if (n < 3) return linear();
 

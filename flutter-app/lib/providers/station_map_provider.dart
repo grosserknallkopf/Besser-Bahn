@@ -351,6 +351,16 @@ class StationMapNotifier extends Notifier<StationMapState> {
   ({String category, String trainNumber, DateTime? time})? _coachRef;
   ({String category, String trainNumber, DateTime? time})? _coachRefSecondary;
 
+  /// Optional ORIGIN refs for the train(s): the stop that HAS Wagenreihung data
+  /// (the train's origin departure), used to fetch the known composition as a
+  /// fallback for stops the per-station vehicle-sequence endpoint doesn't serve
+  /// (a regional train's terminus/Ausstieg 404s). [_fallbackRef] is the Einstieg
+  /// train; [_secondaryFallbackRef] is the Ausstieg train on a transfer.
+  ({String category, String trainNumber, String originEva, DateTime? departureTime})?
+      _fallbackRef;
+  ({String category, String trainNumber, String originEva, DateTime? departureTime})?
+      _secondaryFallbackRef;
+
   @override
   StationMapState build() => const StationMapState();
 
@@ -370,6 +380,10 @@ class StationMapNotifier extends Notifier<StationMapState> {
           secondaryCoachRef,
       CoachSequence? fallbackCoachSequence,
       CoachSequence? secondaryFallbackCoachSequence,
+      ({String category, String trainNumber, String originEva, DateTime? departureTime})?
+          fallbackRef,
+      ({String category, String trainNumber, String originEva, DateTime? departureTime})?
+          secondaryFallbackRef,
       String? product,
       String? secondaryProduct,
       String? trainLabel,
@@ -377,6 +391,8 @@ class StationMapNotifier extends Notifier<StationMapState> {
     _primaryTypes = primaryTypes ?? kDefaultPrimaryTypes;
     _coachRef = coachRef;
     _coachRefSecondary = secondaryCoachRef;
+    _fallbackRef = fallbackRef;
+    _secondaryFallbackRef = secondaryFallbackRef;
     final raw = highlightGleis?.trim() ?? '';
     final hl = raw.isNotEmpty ? normalizeGleis(raw) : null;
     // [sectionOverride] (the boarding portion of a wing train, e.g. just "I")
@@ -407,6 +423,8 @@ class StationMapNotifier extends Notifier<StationMapState> {
       secondaryProduct: secondaryProduct,
       clearFallback: fallbackCoachSequence == null &&
           secondaryFallbackCoachSequence == null &&
+          fallbackRef == null &&
+          secondaryFallbackRef == null &&
           product == null &&
           secondaryProduct == null,
       trainLabel: trainLabel,
@@ -425,6 +443,8 @@ class StationMapNotifier extends Notifier<StationMapState> {
     _primaryTypes = kDefaultPrimaryTypes;
     _coachRef = null;
     _coachRefSecondary = null;
+    _fallbackRef = null;
+    _secondaryFallbackRef = null;
     state = state.copyWith(clearHighlight: true, clearCoachSequence: true);
     await _load(() => _service.fetchBySlug(slug));
   }
@@ -450,13 +470,49 @@ class StationMapNotifier extends Notifier<StationMapState> {
       }
     }
 
-    final results = await Future.wait([fetch(_coachRef), fetch(_coachRefSecondary)]);
+    // The fallback compositions come from each train's ORIGIN departure (a stop
+    // the vehicle-sequence endpoint always serves) — so we can still draw the
+    // train where THIS stop's per-station sequence 404s (regional terminus).
+    Future<CoachSequence?> fetchOrigin(
+        ({String category, String trainNumber, String originEva, DateTime? departureTime})?
+            r) async {
+      if (r == null || r.trainNumber.isEmpty || r.originEva.isEmpty) return null;
+      try {
+        return await svc.getCoachSequenceForDeparture(
+          category: r.category,
+          trainNumber: r.trainNumber,
+          stationEva: r.originEva,
+          departureTime: r.departureTime,
+        );
+      } catch (_) {
+        return null;
+      }
+    }
+
+    final results = await Future.wait([
+      fetch(_coachRef),
+      fetch(_coachRefSecondary),
+      fetchOrigin(_fallbackRef),
+      fetchOrigin(_secondaryFallbackRef),
+    ]);
     final primary = results[0];
     final secondary = results[1];
-    if (primary == null && secondary == null) return;
+    final primaryFallback = results[2];
+    final secondaryFallback = results[3];
+    if (primary == null &&
+        secondary == null &&
+        primaryFallback == null &&
+        secondaryFallback == null) {
+      return;
+    }
     state = state.copyWith(
+      // Don't clobber a successfully-fetched exact per-stop sequence with null.
       coachSequence: primary,
       secondaryCoachSequence: secondary,
+      // The origin composition is a fallback only — never overwrites a non-null
+      // value we already had with null (copyWith keeps the existing one).
+      fallbackCoachSequence: primaryFallback,
+      secondaryFallbackCoachSequence: secondaryFallback,
     );
   }
 

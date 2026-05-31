@@ -375,14 +375,6 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
             MarkerLayer(
                 markers:
                     _markers(context, state.visiblePois, state.station)),
-            if (state.highlightSectionLine.isNotEmpty)
-              MarkerLayer(
-                  markers: _sectionMarkers(state.highlightSectionLine,
-                      roleColor(state.highlightRole) ?? Colors.amber.shade700)),
-            if (state.secondarySectionLine.isNotEmpty)
-              MarkerLayer(
-                  markers: _sectionMarkers(state.secondarySectionLine,
-                      roleColor(state.secondaryRole) ?? Colors.red)),
             // "Ausstieg"/"Einstieg" labels floating above the two Gleise so
             // the map itself says which is which.
             if (state.secondaryGleis != null)
@@ -482,38 +474,6 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
               dimmed: transferMode &&
                   poi.isPlatform &&
                   mapState.roleForPoi(poi) == GleisRole.none,
-            ),
-          ),
-        ),
-    ];
-  }
-
-  /// Amber labelled chips for the interpolated boarding-section letters,
-  /// drawn on top of the section line so the rider sees exactly where to wait.
-  List<Marker> _sectionMarkers(
-      List<({String letter, LatLng pos})> section, Color color) {
-    return [
-      for (final s in section)
-        Marker(
-          point: s.pos,
-          width: 26,
-          height: 26,
-          child: Container(
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white, width: 2),
-              boxShadow: [
-                BoxShadow(color: color, blurRadius: 8, spreadRadius: 1),
-              ],
-            ),
-            child: Text(
-              s.letter,
-              style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold),
             ),
           ),
         ),
