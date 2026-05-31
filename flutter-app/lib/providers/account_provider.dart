@@ -56,9 +56,16 @@ class DbAuthNotifier extends Notifier<DbAuthState> {
         state = state.copyWith(initialized: true, profile: profile);
         return;
       }
+    } on DbAccountException catch (e) {
+      // Only a genuine auth failure (401) means the stored session is dead —
+      // then drop the tokens. The service has already cleared them on a failed
+      // refresh, but be explicit. A transient error (offline, timeout, missing
+      // platform keyring) must NOT wipe a valid refresh token, or the user is
+      // forced to log in again on every cold start.
+      if (e.status == 401) await _service.logout();
     } catch (_) {
-      // Stale/invalid token — drop it and present as logged-out.
-      await _service.logout();
+      // Network/platform hiccup — keep the tokens, just show logged-out for
+      // now; the next launch (or a manual retry) re-validates the session.
     }
     state = state.copyWith(initialized: true, clearProfile: true);
   }

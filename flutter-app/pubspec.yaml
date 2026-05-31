@@ -34,6 +34,7 @@ dependencies:
   # and rearchitects the layer — not worth the instability for the Karte tab.
   vector_map_tiles: 9.0.0-beta.8
   connectivity_plus: ^7.1.1      # offline detection → offline banner / cached-data mode
+  webview_flutter: ^4.10.0       # render DB's official Handyticket HTML offline
 
 dev_dependencies:
   flutter_test:
