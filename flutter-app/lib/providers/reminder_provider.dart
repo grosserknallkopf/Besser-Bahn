@@ -18,5 +18,7 @@ final reminderSchedulerProvider = Provider<void>((ref) {
     enabled: settings.remindersEnabled,
     leadMinutes: settings.reminderLeadMinutes,
     transferAlerts: settings.transferAlerts,
+    arrivalAlert: settings.arrivalAlertEnabled,
+    arrivalAlarmSound: settings.arrivalAlarmSound,
   );
 });

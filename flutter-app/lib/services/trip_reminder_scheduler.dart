@@ -11,11 +11,15 @@ import 'notification_service.dart';
 /// no server in the loop. Live delay-aware alerts are a separate, foreground
 /// concern (see the live-tracking controller).
 ///
-/// For each trip we plan up to three kinds of pings:
+/// For each trip we plan up to five kinds of pings:
 ///  - **Bereit machen** — [leadMinutes] before departure ("In 30 Min fährt …").
 ///  - **Boarding** — 5 min before departure, with the platform.
 ///  - **Umstieg** — 5 min before each connecting train leaves, with platform
 ///    and the real transfer gap.
+///  - **Ankunfts-Wecker** — ~10 min before reaching the final destination
+///    ("In 10 Minuten bist du da", vibration) and ~5 min before it. The 5-min
+///    one becomes a loud, looping, stoppable alarm when [arrivalAlarmSound] is
+///    on — so a dozing rider doesn't sleep past the stop.
 ///
 /// [sync] is idempotent: it reconciles the OS's pending list, so calling it on
 /// every library/settings change (or app start) converges without piling up.
@@ -26,14 +30,20 @@ class TripReminderScheduler {
   /// trips so the soonest ones never get dropped.
   static const int _maxReminders = 56;
 
+  /// Lead times for the arrival wake-up, in minutes before the final arrival.
+  static const int _arrivalNoticeMinutes = 10;
+  static const int _arrivalAlarmMinutes = 5;
+
   static Future<void> sync(
     List<SavedJourney> upcoming, {
     required bool enabled,
     required int leadMinutes,
     required bool transferAlerts,
+    required bool arrivalAlert,
+    required bool arrivalAlarmSound,
   }) async {
-    // Toggle off → clear everything we scheduled and stop.
-    if (!enabled) {
+    // Nothing to schedule from either half → clear everything and stop.
+    if (!enabled && !arrivalAlert) {
       await NotificationService.cancelReminders();
       return;
     }
@@ -41,7 +51,14 @@ class TripReminderScheduler {
     final now = DateTime.now();
     final reminders = <_Reminder>[];
     for (final saved in upcoming) {
-      reminders.addAll(_remindersFor(saved.journey, leadMinutes, transferAlerts));
+      reminders.addAll(_remindersFor(
+        saved.journey,
+        leadMinutes,
+        departureReminders: enabled,
+        transferAlerts: enabled && transferAlerts,
+        arrivalAlert: arrivalAlert,
+        arrivalAlarmSound: arrivalAlarmSound,
+      ));
     }
 
     // Only future pings, soonest first, capped.
@@ -53,25 +70,51 @@ class TripReminderScheduler {
     await NotificationService.cancelReminders();
     var id = NotificationService.reminderIdBase;
     for (final r in planned) {
-      await NotificationService.scheduleReminder(
-        id: id++,
-        when: r.when,
-        title: r.title,
-        body: r.body,
-      );
+      if (r.alarm) {
+        await NotificationService.scheduleAlarm(
+          id: id++,
+          when: r.when,
+          title: r.title,
+          body: r.body,
+        );
+      } else {
+        await NotificationService.scheduleReminder(
+          id: id++,
+          when: r.when,
+          title: r.title,
+          body: r.body,
+        );
+      }
     }
     AppLog.log('reminders synced (${planned.length} scheduled)', tag: 'notify');
   }
 
   static List<_Reminder> _remindersFor(
-      Journey journey, int leadMinutes, bool transferAlerts) {
+    Journey journey,
+    int leadMinutes, {
+    required bool departureReminders,
+    required bool transferAlerts,
+    required bool arrivalAlert,
+    required bool arrivalAlarmSound,
+  }) {
     final out = <_Reminder>[];
     final transit = journey.legs.where((l) => !l.isWalking).toList();
     if (transit.isEmpty) return out;
 
+    if (departureReminders) {
+      _addDepartureReminders(out, transit, leadMinutes, transferAlerts);
+    }
+    if (arrivalAlert) {
+      _addArrivalReminders(out, transit, arrivalAlarmSound);
+    }
+    return out;
+  }
+
+  static void _addDepartureReminders(List<_Reminder> out,
+      List<JourneyLeg> transit, int leadMinutes, bool transferAlerts) {
     final first = transit.first;
     final dep = first.plannedDeparture ?? first.departure;
-    if (dep == null) return out;
+    if (dep == null) return;
     final line = first.line?.displayName ?? 'Zug';
     final origin = first.origin.name;
     final plat = first.departurePlatform ?? first.plannedDeparturePlatform;
@@ -117,7 +160,38 @@ class TripReminderScheduler {
         ));
       }
     }
-    return out;
+  }
+
+  /// Ankunfts-Wecker for the final destination: a gentle "in 10 Min bist du da"
+  /// and a "gleich aussteigen" ping 5 min before — the latter as a loud,
+  /// looping alarm when [alarmSound] is on. Times come from the saved arrival
+  /// (live if we have it, else planned), so it's planned offline like every
+  /// other reminder; the [sync] filter drops any leg that's already < 10 / < 5
+  /// min out.
+  static void _addArrivalReminders(
+      List<_Reminder> out, List<JourneyLeg> transit, bool alarmSound) {
+    final last = transit.last;
+    final arr = last.arrival ?? last.plannedArrival;
+    if (arr == null) return;
+    final dest = last.destination.name;
+    final plat = last.arrivalPlatform ?? last.plannedArrivalPlatform;
+
+    out.add(_Reminder(
+      when: arr.subtract(const Duration(minutes: _arrivalNoticeMinutes)),
+      title: 'In $_arrivalNoticeMinutes Minuten bist du da',
+      body: 'Ankunft $dest um ${arr.hhmm}'
+          '${plat != null ? ' · Gleis $plat' : ''}.',
+    ));
+
+    out.add(_Reminder(
+      when: arr.subtract(const Duration(minutes: _arrivalAlarmMinutes)),
+      title: alarmSound
+          ? 'Aufwachen — $dest in $_arrivalAlarmMinutes Min'
+          : 'Gleich aussteigen: $dest',
+      body: 'Ankunft um ${arr.hhmm}'
+          '${plat != null ? ' · Gleis $plat' : ''} — mach dich fertig.',
+      alarm: alarmSound,
+    ));
   }
 }
 
@@ -125,5 +199,14 @@ class _Reminder {
   final DateTime when;
   final String title;
   final String body;
-  const _Reminder({required this.when, required this.title, required this.body});
+
+  /// Schedule via the loud insistent "Ankunfts-Wecker" instead of a normal
+  /// notification.
+  final bool alarm;
+  const _Reminder({
+    required this.when,
+    required this.title,
+    required this.body,
+    this.alarm = false,
+  });
 }

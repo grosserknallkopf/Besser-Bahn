@@ -107,6 +107,33 @@ class SettingsScreen extends ConsumerWidget {
                     onChanged: (v) => notifier.setTransferAlerts(v),
                   ),
                 ],
+                const Divider(height: 1),
+                SwitchListTile(
+                  secondary: const Icon(Icons.pin_drop_outlined),
+                  title: const Text('Ankunfts-Wecker'),
+                  subtitle: const Text(
+                      '10 Min und 5 Min vor Ankunft erinnern (vibriert) — '
+                      'damit du deinen Halt nicht verschläfst.'),
+                  value: settings.arrivalAlertEnabled,
+                  onChanged: (v) {
+                    notifier.setArrivalAlertEnabled(v);
+                    if (v) NotificationService.requestPermissions();
+                  },
+                ),
+                if (settings.arrivalAlertEnabled) ...[
+                  const Divider(height: 1),
+                  SwitchListTile(
+                    secondary: const Icon(Icons.alarm),
+                    title: const Text('Klingeln statt nur vibrieren'),
+                    subtitle: const Text(
+                        '5 Min vorher laut klingeln, bis du es stoppst.'),
+                    value: settings.arrivalAlarmSound,
+                    onChanged: (v) {
+                      notifier.setArrivalAlarmSound(v);
+                      if (v) NotificationService.requestPermissions();
+                    },
+                  ),
+                ],
               ],
             ),
           ),

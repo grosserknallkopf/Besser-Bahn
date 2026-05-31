@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
@@ -31,13 +33,33 @@ class NotificationService {
   );
 
   /// Channel for trip reminders & live delay alerts ("Zug fährt in 30 Min",
-  /// "Gleiswechsel", "Anschluss gefährdet").
+  /// "Gleiswechsel", "Anschluss gefährdet"). Also carries the gentle "in 10 Min
+  /// bist du da" arrival ping (heads-up + vibration, default sound).
   static const _tripChannel = AndroidNotificationChannel(
     'trip_alerts',
     'Reise-Hinweise',
     description: 'Abfahrts-Erinnerungen, Verspätungen und Umstiege',
     importance: Importance.high,
   );
+
+  /// Loud "Ankunfts-Wecker" channel: the insistent ring shortly before arrival,
+  /// for the user who's dozing and must not miss the stop. Max importance,
+  /// alarm-stream audio (rings even when media is muted), and vibration. The
+  /// channel only governs *whether* sound/vibration play — the looping
+  /// (FLAG_INSISTENT) and "Stoppen" action live on the notification itself.
+  static const _alarmChannel = AndroidNotificationChannel(
+    'arrival_alarm',
+    'Ankunfts-Wecker',
+    description: 'Lauter Wecker kurz bevor du ankommst',
+    importance: Importance.max,
+    playSound: true,
+    enableVibration: true,
+    audioAttributesUsage: AudioAttributesUsage.alarm,
+  );
+
+  /// Android FLAG_INSISTENT (Notification.FLAG_INSISTENT) — loops the alarm
+  /// sound until the notification is dismissed or "Stoppen" is tapped.
+  static const int _flagInsistent = 4;
 
   /// Initialise the plugin, tz database and the Android channels. Call once at
   /// startup. Permission is requested lazily on first post.
@@ -52,15 +74,23 @@ class NotificationService {
         requestBadgePermission: false,
         requestSoundPermission: false,
       );
-      await _plugin.initialize(const InitializationSettings(
-        android: android,
-        iOS: darwin,
-        macOS: darwin,
-      ));
+      await _plugin.initialize(
+        const InitializationSettings(
+          android: android,
+          iOS: darwin,
+          macOS: darwin,
+        ),
+        // Tapping the alarm's "Stoppen" action already dismisses the
+        // notification (cancelNotification: true → kills the insistent loop at
+        // the OS level). The handler just records it; kept tiny because it can
+        // also run when the app cold-starts from a notification tap.
+        onDidReceiveNotificationResponse: _onResponse,
+      );
       final android_ = _plugin.resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin>();
       await android_?.createNotificationChannel(_channel);
       await android_?.createNotificationChannel(_tripChannel);
+      await android_?.createNotificationChannel(_alarmChannel);
       _ready = true;
     } catch (e) {
       AppLog.log('notification init failed ($e)', tag: 'notify');
@@ -181,6 +211,37 @@ class NotificationService {
     }
   }
 
+  /// Schedule the loud "Ankunfts-Wecker" — same scheduling contract as
+  /// [scheduleReminder] (wall-clock [when] in the local zone, [id] >=
+  /// [reminderIdBase], no-op if in the past), but it rings insistently on the
+  /// alarm audio stream and carries a "Stoppen" action so the user can silence
+  /// it the moment it wakes them. Falls back to a heads-up notification if the
+  /// OS denies the full-screen intent.
+  static Future<void> scheduleAlarm({
+    required int id,
+    required DateTime when,
+    required String title,
+    required String body,
+  }) async {
+    if (!_ready) await init();
+    final at = tz.TZDateTime.from(when, tz.local);
+    if (!at.isAfter(tz.TZDateTime.now(tz.local))) return;
+    try {
+      await _plugin.zonedSchedule(
+        id,
+        title,
+        body,
+        at,
+        _alarmDetails(),
+        androidScheduleMode: _exactAlarms
+            ? AndroidScheduleMode.exactAllowWhileIdle
+            : AndroidScheduleMode.inexactAllowWhileIdle,
+      );
+    } catch (e) {
+      AppLog.log('schedule alarm failed ($e)', tag: 'notify');
+    }
+  }
+
   /// Cancel every pending reminder in the reserved id range. The scheduler
   /// calls this before re-scheduling so removed/changed trips don't linger,
   /// even across process restarts (it reconciles the OS's pending list, not an
@@ -213,4 +274,44 @@ class NotificationService {
         iOS: DarwinNotificationDetails(),
         macOS: DarwinNotificationDetails(),
       );
+
+  static NotificationDetails _alarmDetails() => NotificationDetails(
+        android: AndroidNotificationDetails(
+          'arrival_alarm',
+          'Ankunfts-Wecker',
+          channelDescription: 'Lauter Wecker kurz bevor du ankommst',
+          importance: Importance.max,
+          priority: Priority.max,
+          category: AndroidNotificationCategory.alarm,
+          // Show full-screen on the lock screen like an alarm clock. Degrades
+          // to a heads-up banner if USE_FULL_SCREEN_INTENT isn't granted.
+          fullScreenIntent: true,
+          audioAttributesUsage: AudioAttributesUsage.alarm,
+          // Loop the sound until the user dismisses it / taps Stoppen.
+          additionalFlags: Int32List.fromList(<int>[_flagInsistent]),
+          actions: const <AndroidNotificationAction>[
+            AndroidNotificationAction(
+              'stop_alarm',
+              'Stoppen',
+              cancelNotification: true,
+            ),
+          ],
+        ),
+        // iOS can't loop a notification sound; the critical alarm tone is the
+        // closest equivalent for "wake me before my stop".
+        iOS: const DarwinNotificationDetails(
+          interruptionLevel: InterruptionLevel.critical,
+        ),
+        macOS: const DarwinNotificationDetails(
+          interruptionLevel: InterruptionLevel.critical,
+        ),
+      );
+
+  /// Notification (action) tap handler. Insistent alarms are stopped at the OS
+  /// level by the action's `cancelNotification: true`; this only logs.
+  static void _onResponse(NotificationResponse r) {
+    if (r.actionId == 'stop_alarm') {
+      AppLog.log('arrival alarm stopped by user', tag: 'notify');
+    }
+  }
 }

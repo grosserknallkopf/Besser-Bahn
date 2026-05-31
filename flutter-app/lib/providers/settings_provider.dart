@@ -34,6 +34,16 @@ class AppSettings {
   /// Whether to also ping shortly before each connecting train departs.
   final bool transferAlerts;
 
+  /// "Ankunfts-Wecker": ping ~10 Min and ~5 Min before reaching the final
+  /// destination so a dozing rider doesn't miss the stop. Scheduled offline
+  /// from the saved arrival time, like the departure reminders.
+  final bool arrivalAlertEnabled;
+
+  /// Upgrade the 5-Min arrival ping to a loud, looping alarm (alarm volume,
+  /// full-screen) that keeps ringing until stopped. Off by default — opt-in,
+  /// since it's deliberately hard to sleep through.
+  final bool arrivalAlarmSound;
+
   const AppSettings({
     this.bahnCard = BahnCardType.none,
     this.hasDeutschlandTicket = false,
@@ -44,6 +54,8 @@ class AppSettings {
     this.remindersEnabled = true,
     this.reminderLeadMinutes = 30,
     this.transferAlerts = true,
+    this.arrivalAlertEnabled = true,
+    this.arrivalAlarmSound = false,
     this.searchParty = const SearchParty(),
   });
 
@@ -57,6 +69,8 @@ class AppSettings {
     bool? remindersEnabled,
     int? reminderLeadMinutes,
     bool? transferAlerts,
+    bool? arrivalAlertEnabled,
+    bool? arrivalAlarmSound,
     SearchParty? searchParty,
   }) {
     return AppSettings(
@@ -69,6 +83,8 @@ class AppSettings {
       remindersEnabled: remindersEnabled ?? this.remindersEnabled,
       reminderLeadMinutes: reminderLeadMinutes ?? this.reminderLeadMinutes,
       transferAlerts: transferAlerts ?? this.transferAlerts,
+      arrivalAlertEnabled: arrivalAlertEnabled ?? this.arrivalAlertEnabled,
+      arrivalAlarmSound: arrivalAlarmSound ?? this.arrivalAlarmSound,
       searchParty: searchParty ?? this.searchParty,
     );
   }
@@ -95,6 +111,8 @@ class SettingsNotifier extends Notifier<AppSettings> {
       remindersEnabled: prefs.getBool('remindersEnabled') ?? true,
       reminderLeadMinutes: prefs.getInt('reminderLeadMinutes') ?? 30,
       transferAlerts: prefs.getBool('transferAlerts') ?? true,
+      arrivalAlertEnabled: prefs.getBool('arrivalAlertEnabled') ?? true,
+      arrivalAlarmSound: prefs.getBool('arrivalAlarmSound') ?? false,
       // First run (no stored party): seed from the single-card settings so the
       // search behaves exactly as before until the user customises the party.
       searchParty: SearchParty.tryDecode(prefs.getString('searchParty')) ??
@@ -113,6 +131,8 @@ class SettingsNotifier extends Notifier<AppSettings> {
     await prefs.setBool('remindersEnabled', state.remindersEnabled);
     await prefs.setInt('reminderLeadMinutes', state.reminderLeadMinutes);
     await prefs.setBool('transferAlerts', state.transferAlerts);
+    await prefs.setBool('arrivalAlertEnabled', state.arrivalAlertEnabled);
+    await prefs.setBool('arrivalAlarmSound', state.arrivalAlarmSound);
     await prefs.setString('searchParty', state.searchParty.encode());
   }
 
@@ -172,6 +192,16 @@ class SettingsNotifier extends Notifier<AppSettings> {
 
   void setTransferAlerts(bool value) {
     state = state.copyWith(transferAlerts: value);
+    _save();
+  }
+
+  void setArrivalAlertEnabled(bool value) {
+    state = state.copyWith(arrivalAlertEnabled: value);
+    _save();
+  }
+
+  void setArrivalAlarmSound(bool value) {
+    state = state.copyWith(arrivalAlarmSound: value);
     _save();
   }
 }

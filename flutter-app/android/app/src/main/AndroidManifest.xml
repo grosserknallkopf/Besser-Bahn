@@ -14,6 +14,11 @@
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Ankunfts-Wecker: show the loud arrival alarm full-screen on the lock
+         screen (Android 14+ gates this; degrades to a heads-up banner if the
+         OS withholds the grant). VIBRATE for the gentle "in 10 Min" ping. -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+    <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
         android:label="Besser Bahn"
