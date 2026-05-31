@@ -200,6 +200,7 @@ class _ConnectionDetailScreenState
         physics: const AlwaysScrollableScrollPhysics(),
         children: [
           _summary(context),
+          _buyButton(context, ref),
           // Live companion cards (each self-hides when not applicable):
           // Fahrgastrechte claim on a 60+ min late arrival, and one combined
           // pre-departure card (countdown + "wann musst du los") that
@@ -240,6 +241,30 @@ class _ConnectionDetailScreenState
             ],
           ],
         ],
+        ),
+      ),
+    );
+  }
+
+  /// Prominent "Kaufen" call to action. Opens the EXACT connection on bahn.de
+  /// (the `vbid` deep link lands on the booking/checkout page), where the user
+  /// completes the purchase on the official Deutsche-Bahn flow. After buying,
+  /// the Profil tab picks the ticket up automatically on app resume.
+  Widget _buyButton(BuildContext context, WidgetRef ref) {
+    final price = journey.price?.amount;
+    final label = price != null
+        ? 'Kaufen ab ${price.toStringAsFixed(2).replaceAll('.', ',')} €'
+        : 'Auf bahn.de kaufen';
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      child: SizedBox(
+        width: double.infinity,
+        child: FilledButton.icon(
+          icon: const Icon(Icons.shopping_cart_outlined),
+          label: Text(label),
+          style: FilledButton.styleFrom(
+              padding: const EdgeInsets.symmetric(vertical: 14)),
+          onPressed: () => _openOnBahn(context, ref),
         ),
       ),
     );

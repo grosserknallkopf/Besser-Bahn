@@ -10,11 +10,42 @@ import 'widgets/bahncard_view.dart';
 
 /// "Profil" tab — the signed-in DB account: identity, BahnBonus, BahnCards and
 /// booked tickets. Logged out, it shows a single DB-login call to action.
-class ProfileScreen extends ConsumerWidget {
+class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends ConsumerState<ProfileScreen>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Coming back to the app — e.g. after completing a purchase on bahn.de —
+    // re-pull the account data so a freshly bought ticket appears without a
+    // manual refresh.
+    if (state == AppLifecycleState.resumed &&
+        ref.read(dbAuthProvider).isLoggedIn) {
+      ref.invalidate(ticketIndicesProvider);
+      ref.invalidate(bahnbonusProvider);
+      ref.invalidate(bahncardsProvider);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final auth = ref.watch(dbAuthProvider);
 
     return Scaffold(
@@ -25,7 +56,7 @@ class ProfileScreen extends ConsumerWidget {
             IconButton(
               tooltip: 'Abmelden',
               icon: const Icon(Icons.logout),
-              onPressed: () => _confirmLogout(context, ref),
+              onPressed: () => _confirmLogout(context),
             ),
         ],
       ),
@@ -37,7 +68,7 @@ class ProfileScreen extends ConsumerWidget {
     );
   }
 
-  void _confirmLogout(BuildContext context, WidgetRef ref) async {
+  void _confirmLogout(BuildContext context) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
