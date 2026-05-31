@@ -2,6 +2,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/app_log.dart';
 import '../core/platform_train.dart' as pt;
+import '../core/train_dimensions.dart';
 import '../models/coach_sequence.dart';
 import '../models/station.dart';
 import '../models/station_map.dart';
@@ -84,6 +85,19 @@ class StationMapState {
   /// the secondary Gleis. Null when not a transfer.
   final CoachSequence? secondaryCoachSequence;
 
+  /// The train's composition fetched at a stop that HAS Wagenreihung data (its
+  /// origin), used as a fallback to still draw the train where the per-stop
+  /// vehicle-sequence endpoint serves nothing — a regional train's TERMINUS /
+  /// Ausstieg 404s, so we place this known composition on the platform instead
+  /// of a bare line. [secondaryFallbackCoachSequence] is the Ausstieg train's.
+  final CoachSequence? fallbackCoachSequence;
+  final CoachSequence? secondaryFallbackCoachSequence;
+
+  /// Product (ICE/IC/RE…) of the primary/secondary train, for a realistic
+  /// generic-body length when there's no composition at all.
+  final String? product;
+  final String? secondaryProduct;
+
   /// The train this map was opened for, e.g. "RE 7" — shown in the banner so
   /// the map says which train it is. Null for a plain station lookup.
   final String? trainLabel;
@@ -105,6 +119,10 @@ class StationMapState {
     this.secondarySection,
     this.coachSequence,
     this.secondaryCoachSequence,
+    this.fallbackCoachSequence,
+    this.secondaryFallbackCoachSequence,
+    this.product,
+    this.secondaryProduct,
     this.trainLabel,
     this.isLoading = false,
     this.error,
@@ -124,12 +142,17 @@ class StationMapState {
     ({String start, String end})? secondarySection,
     CoachSequence? coachSequence,
     CoachSequence? secondaryCoachSequence,
+    CoachSequence? fallbackCoachSequence,
+    CoachSequence? secondaryFallbackCoachSequence,
+    String? product,
+    String? secondaryProduct,
     String? trainLabel,
     bool clearHighlight = false,
     bool clearSection = false,
     bool clearTransferNote = false,
     bool clearSecondary = false,
     bool clearCoachSequence = false,
+    bool clearFallback = false,
     bool clearTrainLabel = false,
     bool? isLoading,
     String? error,
@@ -165,6 +188,17 @@ class StationMapState {
       secondaryCoachSequence: (clearCoachSequence || clearSecondary)
           ? null
           : (secondaryCoachSequence ?? this.secondaryCoachSequence),
+      fallbackCoachSequence: clearFallback
+          ? null
+          : (fallbackCoachSequence ?? this.fallbackCoachSequence),
+      secondaryFallbackCoachSequence: (clearFallback || clearSecondary)
+          ? null
+          : (secondaryFallbackCoachSequence ??
+              this.secondaryFallbackCoachSequence),
+      product: clearFallback ? null : (product ?? this.product),
+      secondaryProduct: (clearFallback || clearSecondary)
+          ? null
+          : (secondaryProduct ?? this.secondaryProduct),
       trainLabel:
           clearTrainLabel ? null : (trainLabel ?? this.trainLabel),
       isLoading: isLoading ?? this.isLoading,
@@ -229,36 +263,59 @@ class StationMapState {
 
   /// The boarding (Einstieg) train drawn to scale, top-down, on its platform.
   List<({List<LatLng> outline, Coach coach, bool boarding})>
-      get boardingTrainCars =>
-          _trainCarsFor(highlightGleis, highlightSection, coachSequence);
+      get boardingTrainCars => _trainCarsFor(
+          highlightGleis, highlightSection, coachSequence, fallbackCoachSequence);
 
   /// The Ausstieg train on a transfer map — the arriving train on its Gleis.
   List<({List<LatLng> outline, Coach coach, bool boarding})>
-      get secondaryTrainCars => _trainCarsFor(
-          secondaryGleis, secondarySection, secondaryCoachSequence);
+      get secondaryTrainCars => _trainCarsFor(secondaryGleis, secondarySection,
+          secondaryCoachSequence, secondaryFallbackCoachSequence);
 
+  /// Per-car train at [g]: the exact per-stop Wagenreihung when we have it,
+  /// else the train's known composition ([fallback]) placed to scale on this
+  /// platform — for stops the vehicle-sequence endpoint doesn't serve (a
+  /// regional train's Ausstieg/terminus). Empty only when we know neither.
   List<({List<LatLng> outline, Coach coach, bool boarding})> _trainCarsFor(
-      String? g, ({String start, String end})? section, CoachSequence? cs) {
+      String? g,
+      ({String start, String end})? section,
+      CoachSequence? cs,
+      CoachSequence? fallback) {
     final m = map;
-    if (m == null || cs == null || g == null) return const [];
-    return pt.platformTrainCars(m, gleis: g, section: section, cs: cs);
+    if (m == null || g == null) return const [];
+    if (cs != null) {
+      return pt.platformTrainCars(m, gleis: g, section: section, cs: cs);
+    }
+    if (fallback != null) {
+      return pt.platformTrainFromComposition(
+          m, gleis: g, section: section, cs: fallback);
+    }
+    return const [];
   }
 
   /// A single curved train BODY along the boarding Gleis, drawn ONLY when we
-  /// have no Wagenreihung to split into per-Wagen polygons (e.g. an ÖBB RJ that
-  /// the DB coach API doesn't carry) — so the map shows a *train* on the
-  /// platform, not a bare line. Empty when a per-car train is already drawn.
-  List<LatLng> get boardingGenericBody =>
-      _genericBodyFor(highlightGleis, boardingTrainCars.isEmpty);
+  /// have NO composition at all (e.g. an ÖBB RJ the DB coach API never carries)
+  /// — so the map still shows a *train*, not a bare line. Sized to a realistic
+  /// per-product length, NOT the whole platform. Empty once any per-car train
+  /// (exact or composition fallback) is drawn.
+  List<LatLng> get boardingGenericBody => _genericBodyFor(highlightGleis,
+      highlightSection, boardingTrainCars.isEmpty, product);
 
   /// Same, for the Ausstieg (arriving) train's Gleis on a transfer map.
-  List<LatLng> get secondaryGenericBody =>
-      _genericBodyFor(secondaryGleis, secondaryTrainCars.isEmpty);
+  List<LatLng> get secondaryGenericBody => _genericBodyFor(secondaryGleis,
+      secondarySection, secondaryTrainCars.isEmpty, secondaryProduct);
 
-  List<LatLng> _genericBodyFor(String? g, bool noCars) {
+  List<LatLng> _genericBodyFor(String? g, ({String start, String end})? section,
+      bool noCars, String? prod) {
     final m = map;
     if (m == null || g == null || !noCars) return const [];
-    return pt.platformGenericBody(m, gleis: g, highSpeed: _highSpeedLabel);
+    final dims = TrainDimensions.forProduct(prod);
+    return pt.platformGenericBody(
+      m,
+      gleis: g,
+      section: section,
+      lengthM: dims.totalLengthM,
+      highSpeed: _highSpeedLabel,
+    );
   }
 
   /// Best-effort high-speed guess from the train label when we have no
@@ -311,6 +368,10 @@ class StationMapNotifier extends Notifier<StationMapState> {
       ({String category, String trainNumber, DateTime? time})? coachRef,
       ({String category, String trainNumber, DateTime? time})?
           secondaryCoachRef,
+      CoachSequence? fallbackCoachSequence,
+      CoachSequence? secondaryFallbackCoachSequence,
+      String? product,
+      String? secondaryProduct,
       String? trainLabel,
       Set<String>? primaryTypes}) async {
     _primaryTypes = primaryTypes ?? kDefaultPrimaryTypes;
@@ -338,6 +399,16 @@ class StationMapNotifier extends Notifier<StationMapState> {
       // Clear any train from the previous map; this stop's Wagenreihung is
       // fetched fresh below.
       clearCoachSequence: true,
+      // The known composition (from the train's origin) to fall back to where
+      // this stop's per-station Wagenreihung 404s (regional Ausstieg/terminus).
+      fallbackCoachSequence: fallbackCoachSequence,
+      secondaryFallbackCoachSequence: secondaryFallbackCoachSequence,
+      product: product,
+      secondaryProduct: secondaryProduct,
+      clearFallback: fallbackCoachSequence == null &&
+          secondaryFallbackCoachSequence == null &&
+          product == null &&
+          secondaryProduct == null,
       trainLabel: trainLabel,
       clearTrainLabel: trainLabel == null,
       clearHighlight: hl == null,

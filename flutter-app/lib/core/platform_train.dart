@@ -422,7 +422,10 @@ List<({List<LatLng> outline, Coach coach, bool boarding})> platformTrainCars(
     if (idx == null) continue;
     final ci = island.cubes.indexWhere((c) => c.idx == idx);
     if (ci < 0) continue;
-    anchors.add((off: (s.start + s.end) / 2, arc: curve.locate(curvePts[ci])));
+    anchors.add((
+      off: (s.start + s.end) / 2,
+      arc: curve.locate(_nudgedCube(island, island.cubes[ci].pos)),
+    ));
   }
   if (anchors.length < 2) {
     why('<2 sector→cube anchors '
@@ -479,38 +482,197 @@ List<({List<LatLng> outline, Coach coach, bool boarding})> platformTrainCars(
   return out;
 }
 
-/// Ordered (A→I) LatLng points down a platform island's sector cubes, each
-/// nudged onto the boarding rail — the platform's real curved centreline, used
-/// as the spine for both the per-car train and the generic body.
+/// Ordered points down a platform island's sector cubes — each nudged onto the
+/// boarding rail — forming the platform's real curved centreline (the spine for
+/// the per-car, composition and generic bodies).
+///
+/// Robustness matters: a sector cube occasionally gets assigned to the WRONG
+/// track island (the cubes carry no track id), and chaining it in letter order
+/// then yanks the curve 90° across to a neighbouring Gleis (the "ICE jumps to
+/// Gleis A" bug). So we (1) order cubes by their projection ALONG the
+/// platform's own best-fit axis — not by letter, which can be physically out of
+/// order — and (2) drop any cube sitting far off that axis (a stray from
+/// another track). Finally we extend both ends along their tangents so a train
+/// slightly longer than the cube span keeps going straight past the platform
+/// instead of piling up / cutting off.
 List<LatLng> _cubeCurvePts(
-        ({List<({int idx, LatLng pos})> cubes, double dLat, double dLon, PlatformLine? axis}) island) =>
-    [
-      for (final c in island.cubes)
-        LatLng(c.pos.latitude + island.dLat, c.pos.longitude + island.dLon),
-    ];
+    ({List<({int idx, LatLng pos})> cubes, double dLat, double dLon, PlatformLine? axis})
+        island) {
+  final cubes = island.cubes;
+  LatLng nud(LatLng p) =>
+      LatLng(p.latitude + island.dLat, p.longitude + island.dLon);
+  if (cubes.length < 2) return [for (final c in cubes) nud(c.pos)];
+
+  final lat0 =
+      cubes.map((c) => c.pos.latitude).reduce((a, b) => a + b) / cubes.length;
+  const mlat = 111320.0;
+  final mlon = 111320.0 * math.cos(lat0 * math.pi / 180);
+  math.Point<double> xy(LatLng p) => math.Point(p.longitude * mlon, p.latitude * mlat);
+
+  final line = fitLine([for (final c in cubes) xy(c.pos)]);
+  if (line == null) return [for (final c in cubes) nud(c.pos)];
+
+  final entries = [
+    for (final c in cubes)
+      (
+        pos: nud(c.pos),
+        t: (xy(c.pos).x - line.cx) * line.dx + (xy(c.pos).y - line.cy) * line.dy,
+        perp: line.perpDistance(xy(c.pos)),
+      )
+  ];
+  // Drop strays: a cube whose perpendicular offset from the platform axis is
+  // far above the median (cubes on other tracks sit ~10 m+ off). Keep ≥2.
+  final perps = [for (final e in entries) e.perp]..sort();
+  final med = perps[perps.length ~/ 2];
+  var kept = entries.where((e) => e.perp <= med + 6.0).toList();
+  if (kept.length < 2) kept = entries.toList();
+  kept.sort((a, b) => a.t.compareTo(b.t));
+  return _extendEnds([for (final e in kept) e.pos], 60.0);
+}
+
+/// Extend a polyline by [byM] metres beyond each end along its end tangents, so
+/// a body sliced a little past the last vertex keeps going straight instead of
+/// clamping into a stub at the platform end.
+List<LatLng> _extendEnds(List<LatLng> pts, double byM) {
+  if (pts.length < 2) return pts;
+  const mlat = 111320.0;
+  final mlon = 111320.0 * math.cos(pts.first.latitude * math.pi / 180);
+  math.Point<double> xy(LatLng p) => math.Point(p.longitude * mlon, p.latitude * mlat);
+  LatLng ll(math.Point<double> p) => LatLng(p.y / mlat, p.x / mlon);
+  math.Point<double> unit(math.Point<double> d) {
+    final m = d.magnitude;
+    return m == 0 ? const math.Point(1.0, 0.0) : d * (1 / m);
+  }
+  final v = [for (final p in pts) xy(p)];
+  final head = v.first + unit(v.first - v[1]) * byM;
+  final tail = v.last + unit(v.last - v[v.length - 2]) * byM;
+  return [ll(head), ...pts, ll(tail)];
+}
+
+/// The boarding-rail-nudged LatLng of a resolved sector cube.
+LatLng _nudgedCube(
+        ({List<({int idx, LatLng pos})> cubes, double dLat, double dLon, PlatformLine? axis})
+            island,
+        LatLng p) =>
+    LatLng(p.latitude + island.dLat, p.longitude + island.dLon);
+
+/// Place a known train COMPOSITION (coach order + real lengths, from a stop
+/// that HAS a Wagenreihung) onto ANOTHER stop's platform — for stops the
+/// per-station vehicle-sequence endpoint doesn't serve. A regional train's
+/// TERMINUS arrival 404s on that endpoint (regional formation is published per
+/// *departure* only), though the same train's departure is fine — so at the
+/// destination we'd otherwise have no train. We can't know which sector each
+/// coach hits there, but the order + lengths are train-wide, so we draw the
+/// train to its real length, in order, curved along the cubes, centred on the
+/// highlighted boarding section (where it stops) or the platform centre.
+List<({List<LatLng> outline, Coach coach, bool boarding})>
+    platformTrainFromComposition(
+  StationMap map, {
+  required String gleis,
+  ({String start, String end})? section,
+  required CoachSequence cs,
+}) {
+  final coaches = cs.allCoaches
+      .where((c) => c.platformPosition != null && c.platformPosition!.length > 0)
+      .toList();
+  if (coaches.isEmpty) return const [];
+  final plat = _platformForGleis(map, gleis);
+  if (plat == null) return const [];
+  final island = resolveIsland(map, plat, gleis, 0, 8);
+  if (island.cubes.length < 2) return const [];
+  final curvePts = _cubeCurvePts(island);
+  final curve = RoutePath.build(curvePts);
+  if (curve == null) return const [];
+
+  final lens = [for (final c in coaches) c.platformPosition!.length];
+  final total = lens.fold(0.0, (a, b) => a + b);
+  if (total <= 0) return const [];
+
+  final highSpeed = isHighSpeedCoach(cs);
+  final hw = (highSpeed ? 2.95 : 2.85) / 2;
+  final noseLen = highSpeed ? 5.0 : 2.5;
+
+  final startArc = _anchorStartArc(curve, island, section, total);
+  final out = <({List<LatLng> outline, Coach coach, bool boarding})>[];
+  var off = startArc;
+  for (var i = 0; i < coaches.length; i++) {
+    final spine = curve.slice(off, off + lens[i]);
+    off += lens[i];
+    final outline = TrainGeometry.body(
+      spine,
+      halfWidthM: hw,
+      noseStart: i == 0,
+      noseEnd: i == coaches.length - 1,
+      noseLenM: noseLen,
+    );
+    if (outline.length >= 3) {
+      out.add((outline: outline, coach: coaches[i], boarding: true));
+    }
+  }
+  return out;
+}
 
 /// A single to-scale train BODY (curved along the platform's sector cubes) for
-/// when there is NO Wagenreihung to split into per-Wagen polygons — so the map
-/// still shows a *train* standing at the Gleis (bent to the platform, rounded
-/// snouts), not a bare line. The caller still draws the sector letters so the
-/// rider sees the boarding Abschnitt. Empty when the Gleis/island can't be
-/// resolved.
+/// when there is NO Wagenreihung at all — so the map still shows a *train*
+/// standing at the Gleis (bent to the platform, rounded snouts), not a bare
+/// line. Drawn to [lengthM] (a realistic per-product length) and centred on the
+/// boarding [section], NOT spanning the whole platform — a too-long body reads
+/// as wrong. Empty when the Gleis/island can't be resolved.
 List<LatLng> platformGenericBody(
   StationMap map, {
   required String gleis,
+  ({String start, String end})? section,
+  required double lengthM,
   bool highSpeed = false,
 }) {
   final plat = _platformForGleis(map, gleis);
   if (plat == null) return const [];
   final island = resolveIsland(map, plat, gleis, 0, 8);
   if (island.cubes.length < 2) return const [];
+  final curvePts = _cubeCurvePts(island);
+  final curve = RoutePath.build(curvePts);
+  if (curve == null) return const [];
+  final len = lengthM <= 0 ? curve.length : math.min(lengthM, curve.length);
+  final startArc = _anchorStartArc(curve, island, section, len);
   return TrainGeometry.body(
-    _cubeCurvePts(island),
+    curve.slice(startArc, startArc + len),
     halfWidthM: (highSpeed ? 2.95 : 2.85) / 2,
     noseStart: true,
     noseEnd: true,
     noseLenM: highSpeed ? 5.0 : 2.5,
   );
+}
+
+/// Arc-length where a body of [lengthM] should START so it sits centred on the
+/// highlighted [section]'s cubes (where the train actually stops), or the
+/// platform centre when there's no section — clamped to keep the body on the
+/// platform when it fits.
+double _anchorStartArc(
+  RoutePath curve,
+  ({List<({int idx, LatLng pos})> cubes, double dLat, double dLon, PlatformLine? axis}) island,
+  ({String start, String end})? section,
+  double lengthM,
+) {
+  double centerArc = curve.length / 2;
+  if (section != null) {
+    final s = letterIdx(section.start), e = letterIdx(section.end);
+    if (s != null && e != null) {
+      final lo = math.min(s, e), hi = math.max(s, e);
+      final arcs = <double>[];
+      for (final c in island.cubes) {
+        if (c.idx >= lo && c.idx <= hi) {
+          arcs.add(curve.locate(_nudgedCube(island, c.pos)));
+        }
+      }
+      if (arcs.isNotEmpty) {
+        centerArc = arcs.reduce((a, b) => a + b) / arcs.length;
+      }
+    }
+  }
+  var start = centerArc - lengthM / 2;
+  final maxStart = curve.length - lengthM;
+  if (maxStart > 0) start = start.clamp(0.0, maxStart);
+  return start;
 }
 
 /// The platform POI whose normalised name matches [gleis], or null.

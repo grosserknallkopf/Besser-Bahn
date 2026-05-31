@@ -43,8 +43,10 @@ void main() {
     expect(gleis, isNotEmpty, reason: 'expected a Gleis with ≥2 sector cubes');
 
     // Without a Wagenreihung we still get a single closed polygon (a train
-    // body), curved along the platform — not a bare line.
-    final outline = pt.platformGenericBody(map, gleis: gleis);
+    // body), curved along the platform, sized to a realistic length — not a
+    // bare line nor the whole platform.
+    final outline =
+        pt.platformGenericBody(map, gleis: gleis, lengthM: 140);
     expect(outline.length, greaterThanOrEqualTo(3),
         reason: 'generic body is a closed ring');
   });

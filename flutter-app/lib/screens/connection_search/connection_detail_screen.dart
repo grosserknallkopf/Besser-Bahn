@@ -663,6 +663,8 @@ class _ConnectionDetailScreenState
                         time: _liveArrivalOf(prev) ?? prev.arrival,
                       )
                     : null,
+                product: next?.line?.product, // Einstieg (primary)
+                secondaryProduct: prev?.line?.product, // Ausstieg (secondary)
                 primaryTypes: {
                   ...primaryPoiTypesForProduct(prev?.line?.product),
                   ...primaryPoiTypesForProduct(next?.line?.product),
@@ -677,6 +679,8 @@ class _ConnectionDetailScreenState
       String? arrGleis, String? depGleis,
       {({String category, String trainNumber, DateTime? time})? depRef,
       ({String category, String trainNumber, DateTime? time})? arrRef,
+      String? product,
+      String? secondaryProduct,
       Set<String>? primaryTypes}) {
     final note = (arrGleis != null && depGleis != null)
         ? 'Ausstieg Gleis $arrGleis · Einstieg Gleis $depGleis'
@@ -693,6 +697,10 @@ class _ConnectionDetailScreenState
           secondaryRole: GleisRole.alight,
           coachRef: depRef, // departing train
           secondaryCoachRef: arrRef, // arriving train
+          // Products → a realistically-sized generic body where a train has no
+          // per-stop Wagenreihung (best-effort, vs a too-long bare line).
+          product: product,
+          secondaryProduct: secondaryProduct,
           transferNote: note,
           primaryTypes: primaryTypes,
         );
@@ -738,6 +746,8 @@ class _ConnectionDetailScreenState
                 station,
                 arrGleis,
                 depGleis,
+                product: next.line?.product, // Einstieg (primary)
+                secondaryProduct: prev.line?.product, // Ausstieg (secondary)
                 primaryTypes: {
                   ...primaryPoiTypesForProduct(prev.line?.product),
                   ...primaryPoiTypesForProduct(next.line?.product),
@@ -1074,6 +1084,11 @@ class _LegSectionState extends ConsumerState<_LegSection>
                   time: stop.departure ?? stop.arrival,
                 )
               : null,
+          // The leg's composition (fetched at its origin) — the fallback so we
+          // can still draw the train at a stop the per-station Wagenreihung
+          // endpoint doesn't serve (a regional train's terminus/Ausstieg 404s).
+          fallbackCoachSequence: coach,
+          product: leg.line?.product,
           trainLabel: leg.line?.name,
           transferNote: transferNote,
           primaryTypes: primaryPoiTypesForProduct(leg.line?.product),
