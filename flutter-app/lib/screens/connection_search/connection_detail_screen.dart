@@ -23,6 +23,7 @@ import '../../services/db_api_service.dart';
 import '../../widgets/departure_card.dart';
 import '../../widgets/fahrgastrechte_card.dart';
 import '../../widgets/prediction_badge.dart';
+import '../../widgets/product_badge.dart';
 import '../../widgets/trip_progress_inline.dart';
 import '../../widgets/trwl_checkin_sheet.dart';
 import '../train_lookup/widgets/train_detail_view.dart';
@@ -1135,8 +1136,12 @@ class _LegSectionState extends ConsumerState<_LegSection>
         ),
       );
     }
-    // Loading / fallback: still show the leg summary so the user sees the train.
+    // Loading / fallback: getTrip can fail for non-DB-operated trains (ÖBB
+    // Railjet, Flixtrain, a Fernbus) — still show the leg with the SAME circled
+    // product badge as the live header, built from the leg's own line data, so
+    // every product gets its "[RJX] 69"-style badge, not just RE/ICE.
     final leg = widget.leg;
+    final line = leg.line;
     return Card(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: ListTile(
@@ -1144,8 +1149,10 @@ class _LegSectionState extends ConsumerState<_LegSection>
             ? const SizedBox(
                 width: 20, height: 20,
                 child: CircularProgressIndicator(strokeWidth: 2))
-            : const Icon(Icons.train),
-        title: Text(leg.line?.displayName ?? 'Zug'),
+            : (line != null
+                ? ProductBadge(label: line.productBadge)
+                : const Icon(Icons.train)),
+        title: Text(line != null ? line.lineNumberWithFahrt : 'Zug'),
         subtitle: Text(
             '${leg.origin.name} → ${leg.destination.name}'
             '${leg.direction != null ? '  ·  Richtung ${leg.direction}' : ''}'),

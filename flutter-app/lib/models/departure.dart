@@ -155,6 +155,29 @@ class TransitLine {
     return '$base ($nr)';
   }
 
+  /// Short product code for the circled badge — ALWAYS non-empty for a real
+  /// service, so non-DB operators (ÖBB "RJX", Flixtrain "FLX", a Fernbus) get a
+  /// badge too, not just RE/ICE. Prefers the explicit product short text, else
+  /// the alphabetic prefix of the line name ("RJX 69" → "RJX"), else a generic
+  /// label from the coarse product class ("BUS", "U", "S", …).
+  String get productBadge {
+    final pn = productName.trim();
+    if (pn.isNotEmpty) return pn.toUpperCase();
+    final m = RegExp(r'^([A-Za-zÄÖÜäöü]{1,5})').firstMatch(name.trim());
+    if (m != null) return m.group(1)!.toUpperCase();
+    return switch (product) {
+      'nationalExpress' => 'ICE',
+      'national' => 'IC',
+      'regional' => 'RB',
+      'suburban' => 'S',
+      'subway' => 'U',
+      'tram' => 'STR',
+      'bus' => 'BUS',
+      'ferry' => 'FÄHRE',
+      _ => 'ZUG',
+    };
+  }
+
   /// Same line but with a different label (the real line, e.g. "RE7"), carried
   /// over from a departure/leg into a freshly fetched trip whose API omits it.
   TransitLine withName(String newName) => TransitLine(

@@ -3,6 +3,7 @@ import '../../../models/coach_sequence.dart';
 import '../../../models/journey.dart' show OccupancyLevel;
 import '../../../models/trip.dart';
 import '../../../widgets/occupancy_indicator.dart';
+import '../../../widgets/product_badge.dart';
 import 'train_map_view.dart';
 
 class TrainInfoHeader extends StatelessWidget {
@@ -77,7 +78,7 @@ class TrainInfoHeader extends StatelessWidget {
             // Train name and direction
             Row(
               children: [
-                _productBadge(context, trip.line.productName),
+                ProductBadge(label: trip.line.productBadge),
                 const SizedBox(width: 8),
                 Expanded(
                   // Product lives in the badge; show the line number plus the
@@ -155,36 +156,6 @@ class TrainInfoHeader extends StatelessWidget {
               ),
             ],
       ],
-    );
-  }
-
-  Widget _productBadge(BuildContext context, String product) {
-    final color = switch (product.toUpperCase()) {
-      'ICE' => Colors.white,
-      'IC' || 'EC' => Colors.grey.shade200,
-      _ => Theme.of(context).colorScheme.primaryContainer,
-    };
-    final textColor = switch (product.toUpperCase()) {
-      'ICE' => Colors.red.shade700,
-      'IC' || 'EC' => Colors.grey.shade700,
-      _ => Theme.of(context).colorScheme.onPrimaryContainer,
-    };
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color,
-        borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: textColor.withAlpha(60)),
-      ),
-      child: Text(
-        product.toUpperCase(),
-        style: TextStyle(
-          color: textColor,
-          fontSize: 12,
-          fontWeight: FontWeight.bold,
-        ),
-      ),
     );
   }
 

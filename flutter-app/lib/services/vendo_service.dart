@@ -570,6 +570,7 @@ class VendoService {
       case 'SBAHN':
         return 'suburban';
       case 'BUS':
+      case 'SONSTIGE': // long-distance Fernbus (Flixbus) — no rail category
         return 'bus';
       case 'U':
       case 'UBAHN':
