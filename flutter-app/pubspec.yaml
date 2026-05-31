@@ -30,6 +30,7 @@ dependencies:
   timezone: ^0.10.0              # tz-aware scheduling for trip reminders
   flutter_timezone: ^4.1.1       # device local time zone for zonedSchedule
   vector_map_tiles: 9.0.0-beta.8
+  connectivity_plus: ^6.1.0      # offline detection → offline banner / cached-data mode
 
 dev_dependencies:
   flutter_test:

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../widgets/offline_banner.dart';
+
 class HomeScreen extends StatelessWidget {
   final Widget child;
 
@@ -20,7 +22,14 @@ class HomeScreen extends StatelessWidget {
       // Don't lift the bottom nav bar above the soft keyboard — it should sit
       // behind it. Per-tab scaffolds keep their own resize behaviour.
       resizeToAvoidBottomInset: false,
-      body: child,
+      // Offline strip sits above the active tab (collapses to nothing online),
+      // so the user always knows when they're on cached data.
+      body: Column(
+        children: [
+          const OfflineBanner(),
+          Expanded(child: child),
+        ],
+      ),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _currentIndex(context),
         onDestinationSelected: (index) {
