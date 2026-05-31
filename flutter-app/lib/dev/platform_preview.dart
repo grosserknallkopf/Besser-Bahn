@@ -210,6 +210,9 @@ class _PreviewPageState extends State<_PreviewPage> {
   List<({String ref, List<LatLng> pts})> _osmPlatforms = const [];
   List<List<LatLng>> _osmRails = const [];
 
+  /// Diagnostic string from the last [_railFromEdge] call, shown in the banner.
+  String _railDiag = '';
+
   @override
   void initState() {
     super.initState();
@@ -352,24 +355,30 @@ class _PreviewPageState extends State<_PreviewPage> {
     return avg(e1) <= avg(e2) ? e1 : e2; // the edge on this Gleis's track side
   }
 
-  /// The actual rail the train rides. The platform track-side [edge] sits a
-  /// metre or two off the rail centre-line; the train must sit ON the rail, not
-  /// on the platform lip. Pick the OSM `railway=rail` way closest to [edge],
-  /// trim it to the platform's extent (project [edge]'s ends onto the rail and
-  /// keep the span between), resample, and orient it to match [edge]. Falls
-  /// back to [edge] if no rail is near enough.
-  List<LatLng> _railSpine(List<LatLng> edge, List<List<LatLng>> rails) {
-    if (edge.length < 2 || rails.isEmpty) return edge;
+  /// The actual rail the train rides. The platform track-side [edge] is the
+  /// platform LIP; the rail for this Gleis runs ~1–3 m off it, mapped in OSM as
+  /// several short `railway=rail` fragments (a long station-throat way is split
+  /// at every switch). So instead of picking one whole way, gather EVERY rail
+  /// vertex within [tol] m of [edge] (that captures this Gleis's rail and skips
+  /// the neighbour track ~8 m away on the platform's other lip), order them by
+  /// arc-position ALONG the edge (merging the fragments into one monotone line),
+  /// and resample → a clean rail centre-line. Falls back to [edge] if too few.
+  List<LatLng> _railFromEdge(List<LatLng> edge, List<List<LatLng>> rails,
+      {double tol = 4.0}) {
+    if (edge.length < 2 || rails.isEmpty) {
+      _railDiag = 'KANTE (keine Rails)';
+      return edge;
+    }
     final mlon = 111320.0 * math.cos(edge.first.latitude * math.pi / 180);
     math.Point<double> xy(LatLng p) =>
         math.Point(p.longitude * mlon, p.latitude * 111320.0);
 
-    // Nearest distance from point [p] to a polyline, plus the arc-length
-    // position of that foot along the polyline.
-    ({double dist, double s}) nearestOn(math.Point<double> p, List<LatLng> ln) {
+    // Perpendicular distance from [p] to the edge polyline + arc-length of the
+    // foot along the edge (so we can order picked rail points along the track).
+    ({double dist, double s}) nearestOnEdge(math.Point<double> p) {
       var best = double.infinity, bestS = 0.0, acc = 0.0;
-      for (var i = 0; i < ln.length - 1; i++) {
-        final a = xy(ln[i]), b = xy(ln[i + 1]);
+      for (var i = 0; i < edge.length - 1; i++) {
+        final a = xy(edge[i]), b = xy(edge[i + 1]);
         final ab = b - a;
         final len2 = ab.x * ab.x + ab.y * ab.y;
         final t = len2 > 0
@@ -386,63 +395,25 @@ class _PreviewPageState extends State<_PreviewPage> {
       return (dist: best, s: bestS);
     }
 
-    // Pick the rail with the smallest average distance to the edge points.
-    List<LatLng>? bestRail;
-    var bestAvg = double.infinity;
+    final picked = <({double s, LatLng p})>[];
     for (final r in rails) {
-      if (r.length < 2) continue;
-      var s = 0.0;
-      for (final p in edge) {
-        s += nearestOn(xy(p), r).dist;
-      }
-      final a = s / edge.length;
-      if (a < bestAvg) {
-        bestAvg = a;
-        bestRail = r;
+      for (final q in r) {
+        final n = nearestOnEdge(xy(q));
+        if (n.dist <= tol) picked.add((s: n.s, p: q));
       }
     }
-    // Rails near a platform sit ~1–3 m off the lip; anything beyond ~8 m is a
-    // different track — keep the platform edge rather than jump tracks.
-    if (bestRail == null || bestAvg > 8.0) return edge;
-
-    // Trim the (possibly station-long) rail to the platform's own extent.
-    final sA = nearestOn(xy(edge.first), bestRail).s;
-    final sB = nearestOn(xy(edge.last), bestRail).s;
-    final lo = math.min(sA, sB), hi = math.max(sA, sB);
-    final acc = <double>[0];
-    for (var i = 0; i < bestRail.length - 1; i++) {
-      acc.add(acc.last + (xy(bestRail[i + 1]) - xy(bestRail[i])).magnitude);
+    if (picked.length < 4) {
+      _railDiag = 'KANTE (nur ${picked.length} Rail-Pkt ≤${tol.toStringAsFixed(0)}m)';
+      return edge;
     }
-    final sub = <LatLng>[];
-    for (var i = 0; i < bestRail.length; i++) {
-      if (acc[i] >= lo && acc[i] <= hi) sub.add(bestRail[i]);
-    }
-    if (sub.length < 2) return edge;
-    final spine = _resample(sub, 28);
+    picked.sort((a, b) => a.s.compareTo(b.s));
+    final spine = _resample([for (final e in picked) e.p], 40);
+    _railDiag = 'SCHIENE ✓ (${picked.length} Pkt ≤${tol.toStringAsFixed(0)}m → 40)';
     // Orient to match the edge so nose start/end land on the right ends.
-    double d(LatLng a, LatLng b) =>
-        (xy(a) - xy(b)).magnitude;
+    double d(LatLng a, LatLng b) => (xy(a) - xy(b)).magnitude;
     return d(spine.first, edge.first) <= d(spine.last, edge.first)
         ? spine
         : spine.reversed.toList();
-  }
-
-  /// Extend a line by [m] metres beyond each end along its end tangents.
-  List<LatLng> _extendEnds(List<LatLng> pts, double m) {
-    if (pts.length < 2) return pts;
-    final mlon = 111320.0 * math.cos(pts.first.latitude * math.pi / 180);
-    math.Point<double> xy(LatLng p) =>
-        math.Point(p.longitude * mlon, p.latitude * 111320.0);
-    LatLng ll(math.Point<double> p) => LatLng(p.y / 111320.0, p.x / mlon);
-    math.Point<double> unit(math.Point<double> d) {
-      final mag = d.magnitude;
-      return mag == 0 ? const math.Point(1.0, 0.0) : d * (1 / mag);
-    }
-
-    final v = [for (final p in pts) xy(p)];
-    final head = v.first + unit(v.first - v[1]) * m;
-    final tail = v.last + unit(v.last - v[v.length - 2]) * m;
-    return [ll(head), ...pts, ll(tail)];
   }
 
   /// Nearest point on polyline [line] to [p] — used to place each sector letter
@@ -497,10 +468,10 @@ class _PreviewPageState extends State<_PreviewPage> {
     final osmEdge = osmPlat.isNotEmpty
         ? _osmTrackLine(osmPlat.first.pts, cubeSide)
         : const <LatLng>[];
-    // The platform edge sits a metre or two off the rail; snap to the actual
-    // rail centre-line so the train rides ON the track, not on the platform lip.
+    // The platform edge is the lip; the train must ride the rail ~1–3 m off it.
+    // Gather this Gleis's rail vertices along the edge → real rail centre-line.
     final osmCenter =
-        osmEdge.length >= 2 ? _railSpine(osmEdge, _osmRails) : osmEdge;
+        osmEdge.length >= 2 ? _railFromEdge(osmEdge, _osmRails) : osmEdge;
 
     // SECTORS on the line: the DB cube letters (correct A→I sequence from the
     // peeled chain) projected onto the exact OSM track line — "wo Abschnitt A,
@@ -530,10 +501,11 @@ class _PreviewPageState extends State<_PreviewPage> {
     // EVERY sector cube + EVERY Gleis label on this floor (like the DB plan),
     // regardless of the selected Gleis.
     final levelPois = _map.poisOnLevel(level);
-    final allSectors = levelPois.where((p) => p.isPlatformSector).toList();
     final allGleise = levelPois.where((p) => p.isPlatform).toList();
 
-    final label = 'Gleis $_gleis · Zug auf OSM-Linie · Sektoren A–I';
+    final label = 'Gleis $_gleis · Kante ${osmEdge.length} Pkt · '
+        'Zug: ${_railDiag.isEmpty ? "—" : _railDiag} · '
+        'Sektoren ${sectorMarks.length}';
 
     final center = osmCenter.length >= 2
         ? osmCenter[osmCenter.length ~/ 2]
@@ -602,16 +574,7 @@ class _PreviewPageState extends State<_PreviewPage> {
                           strokeWidth: 1,
                           color: Colors.lightBlue.withValues(alpha: 0.45)),
                   ]),
-                // The OSM track line for this Gleis (green) — OSM's exact curve,
-                // extended past both ends. THE line the train rides.
-                if (_showOsm && osmCenter.length >= 2)
-                  PolylineLayer(polylines: [
-                    Polyline(
-                        points: _extendEnds(osmCenter, 50),
-                        strokeWidth: 3,
-                        color: Colors.green),
-                  ]),
-                // The train body — built on the OSM track line (osmCenter).
+                // The train body — built on the OSM rail centre-line (osmCenter).
                 if (body.length >= 3)
                   PolygonLayer(polygons: [
                     Polygon(
@@ -641,29 +604,6 @@ class _PreviewPageState extends State<_PreviewPage> {
                                 color: Colors.black,
                                 fontSize: 11,
                                 fontWeight: FontWeight.w900)),
-                      ),
-                    ),
-                ]),
-                // EVERY sector cube on this floor, each with a UNIQUE ID
-                // (letter·index) so we can refer to a specific one ("the right F
-                // is F·14") — there are many cubes per letter across platforms.
-                MarkerLayer(markers: [
-                  for (var i = 0; i < allSectors.length; i++)
-                    Marker(
-                      point: allSectors[i].latLng,
-                      width: 34,
-                      height: 16,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.6),
-                          borderRadius: BorderRadius.circular(3),
-                        ),
-                        alignment: Alignment.center,
-                        child: Text('${allSectors[i].name}·$i',
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 9,
-                                fontWeight: FontWeight.bold)),
                       ),
                     ),
                 ]),
