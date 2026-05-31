@@ -3,7 +3,6 @@ import 'dart:typed_data';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_tile_caching/flutter_map_tile_caching.dart';
-import 'package:vector_map_tiles/vector_map_tiles.dart';
 
 import 'app_log.dart';
 
@@ -104,98 +103,26 @@ class TileCache {
     }
   }
 
-  /// OpenFreeMap "Positron" — the clean light-grey Positron look the user likes,
-  /// served as VECTOR tiles, which means labels use local names (German in
-  /// Germany: Bayern/München, not CARTO's "Bavaria"). Free, no API key, no usage
-  /// limit. Vector → rendered with vector_map_tiles.
-  static const String _styleUri =
-      'https://tiles.openfreemap.org/styles/positron';
-
-  /// CARTO Positron raster — fallback shown while the vector style loads on the
-  /// first map of a session, and if OpenFreeMap is unreachable. Keyless.
-  static const String _fallbackTileUrl =
+  /// CARTO "Positron" raster tiles — same clean light-grey look, but plain PNG
+  /// RASTER instead of vector. Raster renders far lighter: the GPU just blits
+  /// ready images, whereas vector tiles re-rasterise geometry on the CPU every
+  /// pan/zoom — which was the "ultra slow" map rendering, brutal on desktop GL.
+  /// Keyless, multi-subdomain CDN, no style JSON to fetch → opens instantly.
+  static const String _positronRaster =
       'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png';
 
-  static Future<Style>? _styleFuture;
-  static Style? _style; // resolved style, cached so later maps skip the fetch
-
-  /// Start loading the vector style NOW (fire-and-forget), so the FIRST map the
-  /// rider opens already has it ready instead of paying the ~5 s fetch then.
-  /// Called once at app startup. Errors are swallowed (falls back to raster).
-  static void warmStyle() {
-    _loadStyle().then((_) {}).catchError((_) {});
-  }
-
-  static Future<Style> _loadStyle() {
-    final sw = Stopwatch()..start();
-    return _styleFuture ??= StyleReader(uri: _styleUri)
-        .read()
-        // Generous timeout: this is warmed at startup in the background (not
-        // blocking any map), and on a congested link the style legitimately
-        // takes ~6 s — cutting it shorter would needlessly drop to the raster
-        // fallback. A normal device resolves it in 1-2 s.
-        .timeout(const Duration(seconds: 12))
-        .then((s) {
-      _style = s;
-      AppLog.log('vector basemap style loaded in ${sw.elapsedMilliseconds}ms',
-          tag: 'map');
-      return s;
-    }).catchError((e) {
-      // The vector style failing = the map shows the CARTO raster fallback (or
-      // nothing offline). A frequent cause of "the map is blank / lahm", so log
-      // it loudly instead of swallowing.
-      AppLog.log('vector basemap style FAILED after ${sw.elapsedMilliseconds}ms '
-          '($e) → raster fallback', tag: 'map');
-      throw e;
-    });
-  }
-
-  /// The shared outdoor base layer. Renders the German OpenFreeMap Positron
-  /// vector style (warmed at startup, so usually ready instantly). While the
-  /// style is still loading we show a PLAIN background — NOT the CARTO raster —
-  /// because hitting a second tile host during the load window just doubles the
-  /// request load (and storms when that host is unreachable). Only if the vector
-  /// style permanently FAILS do we fall back to the CARTO raster as a last
-  /// resort.
-  static Widget outdoorLayer() {
-    final ready = _style;
-    if (ready != null) return _vectorLayer(ready);
-    return FutureBuilder<Style>(
-      future: _loadStyle(),
-      builder: (context, snap) {
-        if (snap.data != null) return _vectorLayer(snap.data!);
-        if (snap.hasError) return _rasterFallback(); // vector dead → raster
-        return const SizedBox.shrink(); // still loading → plain bg, no storm
-      },
-    );
-  }
-
-  static Widget _vectorLayer(Style style) => VectorTileLayer(
-        theme: style.theme,
-        sprites: style.sprites,
-        tileProviders: style.providers,
-        fileCacheTtl: const Duration(days: 30),
-        maximumZoom: 20,
-        // Render tiles to images (vs. live canvas) — smoother and lighter, and
-        // works everywhere incl. desktop.
-        layerMode: VectorTileLayerMode.raster,
-      );
-
-  static TileLayer _rasterFallback() => TileLayer(
-        urlTemplate: _fallbackTileUrl,
+  /// The shared outdoor base layer for every map. Plain raster — no style fetch,
+  /// no vector rasterisation, so it opens immediately and pans smoothly.
+  static Widget outdoorLayer() => TileLayer(
+        urlTemplate: _positronRaster,
         subdomains: const ['a', 'b', 'c', 'd'],
         userAgentPackageName: 'de.chuk.besserebahn',
         tileProvider: provider(),
         maxZoom: 20,
-        // A missing tile (cache miss + no/slow connection) makes FMTC throw a
-        // FMTCBrowsingError per tile. flutter_map's default handler dumps EACH
-        // one to the console → the endless red error block the user saw. Swallow
-        // it (log once, throttled) and drop the failed tile so it can retry.
+        // Failed tile → transparent (no red FMTCBrowsingError dump); feed the
+        // circuit breaker + the quiet [tiles] timeline.
         evictErrorTileStrategy: EvictErrorTileStrategy.notVisible,
-        // Show a transparent tile on failure so the error never reaches the
-        // console at all (no red FMTCBrowsingError dump).
         errorImage: MemoryImage(_transparentTile),
-        // Feed the circuit breaker + the quiet [tiles] timeline.
         errorTileCallback: (_, error, _) {
           noteTileFailure();
           AppLog.tileError(error.toString());
