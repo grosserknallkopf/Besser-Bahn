@@ -75,7 +75,7 @@ class NotificationService {
         requestSoundPermission: false,
       );
       await _plugin.initialize(
-        const InitializationSettings(
+        settings: const InitializationSettings(
           android: android,
           iOS: darwin,
           macOS: darwin,
@@ -104,7 +104,8 @@ class NotificationService {
   static Future<void> _initTimeZone() async {
     tzdata.initializeTimeZones();
     try {
-      tz.setLocalLocation(tz.getLocation(await FlutterTimezone.getLocalTimezone()));
+      tz.setLocalLocation(
+          tz.getLocation((await FlutterTimezone.getLocalTimezone()).identifier));
     } catch (_) {
       try {
         tz.setLocalLocation(tz.getLocation('Europe/Berlin'));
@@ -169,7 +170,8 @@ class NotificationService {
       );
       // Stable id → a fresh result replaces the previous notification rather
       // than stacking.
-      await _plugin.show(1001, title, body, details);
+      await _plugin.show(
+          id: 1001, title: title, body: body, notificationDetails: details);
     } catch (e) {
       AppLog.log('notification show failed ($e)', tag: 'notify');
     }
@@ -188,7 +190,11 @@ class NotificationService {
     if (!_ready) await init();
     await _ensurePermission();
     try {
-      await _plugin.show(2000 + (id % 1000), title, body, _tripDetails());
+      await _plugin.show(
+          id: 2000 + (id % 1000),
+          title: title,
+          body: body,
+          notificationDetails: _tripDetails());
     } catch (e) {
       AppLog.log('trip alert show failed ($e)', tag: 'notify');
     }
@@ -206,7 +212,11 @@ class NotificationService {
     if (!_ready) await init();
     await _ensurePermission();
     try {
-      await _plugin.show(3000 + (id % 1000), title, body, _alarmDetails());
+      await _plugin.show(
+          id: 3000 + (id % 1000),
+          title: title,
+          body: body,
+          notificationDetails: _alarmDetails());
     } catch (e) {
       AppLog.log('exit alarm show failed ($e)', tag: 'notify');
     }
@@ -227,11 +237,11 @@ class NotificationService {
     if (!at.isAfter(tz.TZDateTime.now(tz.local))) return;
     try {
       await _plugin.zonedSchedule(
-        id,
-        title,
-        body,
-        at,
-        _tripDetails(),
+        id: id,
+        title: title,
+        body: body,
+        scheduledDate: at,
+        notificationDetails: _tripDetails(),
         androidScheduleMode: _exactAlarms
             ? AndroidScheduleMode.exactAllowWhileIdle
             : AndroidScheduleMode.inexactAllowWhileIdle,
@@ -258,11 +268,11 @@ class NotificationService {
     if (!at.isAfter(tz.TZDateTime.now(tz.local))) return;
     try {
       await _plugin.zonedSchedule(
-        id,
-        title,
-        body,
-        at,
-        _alarmDetails(),
+        id: id,
+        title: title,
+        body: body,
+        scheduledDate: at,
+        notificationDetails: _alarmDetails(),
         androidScheduleMode: _exactAlarms
             ? AndroidScheduleMode.exactAllowWhileIdle
             : AndroidScheduleMode.inexactAllowWhileIdle,
@@ -281,7 +291,7 @@ class NotificationService {
     try {
       final pending = await _plugin.pendingNotificationRequests();
       for (final p in pending) {
-        if (p.id >= reminderIdBase) await _plugin.cancel(p.id);
+        if (p.id >= reminderIdBase) await _plugin.cancel(id: p.id);
       }
     } catch (e) {
       AppLog.log('cancel reminders failed ($e)', tag: 'notify');

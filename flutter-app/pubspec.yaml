@@ -15,7 +15,7 @@ dependencies:
   go_router: ^17.2.3
   http: ^1.6.0
   url_launcher: ^6.3.2
-  share_plus: ^11.0.0            # system share sheet for "Reise teilen" links
+  share_plus: ^12.0.2            # system share sheet for "Reise teilen" links
   flutter_map: ^8.3.0
   latlong2: ^0.9.1
   geolocator: ^14.0.0           # device GPS for "Mein Standort" on the map
@@ -27,11 +27,13 @@ dependencies:
   flutter_secure_storage: ^10.3.1 # access/refresh token storage
   crypto: ^3.0.7                 # PKCE code challenge (SHA-256)
   flutter_map_tile_caching: ^10.1.1
-  flutter_local_notifications: ^19.0.0  # "Split-Ticket fertig" OS notification
-  timezone: ^0.10.0              # tz-aware scheduling for trip reminders
-  flutter_timezone: ^4.1.1       # device local time zone for zonedSchedule
+  flutter_local_notifications: ^21.0.0  # "Split-Ticket fertig" OS notification
+  timezone: ^0.11.0              # tz-aware scheduling for trip reminders
+  flutter_timezone: ^5.1.0       # device local time zone for zonedSchedule
+  # Pinned: 10.x is a GPU/flutter_scene beta rewrite that drops sprite support
+  # and rearchitects the layer — not worth the instability for the Karte tab.
   vector_map_tiles: 9.0.0-beta.8
-  connectivity_plus: ^6.1.0      # offline detection → offline banner / cached-data mode
+  connectivity_plus: ^7.1.1      # offline detection → offline banner / cached-data mode
 
 dev_dependencies:
   flutter_test:
