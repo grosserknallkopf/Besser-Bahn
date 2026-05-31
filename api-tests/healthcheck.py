@@ -1099,7 +1099,22 @@ def check_db_account_endpoints_require_auth() -> str:
     if r.status_code not in (401, 403):
         # 200 would mean it stopped requiring auth (very unexpected) — flag it.
         raise CheckError(f"unexpected status {r.status_code} (expected 401/403)")
-    return f"mob/emobilebahncards reachable, auth-gated (status={r.status_code})"
+
+    # Saved-trips (POST/DELETE /mob/reisen) — the "merken" path the app pushes
+    # local saves to when logged in. Unauthenticated it must answer 401/403.
+    reisen_media = "application/x.db.vendo.mob.freiereisen.v5+json"
+    r2 = requests.post(
+        "https://app.services-bahn.de/mob/reisen",
+        headers=_vendo_headers(reisen_media),
+        data=b"{}",
+        timeout=TIMEOUT,
+    )
+    if r2.status_code in (404, 410):
+        raise CheckError(f"mob/reisen path gone (status={r2.status_code})")
+    if r2.status_code not in (400, 401, 403):
+        raise CheckError(f"mob/reisen unexpected status {r2.status_code}")
+    return ("mob/emobilebahncards + mob/reisen reachable, auth-gated "
+            f"(status={r.status_code}/{r2.status_code})")
 
 
 # (name, callable, soft) — soft checks warn instead of fail.

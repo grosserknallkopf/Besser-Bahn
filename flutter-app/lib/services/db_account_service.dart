@@ -273,6 +273,10 @@ class DbAccountService {
           res = await _client
               .post(uri, headers: headers, body: body)
               .timeout(_timeout);
+        case 'DELETE':
+          res = await _client
+              .delete(uri, headers: headers, body: body)
+              .timeout(_timeout);
         default:
           throw DbAccountException('Unbekannte Methode $method');
       }
@@ -391,6 +395,57 @@ class DbAccountService {
     return DbTicket.fromJson(_decode(res, 'auftrag'));
   }
 
+  // --- Saved trips ("Meine Reisen") -----------------------------------------
+
+  /// Save a journey to the user's official DB account as a tracked "Reise"
+  /// (the same as DB Navigator's "merken" — it appears in Meine Reisen and the
+  /// app tracks it for delays). [kontext] is the HAFAS recon string of the
+  /// connection (a [Journey]'s refreshToken). Returns the created trip's
+  /// `rkUuid` (needed to remove it again), or null on failure.
+  Future<String?> saveReise({
+    required String kontext,
+    required String fromLocationId,
+    required String toLocationId,
+    required DateTime departure,
+    bool firstClass = false,
+  }) async {
+    final body = {
+      'kontext': kontext,
+      'leistungsklasse': firstClass ? 'KLASSE_1' : 'KLASSE_2',
+      'ueberwachung': {
+        'alarmeinstellungen': {'abweichungsAlarm': true, 'regelAlarm': true},
+      },
+      'verbindungswunsch': {
+        'abgangsLocationId': fromLocationId,
+        'alternativeHalteBerechnung': true,
+        'verkehrsmittel': ['ALL'],
+        'zeitWunsch': {
+          'reiseDatum': _isoWithOffset(departure),
+          'zeitPunktArt': 'ABFAHRT',
+        },
+        'zielLocationId': toLocationId,
+      },
+    };
+    final res = await _send('POST', '${DbAccountConstants.mobBase}/reisen',
+        media: DbAccountConstants.freieReisenMedia,
+        body: utf8.encode(json.encode(body)));
+    if (res.statusCode != 201 && res.statusCode != 200) {
+      AppLog.log('saveReise HTTP ${res.statusCode}', tag: 'db-account');
+      return null;
+    }
+    final data = json.decode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+    final details = data['reiseDetails'] as Map<String, dynamic>?;
+    return details?['rkUuid'] as String?;
+  }
+
+  /// Remove a saved trip from the DB account by its `rkUuid`.
+  Future<bool> deleteReise(String rkUuid) async {
+    final res = await _send(
+        'DELETE', '${DbAccountConstants.mobBase}/reisen/$rkUuid',
+        media: DbAccountConstants.freieReisenMedia);
+    return res.statusCode == 204 || res.statusCode == 200;
+  }
+
   // --- PKCE / utils ---------------------------------------------------------
 
   static const _chars =
@@ -405,6 +460,17 @@ class DbAccountService {
   String _codeChallenge(String verifier) {
     final digest = sha256.convert(utf8.encode(verifier));
     return base64UrlEncode(digest.bytes).replaceAll('=', '');
+  }
+
+  /// ISO-8601 with the local UTC offset, as the DB Navigator app sends.
+  String _isoWithOffset(DateTime dt) {
+    final l = dt.toLocal();
+    final off = l.timeZoneOffset;
+    final sign = off.isNegative ? '-' : '+';
+    final h = off.inHours.abs().toString().padLeft(2, '0');
+    final m = (off.inMinutes.abs() % 60).toString().padLeft(2, '0');
+    final base = l.toIso8601String().split('.').first;
+    return '$base$sign$h:$m';
   }
 
   String _uuid() {

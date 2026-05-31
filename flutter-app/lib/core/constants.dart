@@ -98,6 +98,10 @@ class DbAccountConstants {
       'application/x.db.vendo.mob.reisenuebersicht.v7+json';
   static const auftragMedia = 'application/x.db.vendo.mob.auftraege.v11+json';
   static const kciMedia = 'application/x.db.vendo.mob.kci.v3+json';
+
+  /// Saved "Meine Reisen" tracked trips (`POST/DELETE /mob/reisen`).
+  static const freieReisenMedia =
+      'application/x.db.vendo.mob.freiereisen.v5+json';
 }
 
 class AppConstants {

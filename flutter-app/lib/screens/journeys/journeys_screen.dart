@@ -5,7 +5,9 @@ import 'package:intl/intl.dart';
 
 import '../../core/extensions.dart';
 import '../../models/library_models.dart';
+import '../../models/db_ticket.dart';
 import '../../models/travel_stats.dart';
+import '../../providers/account_provider.dart';
 import '../../providers/library_provider.dart';
 import '../../providers/travel_stats_provider.dart';
 import '../../widgets/app_menu_button.dart';
@@ -24,6 +26,13 @@ class JourneysScreen extends ConsumerWidget {
     final upcoming = lib.upcomingJourneys;
     final past = lib.pastJourneys;
     final stats = ref.watch(travelStatsProvider);
+    // When signed into a DB account, the user's REAL booked tickets lead the
+    // list (active + past, newest first). Logged out, only the local/offline
+    // saved trips show — that fallback stays exactly as before.
+    final loggedIn = ref.watch(dbAuthProvider).isLoggedIn;
+    final tickets =
+        loggedIn ? ref.watch(ticketIndicesProvider) : null;
+    final hasLocal = upcoming.isNotEmpty || past.isNotEmpty;
 
     return Scaffold(
       appBar: AppBar(
@@ -37,27 +46,61 @@ class JourneysScreen extends ConsumerWidget {
           const AppMenuButton(),
         ],
       ),
-      body: upcoming.isEmpty && past.isEmpty
+      body: (!loggedIn && !hasLocal)
           ? _empty(context)
-          : ListView(
-              padding: const EdgeInsets.only(top: 8, bottom: 32),
-              children: [
-                // Always-visible live Reisefortschritt for the soonest active
-                // trip (self-hides unless in progress or departing soon) — the
-                // in-app stand-in for a Live Activity / home widget.
-                if (upcoming.isNotEmpty)
-                  TripProgressCard(
-                      journey: upcoming.first.journey, activeOnly: true),
-                if (!stats.isEmpty) _statsTeaser(context, stats),
-                if (upcoming.isNotEmpty) ...[
-                  _sectionHeader(context, 'Anstehende Reisen', upcoming.length),
-                  for (final j in upcoming) _entry(context, ref, j),
+          : RefreshIndicator(
+              onRefresh: () async {
+                if (loggedIn) ref.invalidate(ticketIndicesProvider);
+              },
+              child: ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                padding: const EdgeInsets.only(top: 8, bottom: 32),
+                children: [
+                  // Always-visible live Reisefortschritt for the soonest active
+                  // trip (self-hides unless in progress or departing soon) — the
+                  // in-app stand-in for a Live Activity / home widget.
+                  if (upcoming.isNotEmpty)
+                    TripProgressCard(
+                        journey: upcoming.first.journey, activeOnly: true),
+                  if (!stats.isEmpty) _statsTeaser(context, stats),
+                  // Official DB tickets (bought on the account).
+                  if (loggedIn && tickets != null)
+                    tickets.when(
+                      data: (list) => list.isEmpty
+                          ? const SizedBox.shrink()
+                          : Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _sectionHeader(
+                                    context, 'Meine Tickets', list.length),
+                                for (final t in list)
+                                  _OfficialTicketTile(index: t),
+                              ],
+                            ),
+                      loading: () => const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 28),
+                        child: Center(child: CircularProgressIndicator()),
+                      ),
+                      error: (e, _) => Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                        child: Text(
+                            'Tickets konnten nicht geladen werden.',
+                            style: TextStyle(
+                                color: Theme.of(context).colorScheme.error)),
+                      ),
+                    ),
+                  if (upcoming.isNotEmpty) ...[
+                    _sectionHeader(
+                        context, 'Anstehende Reisen', upcoming.length),
+                    for (final j in upcoming) _entry(context, ref, j),
+                  ],
+                  if (past.isNotEmpty) ...[
+                    _sectionHeader(
+                        context, 'Vergangene Reisen', past.length),
+                    for (final j in past) _entry(context, ref, j, past: true),
+                  ],
                 ],
-                if (past.isNotEmpty) ...[
-                  _sectionHeader(context, 'Vergangene Reisen', past.length),
-                  for (final j in past) _entry(context, ref, j, past: true),
-                ],
-              ],
+              ),
             ),
     );
   }
@@ -205,7 +248,9 @@ class JourneysScreen extends ConsumerWidget {
             const SizedBox(height: 8),
             Text(
               'Suche eine Verbindung und tippe in der Detailansicht\n'
-              'auf das Lesezeichen, um sie hier zu speichern.',
+              'auf das Lesezeichen, um sie hier zu speichern.\n'
+              'Mit DB-Konto-Login (Profil) erscheinen hier deine\n'
+              'echten gekauften Tickets.',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium
                   ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
@@ -214,5 +259,64 @@ class JourneysScreen extends ConsumerWidget {
         ),
       ),
     );
+  }
+}
+
+/// A booked official ticket in the Reisen list. Lazily loads the ticket detail
+/// (cached by [ticketProvider]) to show route, date and class; taps through to
+/// the full official Handyticket.
+class _OfficialTicketTile extends ConsumerWidget {
+  final DbReiseIndex index;
+  const _OfficialTicketTile({required this.index});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final kwId =
+        index.kundenwunschIds.isNotEmpty ? index.kundenwunschIds.first : '';
+    final key = '${index.auftragsnummer}/$kwId';
+    final ticket = kwId.isEmpty ? null : ref.watch(ticketProvider(key));
+
+    final theme = Theme.of(context);
+    final card = Card(
+      margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      child: ListTile(
+        leading: Icon(Icons.confirmation_number_outlined,
+            color: theme.colorScheme.primary),
+        title: _title(ticket),
+        subtitle: _subtitle(context, ticket),
+        trailing: const Icon(Icons.chevron_right),
+        onTap: kwId.isEmpty
+            ? null
+            : () => context.push('/ticket', extra: {
+                  'auftragsnummer': index.auftragsnummer,
+                  'kundenwunschId': kwId,
+                }),
+      ),
+    );
+    return card;
+  }
+
+  Widget _title(AsyncValue<DbTicket>? ticket) {
+    final t = ticket?.asData?.value;
+    if (t != null && (t.vonName != null || t.nachName != null)) {
+      return Text('${t.vonName ?? '—'} → ${t.nachName ?? '—'}',
+          maxLines: 1, overflow: TextOverflow.ellipsis);
+    }
+    return Text('Auftrag ${index.auftragsnummer}');
+  }
+
+  Widget? _subtitle(BuildContext context, AsyncValue<DbTicket>? ticket) {
+    final t = ticket?.asData?.value;
+    final parts = <String>[];
+    final d = t?.gueltigAb ?? index.aenderungsDatum;
+    if (d != null) parts.add(DateFormat('dd.MM.yyyy').format(d));
+    if (t != null) {
+      parts.add(t.firstClass ? '1. Kl.' : '2. Kl.');
+      if (t.angebotsname != null) parts.add(t.angebotsname!);
+    } else if (ticket is AsyncLoading) {
+      parts.add('lädt…');
+    }
+    return parts.isEmpty ? null : Text(parts.join(' · '),
+        maxLines: 1, overflow: TextOverflow.ellipsis);
   }
 }
