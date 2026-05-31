@@ -511,11 +511,13 @@ List<({List<LatLng> outline, Coach coach, bool boarding})> platformTrainCars(
 ///   2. the parabola's sagitta (max deviation from its own chord over the
 ///      t-span) exceeds a few metres — a tiny bow is indistinguishable from
 ///      noise, AND
-///   3. the parabola's RMS residual is meaningfully smaller than the line's
-///      (the curve explains structure the line can't), AND
-///   4. the cubes' perp spread isn't so large that the set is obviously
-///      multi-track contaminated (parallel platforms sit ~10 m apart across,
-///      so a single platform's cubes cluster much tighter than that).
+///   3. the parabola actually FITS: its RMS residual is small in absolute
+///      terms (cubes lie on the smooth curve) AND clearly smaller than the
+///      line's. This — NOT the perp spread — is what separates a real curve
+///      (cubes hug the parabola) from a multi-track-contaminated set (Kiel,
+///      0 anchors: cubes from parallel tracks scatter, so no parabola fits).
+///      Gating on perp spread instead would reject real curves, whose bow IS a
+///      large spread.
 /// If any test fails we use the straight line (a=0): a robust LS line through a
 /// noisy multi-track set still yields a sane, straight platform.
 List<LatLng> _cubeCurvePts(
@@ -579,20 +581,21 @@ List<LatLng> _cubeCurvePts(
     }
   }
 
-  // Perp spread of the cubes around the axis: tight (≲ a coach width) for one
-  // platform, large (≳10 m) when cubes from 2+ parallel tracks are mixed in.
-  final pMin = ps.reduce(math.min), pMax = ps.reduce(math.max);
-  final perpSpread = pMax - pMin;
-
   // Curvature is trustworthy only when every guard agrees; otherwise straight.
+  // NOTE: do NOT gate on perp SPREAD — a genuinely curved platform's bow IS a
+  // large perp spread (its sagitta), so that would reject exactly the curves we
+  // want. The honest discriminator is the parabola's FIT: a real curve's cubes
+  // sit close to the smooth parabola (small residual), whereas cubes mixed from
+  // parallel tracks (Kiel, 0 anchors) scatter and the parabola can't fit them.
   const minCubesForCurve = 4;
-  const minSagittaM = 3.0; // a few metres of genuine bow
-  const maxPerpSpreadM = 6.0; // wider ⇒ multi-track contamination ⇒ straight
-  final residualImproves = quadRms < lineRms * 0.6;
+  const minSagittaM = 2.5; // a few metres of genuine bow, else it's noise
+  const maxFitResidualM = 2.5; // parabola must actually pass near the cubes
+  final fitsWell = quadRms < maxFitResidualM;
+  final betterThanLine = quadRms < lineRms * 0.7;
   final curved = n >= minCubesForCurve &&
       sagitta >= minSagittaM &&
-      residualImproves &&
-      perpSpread <= maxPerpSpreadM;
+      fitsWell &&
+      betterThanLine;
 
   double perpAt(double t) => curved ? quadAt(t) : lineAt(t);
 
