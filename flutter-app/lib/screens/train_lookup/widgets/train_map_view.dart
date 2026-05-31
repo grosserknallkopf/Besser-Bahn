@@ -214,10 +214,13 @@ class _TrainMapState extends ConsumerState<TrainMap> {
       if (!mounted || cam.zoom < _detailZoom) return;
       final bounds = cam.visibleBounds;
       final stops = widget.trip.stopovers;
+      // Only the rider's own segment (boarding…alighting) — never fetch or focus
+      // stops the train visits after the rider has already got off.
+      final seg = _segmentRange;
       var added = false;
       var nearest = -1;
       var best = double.infinity;
-      for (var i = 0; i < stops.length; i++) {
+      for (var i = seg.lo; i <= seg.hi; i++) {
         final s = stops[i];
         if (!s.stop.hasLocation) continue;
         final p = LatLng(s.stop.latitude!, s.stop.longitude!);
@@ -415,6 +418,32 @@ class _TrainMapState extends ConsumerState<TrainMap> {
     return -1;
   }
 
+  /// The stop the rider alights at, resolved from the leg's [alightingId] (EVA,
+  /// then name). -1 on a standalone train lookup (no alightingId).
+  int get _alightingIndex {
+    final id = widget.alightingId;
+    if (id == null || id.isEmpty) return -1;
+    final stops = widget.trip.stopovers;
+    for (var i = 0; i < stops.length; i++) {
+      if (stops[i].stop.id == id) return i;
+    }
+    for (var i = 0; i < stops.length; i++) {
+      if (stops[i].stop.name == id) return i;
+    }
+    return -1;
+  }
+
+  /// The inclusive [lo, hi] index range over `trip.stopovers` the rider actually
+  /// travels — boarding…alighting. On a standalone train lookup (no boarding/
+  /// alighting) it's the whole train run. So the route map shows ONLY the
+  /// rider's segment (Kiel→Raisdorf), not where the train continues afterwards.
+  ({int lo, int hi}) get _segmentRange {
+    final n = widget.trip.stopovers.length;
+    final bi = _boardingIndex, ai = _alightingIndex;
+    if (bi >= 0 && ai >= 0 && bi <= ai) return (lo: bi, hi: ai);
+    return (lo: 0, hi: n - 1);
+  }
+
   /// The boarding section parsed from the boarding stop's track label, if any.
   ({String start, String end})? get _boardingSection {
     final i = _boardingIndex;
@@ -426,23 +455,45 @@ class _TrainMapState extends ConsumerState<TrainMap> {
   @override
   Widget build(BuildContext context) {
     final trip = widget.trip;
-    final stops = trip.stopovers.where((s) => s.stop.hasLocation).toList();
+    // Show only the rider's segment: the stopovers from boarding to alighting
+    // (the whole run on a standalone lookup). The train continues past the
+    // rider's exit, but the map should stop where the rider does.
+    final seg = _segmentRange;
+    final segStops = trip.stopovers.sublist(seg.lo, seg.hi + 1);
+    final stops = segStops.where((s) => s.stop.hasLocation).toList();
     if (stops.isEmpty) return const SizedBox.shrink();
 
     final points = stops
         .map((s) => LatLng(s.stop.latitude!, s.stop.longitude!))
         .toList();
-    final routePoints = (trip.polyline != null && trip.polyline!.isNotEmpty)
-        ? trip.polyline!.map((p) => LatLng(p['lat']!, p['lng']!)).toList()
-        : points;
+    // Clip the full train-run polyline to just the rider's segment (between the
+    // boarding and alighting stops) so the map doesn't draw track the rider
+    // never rides.
+    List<LatLng> routePoints;
+    if (trip.polyline != null && trip.polyline!.isNotEmpty) {
+      final full =
+          trip.polyline!.map((p) => LatLng(p['lat']!, p['lng']!)).toList();
+      final path = RoutePath.build(full);
+      if (path != null && points.length >= 2) {
+        final a = path.locate(points.first);
+        final b = path.locate(points.last);
+        final clipped = path.slice(math.min(a, b), math.max(a, b));
+        routePoints = clipped.length >= 2 ? clipped : full;
+      } else {
+        routePoints = full;
+      }
+    } else {
+      routePoints = points;
+    }
 
     // Flatten every stop's parked-train cars into one polygon layer. They're
     // to scale, so they only become visible (more than a speck) once the rider
     // zooms into a stop — intended.
     final parkedPolygons = <Polygon>[];
     final parkedCars = <({List<LatLng> outline, Coach coach, bool boarding})>[];
-    for (final p in _parked.values) {
-      for (final car in p.cars) {
+    for (final entry in _parked.entries) {
+      if (entry.key < seg.lo || entry.key > seg.hi) continue;
+      for (final car in entry.value.cars) {
         if (car.outline.length < 3) continue;
         parkedCars.add(car);
         final fill = car.boarding
