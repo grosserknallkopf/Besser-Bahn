@@ -48,14 +48,25 @@ class OsmPlatformService {
   /// platform fan without dragging in a whole city's tracks.
   static const _radiusM = 600.0;
 
-  /// Short — a slow/missing Overpass must never stall the map; we just fall back.
-  static const _timeout = Duration(seconds: 12);
+  /// Generous — a big Hbf (Hamburg: 230+ rails) is a large response and the only
+  /// reliable mirror can take >10 s; too short and it times out and falls back to
+  /// the cube line. Still non-blocking, so a long wait never stalls the map.
+  static const _timeout = Duration(seconds: 20);
+
+  /// Transient failures (every mirror errored/timed out) get this many retries
+  /// across views before we give up for the session — so a flaky first fetch for
+  /// a big station doesn't strand it on the cube line permanently.
+  static const _maxAttempts = 4;
 
   final http.Client _client = http.Client();
 
-  /// slug → resolved geometry (or null = "fetched and there was nothing/failed",
-  /// cached so we don't re-hammer Overpass for a station with no data).
+  /// slug → resolved geometry (or null = "fetched a 200 with nothing usable").
+  /// ONLY a real response settles the cache; a transient all-mirrors failure is
+  /// NOT cached (see [_attempts]) so the next view retries.
   final Map<String, OsmPlatformGeometry?> _cache = {};
+
+  /// slug → count of transient (all-mirrors-failed) attempts so far.
+  final Map<String, int> _attempts = {};
 
   /// In-flight fetches, so concurrent callers for the same station share one
   /// request instead of firing duplicates.
@@ -115,6 +126,7 @@ class OsmPlatformService {
                 Uri.parse(endpoint),
                 headers: {
                   'User-Agent': ApiConstants.userAgent,
+                  'Accept': 'application/json',
                   'Content-Type': 'application/x-www-form-urlencoded',
                 },
                 body: {'data': ql},
@@ -130,7 +142,7 @@ class OsmPlatformService {
           AppLog.log('OSM overpass "$slug" $endpoint error: $e', tag: 'osm');
         }
       }
-      if (resp == null) return _settle(slug, null);
+      if (resp == null) return _transient(slug);
       final decoded = json.decode(resp.body) as Map<String, dynamic>;
       final elements = (decoded['elements'] as List?) ?? const [];
       final platforms = <({String ref, List<LatLng> pts})>[];
@@ -162,10 +174,11 @@ class OsmPlatformService {
           tag: 'osm');
       // Empty (no platforms or no rails) is treated as "nothing usable" → null,
       // so the caller falls back to cubes; but we still cache it as resolved.
+      _attempts.remove(slug);
       return _settle(slug, geometry.isEmpty ? null : geometry);
     } catch (e) {
       AppLog.log('OSM overpass "$slug" failed: $e', tag: 'osm');
-      return _settle(slug, null);
+      return _transient(slug);
     } finally {
       _inflight.remove(slug);
     }
@@ -174,6 +187,15 @@ class OsmPlatformService {
   OsmPlatformGeometry? _settle(String slug, OsmPlatformGeometry? g) {
     _cache[slug] = g;
     return g;
+  }
+
+  /// A transient all-mirrors failure: return null but DON'T cache it, so the
+  /// next view retries — up to [_maxAttempts], after which we give up (cache
+  /// null) for the session so a truly unreachable station stops re-hammering.
+  OsmPlatformGeometry? _transient(String slug) {
+    final n = (_attempts[slug] ?? 0) + 1;
+    _attempts[slug] = n;
+    return n >= _maxAttempts ? _settle(slug, null) : null;
   }
 }
 

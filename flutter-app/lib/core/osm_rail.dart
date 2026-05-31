@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:latlong2/latlong.dart';
 
 import 'platform_train.dart' show fitLine;
+import 'train_geometry.dart' show RoutePath;
 
 /// Pure, map-agnostic recovery of the **real rail centre-line** a train rides at
 /// a platform, straight from OpenStreetMap geometry — the proven technique from
@@ -155,16 +156,31 @@ List<LatLng> _railFromEdge(List<LatLng> edge, List<List<LatLng>> rails) {
     return (dist: best, s: bestS);
   }
 
-  final picked = <({double s, LatLng p})>[];
+  final picked = <({double s, double dist, LatLng p})>[];
   for (final r in rails) {
     for (final q in r) {
       final n = onEdge(xy(q));
-      if (n.dist <= 4.0) picked.add((s: n.s, p: q));
+      if (n.dist <= 4.0) picked.add((s: n.s, dist: n.dist, p: q));
     }
   }
   if (picked.length < 4) return const [];
+  // Several rails can fall inside the 4 m band (a crossover, siding or a second
+  // platform-edge fragment), and ordering raw vertices by arc-position zig-zags
+  // between them — a visible kink mid-train. Bin by arc-position and keep, per
+  // bin, the vertex NEAREST the platform edge: that's this Gleis's own rail (a
+  // diverging track pulls away), giving one smooth, monotone centre-line.
   picked.sort((a, b) => a.s.compareTo(b.s));
-  return _resample([for (final e in picked) e.p], 60);
+  const binM = 6.0;
+  final bins = <int, ({double s, double dist, LatLng p})>{};
+  for (final e in picked) {
+    final b = (e.s / binM).floor();
+    final cur = bins[b];
+    if (cur == null || e.dist < cur.dist) bins[b] = e;
+  }
+  final ordered = bins.keys.toList()..sort();
+  final spine = [for (final b in ordered) bins[b]!.p];
+  if (spine.length < 2) return const [];
+  return _resample(spine, 60);
 }
 
 /// The real rail spine the train rides at [gleis], recovered from OSM
@@ -189,8 +205,19 @@ List<LatLng> osmRailForGleis({
   // Several platforms can match (e.g. a section way mis-tagged with the Gleis);
   // return the first that actually yields a rail, so a dud doesn't block us.
   for (final p in platforms.where((p) => refHasGleis(p.ref))) {
-    final rail = _railFromEdge(_trackSideEdge(p.pts, cubeSide), rails);
-    if (rail.length >= 2) return rail;
+    final edge = _trackSideEdge(p.pts, cubeSide);
+    final rail = _railFromEdge(edge, rails);
+    if (rail.length < 2) continue;
+    // Clip the rail to the platform's own extent: the rail continues into the
+    // throat past the platform ends (curving onto switches), and the 4 m gather
+    // creeps a little into that bend. Project the platform edge's ends onto the
+    // rail and keep only the span between them — the train then never shows a
+    // spurious bend beyond where the platform actually is.
+    final path = RoutePath.build(edge.length >= 2 ? rail : const []);
+    if (path == null) return rail;
+    final a = path.locate(edge.first), b = path.locate(edge.last);
+    final clipped = path.slice(math.min(a, b), math.max(a, b));
+    return clipped.length >= 2 ? clipped : rail;
   }
   return const [];
 }
