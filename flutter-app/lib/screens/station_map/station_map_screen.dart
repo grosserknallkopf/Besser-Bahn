@@ -344,37 +344,19 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
             if (_selectedPoi != null) setState(() => _selectedPoi = null);
           },
           children: [
-            // Section band stroke — ONLY as a fallback when we couldn't draw the
-            // actual train (no Wagenreihung / no cubes). When the train is
-            // drawn the thick stroke is redundant, so it's dropped.
-            if (state.boardingTrainCars.isEmpty &&
-                state.highlightSectionLine.length >= 2)
-              PolylineLayer(
-                polylines: [
-                  Polyline(
-                    points:
-                        state.highlightSectionLine.map((e) => e.pos).toList(),
-                    color: roleColor(state.highlightRole) ?? Colors.amber.shade700,
-                    strokeWidth: 7,
-                    borderColor: Colors.white,
-                    borderStrokeWidth: 2,
-                  ),
-                ],
-              ),
-            if (state.secondaryTrainCars.isEmpty &&
-                state.secondarySectionLine.length >= 2)
-              PolylineLayer(
-                polylines: [
-                  Polyline(
-                    points:
-                        state.secondarySectionLine.map((e) => e.pos).toList(),
-                    color: roleColor(state.secondaryRole) ?? Colors.red,
-                    strokeWidth: 7,
-                    borderColor: Colors.white,
-                    borderStrokeWidth: 2,
-                  ),
-                ],
-              ),
+            // No Wagenreihung for this train → still draw a *train*: a single
+            // curved body following the platform's sector cubes, NOT a bare
+            // line. When the per-car train is drawn (below) these are empty.
+            if (state.boardingGenericBody.length >= 3)
+              PolygonLayer(polygons: [
+                _genericBodyPolygon(state.boardingGenericBody,
+                    roleColor(state.highlightRole) ?? Colors.amber.shade700),
+              ]),
+            if (state.secondaryGenericBody.length >= 3)
+              PolygonLayer(polygons: [
+                _genericBodyPolygon(state.secondaryGenericBody,
+                    roleColor(state.secondaryRole) ?? Colors.red),
+              ]),
             // The train(s) drawn to scale, top-down, on the platform — one
             // filled car per Wagen (class colour), the rider's portion bright
             // and the rest dimmed, end cars with a rounded snout. On a transfer
@@ -537,6 +519,15 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
         ),
     ];
   }
+
+  /// A single filled, role-coloured train body for a Gleis we have no
+  /// Wagenreihung for — same top-down look as the per-car train, one piece.
+  Polygon _genericBodyPolygon(List<LatLng> outline, Color color) => Polygon(
+        points: outline,
+        color: color.withValues(alpha: 0.55),
+        borderColor: Colors.white.withValues(alpha: 0.9),
+        borderStrokeWidth: 1.2,
+      );
 
   /// Filled, class-coloured car polygons for the to-scale platform train. The
   /// rider's portion (a wing train) is opaque; other portions are dimmed.

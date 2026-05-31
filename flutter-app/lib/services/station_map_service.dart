@@ -85,9 +85,16 @@ class StationMapService {
       // Background prefetch is best-effort: don't pay a SECOND timeout on the
       // alt slug (that's what turned one slow stop into a ~30 s hang).
       if (background) rethrow;
+      // Only a genuine NOT-FOUND (wrong slug) is worth swapping
+      // hbf<->hauptbahnhof. A timeout/network blip is transient: retrying a
+      // DIFFERENT slug there just 404s and mis-reports the real station as
+      // "nicht gefunden" — and worse, caches that bogus 404 — so a perfectly
+      // valid stop (Kiel Hbf) shows "gibt es nicht", then loads fine on the
+      // next try. Rethrow the transient error so the UI offers a retry instead.
+      if (e.transient) rethrow;
       final alt = _altSlug(slug);
       if (alt != null) {
-        AppLog.log('slug "$slug" failed ($e) → retry alt slug "$alt"',
+        AppLog.log('slug "$slug" not found ($e) → retry alt slug "$alt"',
             tag: 'map');
         return await fetchBySlug(alt);
       }

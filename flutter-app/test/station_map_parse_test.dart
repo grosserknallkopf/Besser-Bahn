@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:besser_bahn/core/platform_train.dart' as pt;
 import 'package:besser_bahn/services/station_map_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -26,5 +27,25 @@ void main() {
     expect(map.center.latitude, closeTo(54.315, 0.05));
     expect(map.center.longitude, closeTo(10.132, 0.05));
     expect(map.pois, isNotEmpty);
+  });
+
+  test('platformGenericBody draws a closed train body when no Wagenreihung', () {
+    final body = File('test/fixtures/kiel-hbf.rsc.txt').readAsStringSync();
+    final map = parseStationMapBody('kiel-hbf', body);
+
+    // A Gleis that actually carries sector cubes on its platform island.
+    final gleis = map.platforms
+        .map((p) => pt.normalizeGleis(p.name))
+        .firstWhere(
+          (g) => pt.platformSectors(map, g).length >= 2,
+          orElse: () => '',
+        );
+    expect(gleis, isNotEmpty, reason: 'expected a Gleis with ≥2 sector cubes');
+
+    // Without a Wagenreihung we still get a single closed polygon (a train
+    // body), curved along the platform — not a bare line.
+    final outline = pt.platformGenericBody(map, gleis: gleis);
+    expect(outline.length, greaterThanOrEqualTo(3),
+        reason: 'generic body is a closed ring');
   });
 }

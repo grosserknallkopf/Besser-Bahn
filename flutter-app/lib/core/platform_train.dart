@@ -401,16 +401,28 @@ List<({List<LatLng> outline, Coach coach, bool boarding})> platformTrainCars(
     why('island resolved <2 sector cubes (got ${island.cubes.length})');
     return const [];
   }
-  final cubeByIdx = {for (final c in island.cubes) c.idx: c.pos};
 
-  // (offset metres → LatLng) anchors from sectors present as real cubes.
-  final anchors = <({double off, LatLng pos})>[];
+  // The platform's real SHAPE: an ordered, arc-length-indexed curve through its
+  // sector cubes A→I (nudged onto the boarding rail). Placing cars along THIS
+  // curve — not a straight principal-axis fit — makes the train bend exactly
+  // like the platform (Hamburg's tracks curve hard toward the throat), instead
+  // of a stiff straight body cutting across the bend.
+  final curvePts = _cubeCurvePts(island);
+  final curve = RoutePath.build(curvePts);
+  if (curve == null) {
+    why('cube curve degenerate (${curvePts.length} pts)');
+    return const [];
+  }
+
+  // (Wagenreihung metre offset → arc-length ALONG the curve) anchors, from the
+  // sectors present as real cubes.
+  final anchors = <({double off, double arc})>[];
   for (final s in cs.platform.sectors) {
     final idx = letterIdx(s.name);
     if (idx == null) continue;
-    final pos = cubeByIdx[idx];
-    if (pos == null) continue;
-    anchors.add((off: (s.start + s.end) / 2, pos: pos));
+    final ci = island.cubes.indexWhere((c) => c.idx == idx);
+    if (ci < 0) continue;
+    anchors.add((off: (s.start + s.end) / 2, arc: curve.locate(curvePts[ci])));
   }
   if (anchors.length < 2) {
     why('<2 sector→cube anchors '
@@ -419,43 +431,22 @@ List<({List<LatLng> outline, Coach coach, bool boarding})> platformTrainCars(
     return const [];
   }
 
-  final lat0 = anchors.map((a) => a.pos.latitude).reduce((x, y) => x + y) /
-      anchors.length;
-  const mlat = 111320.0;
-  final mlon = 111320.0 * math.cos(lat0 * math.pi / 180);
-  final ax = [
-    for (final a in anchors)
-      math.Point(a.pos.longitude * mlon, a.pos.latitude * mlat)
-  ];
-
-  // Direction = the best-fit line through THIS platform's own sector cubes
-  // (A,B,C,D…). That makes the train parallel to the cube row — exactly the
-  // line the rider reads on the map. (The island anchor axis can sit at a
-  // slightly different angle than the cubes, which looked tilted; use it only
-  // as a fallback when there are too few cubes to fit.) Then least-squares fit
-  // the cubes' metre offset → position-along-axis; cars map straight onto it.
-  final line = fitLine(ax) ?? island.axis;
-  if (line == null) return const [];
+  // Least-squares fit metre-offset → arc-length, so every car's offset maps to
+  // a distance along the curve; slice() then carves a spine that keeps every
+  // bend between the car's two ends.
   var sx = 0.0, sy = 0.0, sxx = 0.0, sxy = 0.0;
   final n = anchors.length;
-  for (var i = 0; i < n; i++) {
-    final t = (ax[i].x - line.cx) * line.dx + (ax[i].y - line.cy) * line.dy;
-    final off = anchors[i].off;
-    sx += off;
-    sy += t;
-    sxx += off * off;
-    sxy += off * t;
+  for (final a in anchors) {
+    sx += a.off;
+    sy += a.arc;
+    sxx += a.off * a.off;
+    sxy += a.off * a.arc;
   }
   final denom = n * sxx - sx * sx;
   if (denom.abs() < 1e-9) return const [];
   final aSlope = (n * sxy - sx * sy) / denom;
   final bIntercept = (sy - aSlope * sx) / n;
-
-  LatLng axisLatLng(double off) {
-    final t = aSlope * off + bIntercept;
-    final x = line.cx + line.dx * t, y = line.cy + line.dy * t;
-    return LatLng(y / mlat + island.dLat, x / mlon + island.dLon);
-  }
+  double arcOf(double off) => aSlope * off + bIntercept;
 
   final highSpeed = isHighSpeedCoach(cs);
   final hw = (highSpeed ? 2.95 : 2.85) / 2;
@@ -473,8 +464,9 @@ List<({List<LatLng> outline, Coach coach, bool boarding})> platformTrainCars(
   for (var i = 0; i < coaches.length; i++) {
     final c = coaches[i];
     final pos = c.platformPosition!;
+    final spine = curve.slice(arcOf(pos.start), arcOf(pos.end));
     final outline = TrainGeometry.body(
-      [axisLatLng(pos.start), axisLatLng(pos.end)],
+      spine,
       halfWidthM: hw,
       noseStart: i == 0,
       noseEnd: i == coaches.length - 1,
@@ -485,6 +477,40 @@ List<({List<LatLng> outline, Coach coach, bool boarding})> platformTrainCars(
     }
   }
   return out;
+}
+
+/// Ordered (A→I) LatLng points down a platform island's sector cubes, each
+/// nudged onto the boarding rail — the platform's real curved centreline, used
+/// as the spine for both the per-car train and the generic body.
+List<LatLng> _cubeCurvePts(
+        ({List<({int idx, LatLng pos})> cubes, double dLat, double dLon, PlatformLine? axis}) island) =>
+    [
+      for (final c in island.cubes)
+        LatLng(c.pos.latitude + island.dLat, c.pos.longitude + island.dLon),
+    ];
+
+/// A single to-scale train BODY (curved along the platform's sector cubes) for
+/// when there is NO Wagenreihung to split into per-Wagen polygons — so the map
+/// still shows a *train* standing at the Gleis (bent to the platform, rounded
+/// snouts), not a bare line. The caller still draws the sector letters so the
+/// rider sees the boarding Abschnitt. Empty when the Gleis/island can't be
+/// resolved.
+List<LatLng> platformGenericBody(
+  StationMap map, {
+  required String gleis,
+  bool highSpeed = false,
+}) {
+  final plat = _platformForGleis(map, gleis);
+  if (plat == null) return const [];
+  final island = resolveIsland(map, plat, gleis, 0, 8);
+  if (island.cubes.length < 2) return const [];
+  return TrainGeometry.body(
+    _cubeCurvePts(island),
+    halfWidthM: (highSpeed ? 2.95 : 2.85) / 2,
+    noseStart: true,
+    noseEnd: true,
+    noseLenM: highSpeed ? 5.0 : 2.5,
+  );
 }
 
 /// The platform POI whose normalised name matches [gleis], or null.

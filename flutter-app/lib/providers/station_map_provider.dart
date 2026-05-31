@@ -244,6 +244,30 @@ class StationMapState {
     return pt.platformTrainCars(m, gleis: g, section: section, cs: cs);
   }
 
+  /// A single curved train BODY along the boarding Gleis, drawn ONLY when we
+  /// have no Wagenreihung to split into per-Wagen polygons (e.g. an ÖBB RJ that
+  /// the DB coach API doesn't carry) — so the map shows a *train* on the
+  /// platform, not a bare line. Empty when a per-car train is already drawn.
+  List<LatLng> get boardingGenericBody =>
+      _genericBodyFor(highlightGleis, boardingTrainCars.isEmpty);
+
+  /// Same, for the Ausstieg (arriving) train's Gleis on a transfer map.
+  List<LatLng> get secondaryGenericBody =>
+      _genericBodyFor(secondaryGleis, secondaryTrainCars.isEmpty);
+
+  List<LatLng> _genericBodyFor(String? g, bool noCars) {
+    final m = map;
+    if (m == null || g == null || !noCars) return const [];
+    return pt.platformGenericBody(m, gleis: g, highSpeed: _highSpeedLabel);
+  }
+
+  /// Best-effort high-speed guess from the train label when we have no
+  /// Wagenreihung to tell us — only affects the body's width/nose slightly.
+  bool get _highSpeedLabel {
+    final l = trainLabel?.toUpperCase() ?? '';
+    return l.startsWith('ICE') || l.startsWith('ECE');
+  }
+
   /// POIs to render: current floor, minus hidden categories.
   List<MapPoi> get visiblePois {
     final m = map;
