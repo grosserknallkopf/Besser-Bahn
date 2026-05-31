@@ -379,7 +379,7 @@ class _ConnectionSearchScreenState
                   ),
                 )
               : ListView.builder(
-                  padding: const EdgeInsets.only(top: 8, bottom: 32),
+                  padding: const EdgeInsets.only(bottom: 32),
                   itemCount: journeys.length + 2,
                   itemBuilder: (context, index) {
                     if (index == 0) {
@@ -415,18 +415,19 @@ class _ConnectionSearchScreenState
   Widget _productFilterBar(BuildContext context, JourneySearchState state,
       JourneySearchNotifier notifier) {
     return SizedBox(
-      height: 48,
+      height: 38,
       child: ListView(
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         children: [
           for (final cat in ProductCategory.values)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 3),
               child: FilterChip(
                 label: Text(cat.label),
                 selected: state.products.contains(cat),
                 visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 onSelected: (_) => notifier.toggleProduct(cat),
               ),
             ),
@@ -438,11 +439,17 @@ class _ConnectionSearchScreenState
   Widget _paginationButton(BuildContext context, String label, IconData icon,
       VoidCallback? onPressed) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 1),
       child: OutlinedButton.icon(
         onPressed: onPressed,
         icon: Icon(icon, size: 18),
         label: Text(label),
+        style: OutlinedButton.styleFrom(
+          visualDensity: VisualDensity.compact,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          minimumSize: const Size(0, 32),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        ),
       ),
     );
   }

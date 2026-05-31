@@ -13,13 +13,19 @@ import '../models/journey.dart';
 /// [activeOnly] hides it unless the trip is in progress or departs soon — used
 /// where the card sits among other content (the Reisen list) rather than on the
 /// trip's own detail screen.
+///
+/// [onBoardOnly] hides the pre-departure countdown phase entirely (used on the
+/// connection detail, where [DepartureCard] already shows the countdown + the
+/// "wann musst du los" walk — so this only kicks in once the trip is moving).
 class TripProgressCard extends StatefulWidget {
   final Journey journey;
   final bool activeOnly;
+  final bool onBoardOnly;
   const TripProgressCard({
     super.key,
     required this.journey,
     this.activeOnly = false,
+    this.onBoardOnly = false,
   });
 
   @override
@@ -48,6 +54,9 @@ class _TripProgressCardState extends State<TripProgressCard> {
     final theme = Theme.of(context);
     final p = TripProgress.of(widget.journey);
     if (p == null || p.phase == TripPhase.finished) {
+      return const SizedBox.shrink();
+    }
+    if (widget.onBoardOnly && p.phase == TripPhase.upcoming) {
       return const SizedBox.shrink();
     }
     if (widget.activeOnly && !p.isActive()) return const SizedBox.shrink();
