@@ -406,21 +406,26 @@ List<({List<LatLng> outline, Coach coach, bool boarding})> platformTrainCars(
     return const [];
   }
 
-  final island = resolveIsland(map, plat, gleis, 0, 8);
-  if (island.cubes.length < 2) {
-    why('island resolved <2 sector cubes (got ${island.cubes.length})');
+  // The platform's real SHAPE the cars ride: the accurate OSM track centre-line
+  // (see core/osm_rail.dart). There is no cube fallback for the curve — if we
+  // don't know where the track is, we draw no train rather than guess.
+  final curve = _platformCurve(osmRail);
+  if (curve == null) {
+    why('no trusted OSM rail for this Gleis');
     return const [];
   }
 
-  // The platform's real SHAPE the cars ride. When OSM rail geometry is supplied
-  // (the accurate track centre-line — see core/osm_rail.dart) it IS the curve,
-  // so the train bends exactly like the real track (Hamburg's tracks curve hard
-  // toward the throat). Without it we fall back BYTE-FOR-BYTE to the old
-  // straight cube-axis line — the only stable thing the mis-assigned cubes give.
-  final curve = _platformCurve(osmRail);
-  if (curve == null) {
-    why('platform curve degenerate');
-    return const [];
+  final island = resolveIsland(map, plat, gleis, 0, 8);
+  if (island.cubes.length < 2) {
+    // No bahnhof.de sector cubes (common at small stations, e.g. Raisdorf): we
+    // can't anchor DB's absolute sector metres, but we DO know the real track
+    // (OSM) and the train's car order + lengths — so place the train to scale
+    // on the rail (centred on the platform), real coaches, just not aligned to
+    // sectors DB never published. Far better than no train at all (the cubes'
+    // only real value is side-selecting the rail at multi-track platforms,
+    // which already happened upstream when osmRailForGleis built this curve).
+    return platformTrainFromComposition(
+        map, gleis: gleis, section: section, cs: cs, osmRail: osmRail);
   }
 
   // (Wagenreihung metre offset → arc-length ALONG the curve) anchors, from the
@@ -532,10 +537,11 @@ List<({List<LatLng> outline, Coach coach, bool boarding})>
   if (coaches.isEmpty) return const [];
   final plat = _platformForGleis(map, gleis);
   if (plat == null) return const [];
-  final island = resolveIsland(map, plat, gleis, 0, 8);
-  if (island.cubes.length < 2) return const [];
   final curve = _platformCurve(osmRail);
   if (curve == null) return const [];
+  // Cubes are optional here: with them, the train centres on the boarding
+  // section; without them (small stations), it centres on the platform middle.
+  final island = resolveIsland(map, plat, gleis, 0, 8);
 
   final lens = [for (final c in coaches) c.platformPosition!.length];
   final total = lens.fold(0.0, (a, b) => a + b);
@@ -581,10 +587,11 @@ List<LatLng> platformGenericBody(
 }) {
   final plat = _platformForGleis(map, gleis);
   if (plat == null) return const [];
-  final island = resolveIsland(map, plat, gleis, 0, 8);
-  if (island.cubes.length < 2) return const [];
   final curve = _platformCurve(osmRail);
   if (curve == null) return const [];
+  // Cubes optional: present → centre on the boarding section; absent → centre
+  // on the platform middle. Either way the body rides the real OSM rail.
+  final island = resolveIsland(map, plat, gleis, 0, 8);
   final len = lengthM <= 0 ? curve.length : math.min(lengthM, curve.length);
   final startArc = _anchorStartArc(curve, island, section, len);
   return TrainGeometry.body(

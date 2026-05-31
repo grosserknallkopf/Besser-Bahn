@@ -119,7 +119,10 @@ class _TrainMapViewState extends ConsumerState<TrainMapView> {
 /// One stop's pre-computed parked-train cars (static map geometry) plus the
 /// per-car centre point + wagon number for the on-zoom number labels.
 class _ParkedStop {
-  final List<({List<LatLng> outline, Coach coach, bool boarding})> cars;
+  /// One entry per Wagen (with its [Coach] for colour + number) — or a single
+  /// coach-less entry (`coach == null`) when there's no Wagenreihung and we draw
+  /// just a generic to-scale body to mark where the train stands.
+  final List<({List<LatLng> outline, Coach? coach, bool boarding})> cars;
   const _ParkedStop(this.cars);
 }
 
@@ -344,24 +347,49 @@ class _TrainMapState extends ConsumerState<TrainMap> {
     if (map == null) return; // fetch didn't land in cache; leave for a retry
     _done.add(i);
     if (gleisRaw.isEmpty || map.platforms.isEmpty) return;
+    final gleis = pt.normalizeGleis(gleisRaw);
+    // The real OSM track curve — computed ONCE; both the coach placement and the
+    // generic-body fallback ride it. Null until Overpass is warm (it then kicks
+    // a fetch + rebuilds this stop) or when the track is genuinely unknown — in
+    // which case we draw nothing rather than guess where the train stands.
+    final osmRail = _osmRailFor(map, gleis, rebuildStop: i);
+    final section = i == _boardingIndex ? _boardingSection : null;
     final cs = coachSvc.cachedForDeparture(
       category: line.productName,
       trainNumber: line.fahrtNr,
       stationEva: s.stop.id,
       departureTime: s.departure ?? s.arrival,
     );
-    if (cs == null) return;
-    final gleis = pt.normalizeGleis(gleisRaw);
-    final cars = pt.platformTrainCars(
-      map,
-      gleis: gleis,
-      // Only the rider's boarding stop dims the non-boarding portion.
-      section: i == _boardingIndex ? _boardingSection : null,
-      cs: cs,
-      // Ride the real OSM track curve when this station's geometry is warm;
-      // else the cube fallback now, and rebuild this stop once it lands.
-      osmRail: _osmRailFor(map, gleis, rebuildStop: i),
-    );
+
+    final cars = <({List<LatLng> outline, Coach? coach, bool boarding})>[];
+    if (cs != null) {
+      // Real coaches: cube-anchored where cubes exist (exact sector alignment),
+      // else composition-on-rail (right track, centred on the platform).
+      cars.addAll(pt.platformTrainCars(
+        map,
+        gleis: gleis,
+        section: section,
+        cs: cs,
+        osmRail: osmRail,
+      ));
+    }
+    if (cars.isEmpty) {
+      // No Wagenreihung at all (e.g. erixx isn't covered by the vehicle-sequence
+      // endpoint) — still MARK the train: a single to-scale body for the product
+      // standing on the real OSM rail, so every stop on the segment shows where
+      // the train is, even when DB won't say which sector it stops at.
+      final dims = TrainDimensions.forProduct(line.product);
+      final body = pt.platformGenericBody(
+        map,
+        gleis: gleis,
+        section: section,
+        lengthM: dims.totalLengthM,
+        osmRail: osmRail,
+      );
+      if (body.length >= 3) {
+        cars.add((outline: body, coach: null, boarding: true));
+      }
+    }
     if (cars.isNotEmpty) {
       _parked[i] = _ParkedStop(cars);
       if (mounted) setState(() {});
@@ -391,8 +419,10 @@ class _TrainMapState extends ConsumerState<TrainMap> {
       return null;
     }
     if (gleis.isEmpty) return null;
+    // cubeSide may be empty at small stations with no sector cubes — that's
+    // fine: osmRailForGleis then picks the platform's track-side edge by
+    // centre-line, which is unambiguous on a single-track-edge platform.
     final cubeSide = pt.platformCubeSide(map, gleis);
-    if (cubeSide.length < 2) return null;
     final rail = osmRailForGleis(
       platforms: geom.platforms,
       rails: geom.rails,
@@ -490,15 +520,18 @@ class _TrainMapState extends ConsumerState<TrainMap> {
     // to scale, so they only become visible (more than a speck) once the rider
     // zooms into a stop — intended.
     final parkedPolygons = <Polygon>[];
-    final parkedCars = <({List<LatLng> outline, Coach coach, bool boarding})>[];
+    final parkedCars = <({List<LatLng> outline, Coach? coach, bool boarding})>[];
     for (final entry in _parked.entries) {
       if (entry.key < seg.lo || entry.key > seg.hi) continue;
       for (final car in entry.value.cars) {
         if (car.outline.length < 3) continue;
         parkedCars.add(car);
-        final fill = car.boarding
-            ? coachColor(car.coach)
-            : coachColor(car.coach).withValues(alpha: 0.45);
+        // A coach-less generic body (no Wagenreihung) uses the neutral loco
+        // colour; real coaches keep their class colour.
+        final base = car.coach != null
+            ? coachColor(car.coach!)
+            : AppColors.locomotive;
+        final fill = car.boarding ? base : base.withValues(alpha: 0.45);
         parkedPolygons.add(Polygon(
           points: car.outline,
           color: fill,
@@ -585,7 +618,7 @@ class _TrainMapState extends ConsumerState<TrainMap> {
 /// stay hidden over the route overview. Rebuilds on camera change via
 /// flutter_map's own listenable — no ticker, this is static geometry.
 class _ParkedNumbers extends StatelessWidget {
-  final List<({List<LatLng> outline, Coach coach, bool boarding})> cars;
+  final List<({List<LatLng> outline, Coach? coach, bool boarding})> cars;
   const _ParkedNumbers({required this.cars});
 
   @override
@@ -593,7 +626,11 @@ class _ParkedNumbers extends StatelessWidget {
     final cam = MapCamera.of(context);
     final markers = <Marker>[];
     for (final car in cars) {
-      if (car.coach.wagonNumber <= 0 || car.outline.length < 3) continue;
+      final coach = car.coach;
+      // A coach-less generic body has no wagon number to show.
+      if (coach == null || coach.wagonNumber <= 0 || car.outline.length < 3) {
+        continue;
+      }
       // O(1) per car: the body is a thin sleeve, so its on-screen length is the
       // distance between the two NOSE ends — the first ring vertex and the one
       // at the half-way point. Project only those two (not the whole ring, and
@@ -605,7 +642,7 @@ class _ParkedNumbers extends StatelessWidget {
       final b = cam.latLngToScreenOffset(ring[ring.length ~/ 2]);
       if ((a - b).distance < 22) continue;
       markers.add(_numberMarker(
-          _centroid(car.outline), car.coach.wagonNumber, coachColor(car.coach)));
+          _centroid(car.outline), coach.wagonNumber, coachColor(coach)));
     }
     if (markers.isEmpty) return const SizedBox.shrink();
     return MarkerLayer(markers: markers);
