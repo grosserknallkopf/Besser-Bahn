@@ -33,6 +33,16 @@ import '../theme/app_colors.dart';
 
 const _gleis = '7';
 
+/// Selectable background tile models.
+typedef _BaseMap = ({String name, String url, List<String> subs, int maxZoom});
+const List<_BaseMap> _baseMaps = [
+  (name: 'OSM', url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', subs: [], maxZoom: 19),
+  (name: 'CARTO Voyager', url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png', subs: ['a', 'b', 'c', 'd'], maxZoom: 20),
+  (name: 'CARTO ohne Text', url: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}.png', subs: ['a', 'b', 'c', 'd'], maxZoom: 20),
+  (name: 'Satellit (Esri)', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', subs: [], maxZoom: 19),
+  (name: 'OpenRailwayMap', url: 'https://{s}.tiles.openrailwaymap.org/standard/{z}/{x}/{y}.png', subs: ['a', 'b', 'c'], maxZoom: 19),
+];
+
 void main() => runApp(const _PreviewApp());
 
 String _readFixture(String name) {
@@ -60,6 +70,23 @@ Color _coachColor(Coach c) {
   if (c.isLocomotive) return AppColors.locomotive;
   if (c.type.hasFirstClass) return AppColors.firstClass;
   return AppColors.secondClass;
+}
+
+/// Short label: which compartment this coach is — wagon number when the data
+/// carries one, plus the class/type tag (1./2./1.+2./Bistro/Lok/zu).
+String _coachLabel(Coach c) {
+  final tag = !c.isOpen
+      ? 'zu'
+      : c.isRestaurant
+          ? 'Bistro'
+          : c.isLocomotive
+              ? 'Lok'
+              : c.isMixed
+                  ? '1.+2.'
+                  : c.type.hasFirstClass
+                      ? '1.'
+                      : '2.';
+  return c.wagonNumber > 0 ? 'Wg ${c.wagonNumber}\n$tag' : tag;
 }
 
 /// PEEL the floor's sector cubes into one chain per platform island, then return
@@ -165,6 +192,10 @@ class _PreviewPageState extends State<_PreviewPage> {
 
   /// Real Wagenreihung for a Gleis-7 train (fixture), if present.
   CoachSequence? _cs;
+
+  /// Selected base map and whether the DB indoor station plan overlay shows.
+  _BaseMap _baseMap = _baseMaps.first;
+  bool _showOverlay = false;
 
   @override
   void initState() {
@@ -399,7 +430,7 @@ class _PreviewPageState extends State<_PreviewPage> {
 
     // One to-scale polygon per real coach, sliced from the rail between the
     // coach's metre ends; first/second class coloured; DB sector marks too.
-    final coaches = <({List<LatLng> outline, Color color})>[];
+    final coaches = <({List<LatLng> outline, Color color, String label, LatLng at})>[];
     final dbSectors = <({String letter, LatLng pos})>[];
     LatLng? center;
     if (path != null && arcOf != null && _cs != null) {
@@ -416,7 +447,12 @@ class _PreviewPageState extends State<_PreviewPage> {
             noseEnd: i == cs.length - 1,
             noseLenM: 2.5);
         if (outline.length >= 3) {
-          coaches.add((outline: outline, color: _coachColor(cs[i])));
+          coaches.add((
+            outline: outline,
+            color: _coachColor(cs[i]),
+            label: _coachLabel(cs[i]),
+            at: path.pointAt(arcOf(pp.center)),
+          ));
         }
       }
       for (final s in _cs!.platform.sectors) {
@@ -431,6 +467,15 @@ class _PreviewPageState extends State<_PreviewPage> {
     center ??= (letters.isNotEmpty
         ? letters[letters.length ~/ 2].pos
         : _map.center);
+
+    // Floor whose DB indoor plan to overlay — Gleis 7's level.
+    final plat7 = _map.platforms.firstWhere(
+        (p) => normalizeGleis(p.name) == _gleis,
+        orElse: () => _map.platforms.first);
+    final level = plat7.level ??
+        (_map.levelInit.isNotEmpty
+            ? _map.levelInit
+            : (_map.levels.isNotEmpty ? _map.levels.first : 'GROUND_FLOOR'));
 
     final info = _cs == null
         ? 'keine Wagenreihung-Fixture'
@@ -454,6 +499,26 @@ class _PreviewPageState extends State<_PreviewPage> {
                 style: const TextStyle(
                     color: Colors.white, fontWeight: FontWeight.w600)),
           ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+            child: Row(children: [
+              const Text('Karte: '),
+              DropdownButton<_BaseMap>(
+                value: _baseMap,
+                items: [
+                  for (final b in _baseMaps)
+                    DropdownMenuItem(value: b, child: Text(b.name)),
+                ],
+                onChanged: (v) => setState(() => _baseMap = v ?? _baseMap),
+              ),
+              const Spacer(),
+              const Text('DB-Bahnsteigplan '),
+              Switch(
+                value: _showOverlay,
+                onChanged: (v) => setState(() => _showOverlay = v),
+              ),
+            ]),
+          ),
           Expanded(
             child: FlutterMap(
               options: MapOptions(
@@ -464,14 +529,29 @@ class _PreviewPageState extends State<_PreviewPage> {
               ),
               children: [
                 TileLayer(
-                  urlTemplate:
-                      'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}.png',
-                  subdomains: const ['a', 'b', 'c', 'd'],
-                  maxNativeZoom: 20,
+                  key: ValueKey(_baseMap.name),
+                  urlTemplate: _baseMap.url,
+                  subdomains: _baseMap.subs,
+                  maxNativeZoom: _baseMap.maxZoom,
                   maxZoom: 20,
                   userAgentPackageName: 'dev.chuk.besserbahn.preview',
                   errorTileCallback: (_, _, _) {},
                 ),
+                // DB indoor station plan (Bahnsteigplan) — needs the Referer
+                // header or the tiles 403. Toggle to compare against OSM.
+                if (_showOverlay)
+                  TileLayer(
+                    urlTemplate: StationMap.indoorTileUrl(level),
+                    tileDimension: 256,
+                    minNativeZoom: 14,
+                    maxNativeZoom: 18,
+                    maxZoom: 20,
+                    tileProvider: NetworkTileProvider(
+                      headers: {'Referer': 'https://www.bahnhof.de/'},
+                    ),
+                    userAgentPackageName: 'dev.chuk.besserbahn.preview',
+                    errorTileCallback: (_, _, _) {},
+                  ),
                 // Faint OSM rails, to judge alignment.
                 PolylineLayer(polylines: [
                   for (final r in _osmRails)
@@ -488,6 +568,27 @@ class _PreviewPageState extends State<_PreviewPage> {
                       color: c.color.withValues(alpha: 0.55),
                       borderColor: Colors.black87,
                       borderStrokeWidth: 1.2,
+                    ),
+                ]),
+                // Per-coach label — which compartment (class/type + Wg №).
+                MarkerLayer(markers: [
+                  for (final c in coaches)
+                    Marker(
+                      point: c.at,
+                      width: 52,
+                      height: 30,
+                      child: Center(
+                        child: Text(
+                          c.label,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: AppColors.onClass(c.color),
+                            fontSize: 10,
+                            height: 1.05,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
                     ),
                 ]),
                 // DB platform sectors A–I, mapped onto the rail at their metres.
