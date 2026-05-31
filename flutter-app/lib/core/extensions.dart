@@ -2,13 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 extension DateTimeFormatting on DateTime {
-  String get hhmm => DateFormat('HH:mm').format(this);
+  // Always render in the device's local zone. DateFormat formats the raw
+  // wall-clock fields, so a DateTime still flagged UTC (e.g. parsed from a "…Z"
+  // timestamp) would print 2 h off — toLocal() guards against that. No-op when
+  // the value is already local.
+  String get hhmm => DateFormat('HH:mm').format(toLocal());
 
-  String get dayMonthYear => DateFormat('dd.MM.yyyy').format(this);
+  String get dayMonthYear => DateFormat('dd.MM.yyyy').format(toLocal());
 
-  String get isoDate => DateFormat('yyyy-MM-dd').format(this);
+  String get isoDate => DateFormat('yyyy-MM-dd').format(toLocal());
 
-  String get fullDateTime => DateFormat('dd.MM.yyyy HH:mm').format(this);
+  String get fullDateTime => DateFormat('dd.MM.yyyy HH:mm').format(toLocal());
 }
 
 extension DelayFormatting on int {

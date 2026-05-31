@@ -121,10 +121,22 @@ class NotificationService {
       if (android != null) {
         await android.requestNotificationsPermission();
         // Exact alarms (Android 13+): needed so "30 min vorher" lands on the
-        // minute, not whenever Doze feels like it. Revocable — track the grant
-        // so scheduling can fall back to inexact instead of silently dropping.
+        // minute, not whenever Doze feels like it (inexact alarms get batched
+        // and can be delivered HOURS late — e.g. only when the user unlocks).
+        //
+        // We declare USE_EXACT_ALARM in the manifest, which grants exact alarms
+        // without the user toggling SCHEDULE_EXACT_ALARM. The capability check
+        // is what matters — NOT requestExactAlarmsPermission(), which can return
+        // false/null even when exact alarms are already allowed and would wrongly
+        // pin us to inexact. So read the real capability; only fall back to the
+        // settings prompt if it's genuinely unavailable.
         _exactAlarms =
-            await android.requestExactAlarmsPermission() ?? _exactAlarms;
+            await android.canScheduleExactNotifications() ?? true;
+        if (!_exactAlarms) {
+          await android.requestExactAlarmsPermission();
+          _exactAlarms =
+              await android.canScheduleExactNotifications() ?? _exactAlarms;
+        }
         return;
       }
       final ios = _plugin.resolvePlatformSpecificImplementation<
