@@ -2,20 +2,25 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../core/extensions.dart';
+import '../core/trip_progress.dart';
 import '../models/journey.dart';
 
-/// Client-side "Reisefortschritt": a live countdown + progress bar for an
-/// upcoming or in-progress journey. Computes everything on-device from the
-/// itinerary's times (ticking each 15 s) — the same model a future Live
-/// Activity / home-screen widget / watch face would render.
+/// Live "Reisefortschritt" card for an upcoming or in-progress journey, driven
+/// by the shared [TripProgress] engine (ticks every 15 s). Before departure it
+/// counts down to the train; on board it shows a progress bar to the
+/// destination plus the next transfer; after arrival it removes itself.
 ///
-/// Phases: before departure → "Zug fährt in X Min"; on board → a progress bar
-/// to the destination plus the next transfer's countdown; after arrival it
-/// removes itself.
+/// [activeOnly] hides it unless the trip is in progress or departs soon — used
+/// where the card sits among other content (the Reisen list) rather than on the
+/// trip's own detail screen.
 class TripProgressCard extends StatefulWidget {
   final Journey journey;
-  const TripProgressCard({super.key, required this.journey});
+  final bool activeOnly;
+  const TripProgressCard({
+    super.key,
+    required this.journey,
+    this.activeOnly = false,
+  });
 
   @override
   State<TripProgressCard> createState() => _TripProgressCardState();
@@ -38,42 +43,29 @@ class _TripProgressCardState extends State<TripProgressCard> {
     super.dispose();
   }
 
-  List<JourneyLeg> get _transit =>
-      widget.journey.legs.where((l) => !l.isWalking).toList();
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final now = DateTime.now();
-    final transit = _transit;
-    if (transit.isEmpty) return const SizedBox.shrink();
-
-    final dep = transit.first.departure ?? transit.first.plannedDeparture;
-    final arr = transit.last.arrival ?? transit.last.plannedArrival;
-    if (dep == null || arr == null) return const SizedBox.shrink();
-
-    // Trip already over → nothing to count down.
-    if (now.isAfter(arr)) return const SizedBox.shrink();
-
-    final beforeDeparture = now.isBefore(dep);
+    final p = TripProgress.of(widget.journey);
+    if (p == null || p.phase == TripPhase.finished) {
+      return const SizedBox.shrink();
+    }
+    if (widget.activeOnly && !p.isActive()) return const SizedBox.shrink();
 
     return Card(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
       color: theme.colorScheme.secondaryContainer,
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: beforeDeparture
-            ? _beforeDeparture(theme, now, dep)
-            : _onBoard(theme, now, dep, arr),
+        child: p.phase == TripPhase.upcoming
+            ? _beforeDeparture(theme, p)
+            : _onBoard(theme, p),
       ),
     );
   }
 
-  Widget _beforeDeparture(ThemeData theme, DateTime now, DateTime dep) {
-    final mins = dep.difference(now).inMinutes;
-    final origin = _transit.first.origin.name;
-    final plat = _transit.first.departurePlatform ??
-        _transit.first.plannedDeparturePlatform;
+  Widget _beforeDeparture(ThemeData theme, TripProgress p) {
+    final mins = p.minutesToDeparture;
     return Row(
       children: [
         Icon(Icons.schedule, color: theme.colorScheme.onSecondaryContainer),
@@ -90,7 +82,7 @@ class _TripProgressCardState extends State<TripProgressCard> {
                 ),
               ),
               Text(
-                'ab $origin · ${dep.hhmm}${plat != null ? ' · Gleis $plat' : ''}',
+                'ab ${p.originName} → ${p.destinationName}',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSecondaryContainer
                       .withValues(alpha: 0.8),
@@ -103,26 +95,7 @@ class _TripProgressCardState extends State<TripProgressCard> {
     );
   }
 
-  Widget _onBoard(ThemeData theme, DateTime now, DateTime dep, DateTime arr) {
-    final total = arr.difference(dep).inSeconds;
-    final done = now.difference(dep).inSeconds;
-    final progress = total <= 0 ? 1.0 : (done / total).clamp(0.0, 1.0);
-    final remaining = arr.difference(now).inMinutes;
-
-    // Next transfer still ahead?
-    final nextDep = _transit
-        .map((l) => l.departure ?? l.plannedDeparture)
-        .where((t) => t != null && t.isAfter(now))
-        .cast<DateTime?>()
-        .firstWhere((_) => true, orElse: () => null);
-    JourneyLeg? nextLeg;
-    if (nextDep != null) {
-      nextLeg = _transit.firstWhere(
-        (l) => (l.departure ?? l.plannedDeparture) == nextDep,
-        orElse: () => _transit.last,
-      );
-    }
-
+  Widget _onBoard(ThemeData theme, TripProgress p) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -132,16 +105,16 @@ class _TripProgressCardState extends State<TripProgressCard> {
             const SizedBox(width: 14),
             Expanded(
               child: Text(
-                remaining <= 0
+                p.minutesToArrival <= 0
                     ? 'Ankunft jetzt'
-                    : 'Noch ${_dur(remaining)} bis ${_transit.last.destination.name}',
+                    : 'Noch ${_dur(p.minutesToArrival)} bis ${p.destinationName}',
                 style: theme.textTheme.titleMedium?.copyWith(
                   fontWeight: FontWeight.bold,
                   color: theme.colorScheme.onSecondaryContainer,
                 ),
               ),
             ),
-            Text('${(progress * 100).round()} %',
+            Text('${(p.fraction * 100).round()} %',
                 style: theme.textTheme.labelLarge?.copyWith(
                   color: theme.colorScheme.onSecondaryContainer,
                 )),
@@ -151,30 +124,23 @@ class _TripProgressCardState extends State<TripProgressCard> {
         ClipRRect(
           borderRadius: BorderRadius.circular(4),
           child: LinearProgressIndicator(
-            value: progress,
+            value: p.fraction,
             minHeight: 6,
             backgroundColor:
                 theme.colorScheme.onSecondaryContainer.withValues(alpha: 0.15),
             color: theme.colorScheme.onSecondaryContainer,
           ),
         ),
-        if (nextLeg != null && nextLeg != _transit.first) ...[
+        if (p.nextTransferStation != null) ...[
           const SizedBox(height: 10),
-          Builder(builder: (_) {
-            final tDep = nextLeg!.departure ?? nextLeg.plannedDeparture;
-            final mins = tDep?.difference(now).inMinutes;
-            final plat = nextLeg.departurePlatform ??
-                nextLeg.plannedDeparturePlatform;
-            return Text(
-              'Umstieg in ${nextLeg.origin.name}'
-              '${mins != null ? ' · ${nextLeg.line?.displayName ?? "Anschluss"} in ${_dur(mins)}' : ''}'
-              '${plat != null ? ' · Gleis $plat' : ''}',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.onSecondaryContainer
-                    .withValues(alpha: 0.85),
-              ),
-            );
-          }),
+          Text(
+            'Umstieg in ${p.nextTransferStation}'
+            '${p.minutesToTransfer != null ? ' · in ${_dur(p.minutesToTransfer!)}' : ''}',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSecondaryContainer
+                  .withValues(alpha: 0.85),
+            ),
+          ),
         ],
       ],
     );

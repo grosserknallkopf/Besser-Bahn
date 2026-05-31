@@ -9,6 +9,7 @@ import '../../models/travel_stats.dart';
 import '../../providers/library_provider.dart';
 import '../../providers/travel_stats_provider.dart';
 import '../../widgets/app_menu_button.dart';
+import '../../widgets/trip_progress_card.dart';
 import '../connection_search/widgets/journey_card.dart';
 
 /// "Reisen" — the user's saved connections, like the DB Navigator. Upcoming
@@ -41,6 +42,12 @@ class JourneysScreen extends ConsumerWidget {
           : ListView(
               padding: const EdgeInsets.only(top: 8, bottom: 32),
               children: [
+                // Always-visible live Reisefortschritt for the soonest active
+                // trip (self-hides unless in progress or departing soon) — the
+                // in-app stand-in for a Live Activity / home widget.
+                if (upcoming.isNotEmpty)
+                  TripProgressCard(
+                      journey: upcoming.first.journey, activeOnly: true),
                 if (!stats.isEmpty) _statsTeaser(context, stats),
                 if (upcoming.isNotEmpty) ...[
                   _sectionHeader(context, 'Anstehende Reisen', upcoming.length),
