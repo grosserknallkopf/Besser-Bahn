@@ -26,6 +26,7 @@ import 'package:latlong2/latlong.dart';
 
 import '../core/platform_train.dart';
 import '../core/train_geometry.dart';
+import '../models/coach_sequence.dart';
 import '../models/station_map.dart';
 import '../services/station_map_service.dart';
 import '../theme/app_colors.dart';
@@ -152,6 +153,13 @@ class _PreviewPageState extends State<_PreviewPage> {
   List<({String ref, List<LatLng> pts})> _osmPlatforms = const [];
   List<List<LatLng>> _osmRails = const [];
 
+  /// Real Wagenreihung for a Gleis-7 train (fixture), if present.
+  CoachSequence? _cs;
+
+  /// Manual nudge of the whole train ALONG the rail, metres — to correct any
+  /// residual DB-metre ↔ OSM-rail offset (the "shift left/right").
+  double _shiftM = 0;
+
   @override
   void initState() {
     super.initState();
@@ -176,6 +184,11 @@ class _PreviewPageState extends State<_PreviewPage> {
               LatLng((q['lat'] as num).toDouble(), (q['lng'] as num).toDouble())
           ],
       ];
+      try {
+        _cs = CoachSequence.fromJson(
+            json.decode(_readFixture('hamburg-wagenreihung.json'))
+                as Map<String, dynamic>);
+      } catch (_) {/* optional — preview still shows the platform band */}
     } catch (e) {
       _loadError = e;
     }
@@ -332,97 +345,195 @@ class _PreviewPageState extends State<_PreviewPage> {
           body: Center(child: Text('Failed to load fixtures:\n$_loadError')));
     }
 
-    const hw = 2.95 / 2; // ICE half-width, metres
-    const nose = 5.0;
-
-    // Gleis 7's sector letters A–I (+ their positions) and the OSM platform area.
+    // Gleis 7's sector letters A–I (from cubes — used to anchor the DB metre
+    // axis onto the rail and to pick Gleis 7's side) and the OSM platform area.
     final letters = _cubeLetters(_map);
     final cubeSide = [for (final c in letters) c.pos];
     final osmPlat =
         _osmPlatforms.where((p) => p.ref.split(';').contains(_gleis)).toList();
-
-    // OSM rail curve for Gleis 7, then CLIP it to the sector span (I…A): the
-    // train is exactly platform-long and the throat bend past A is excluded.
     final rail = osmPlat.isNotEmpty
         ? _railFromEdge(_trackSideEdge(osmPlat.first.pts, cubeSide))
         : const <LatLng>[];
     final path = rail.length >= 2 ? RoutePath.build(rail) : null;
 
-    List<({String letter, LatLng pos})> sectors = const [];
-    List<LatLng> body = const [];
-    List<LatLng> bandSpine = const [];
-    if (path != null) {
-      // Each sector letter pinned onto the rail.
-      sectors = [
-        for (final c in letters) (letter: c.letter, pos: path.pointAt(path.locate(c.pos)))
-      ];
-      final arcs = [for (final c in letters) path.locate(c.pos)];
-      final lo = arcs.reduce(math.min) - nose;
-      final hi = arcs.reduce(math.max) + nose;
-      bandSpine = path.slice(lo, hi);
-      body = TrainGeometry.body(bandSpine,
-          halfWidthM: hw, noseStart: true, noseEnd: true, noseLenM: nose);
+    // DB platform-metre → rail arc-length. Anchor each DB sector's centre metre
+    // to that letter's cube projected on the rail, least-squares; _shiftM nudges
+    // the whole train along the rail for any residual DB↔OSM offset.
+    double Function(double)? arcOf;
+    if (path != null && _cs != null) {
+      final cubeArc = {
+        for (final c in letters)
+          if (letterIdx(c.letter) != null) letterIdx(c.letter)!: path.locate(c.pos)
+      };
+      final aM = <double>[], aArc = <double>[];
+      for (final s in _cs!.platform.sectors) {
+        final i = letterIdx(s.name);
+        final arc = i == null ? null : cubeArc[i];
+        if (arc == null) continue;
+        aM.add((s.start + s.end) / 2);
+        aArc.add(arc);
+      }
+      if (aM.length >= 2) {
+        final n = aM.length;
+        var sx = 0.0, sy = 0.0, sxx = 0.0, sxy = 0.0;
+        for (var i = 0; i < n; i++) {
+          sx += aM[i];
+          sy += aArc[i];
+          sxx += aM[i] * aM[i];
+          sxy += aM[i] * aArc[i];
+        }
+        final den = n * sxx - sx * sx;
+        if (den.abs() > 1e-9) {
+          final slope = (n * sxy - sx * sy) / den;
+          final icpt = (sy - slope * sx) / n;
+          arcOf = (m) => slope * m + icpt + _shiftM;
+        }
+      }
     }
 
-    final center = bandSpine.isNotEmpty
-        ? bandSpine[bandSpine.length ~/ 2]
-        : (letters.isNotEmpty ? letters[letters.length ~/ 2].pos : _map.center);
+    // One to-scale polygon per real coach, sliced from the rail between the
+    // coach's metre ends; first/second class coloured; DB sector marks too.
+    final coaches = <({List<LatLng> outline, Color color})>[];
+    final dbSectors = <({String letter, LatLng pos})>[];
+    LatLng? center;
+    if (path != null && arcOf != null && _cs != null) {
+      final cs = _cs!.allCoaches
+          .where((c) =>
+              c.platformPosition != null && c.platformPosition!.length > 0)
+          .toList();
+      for (var i = 0; i < cs.length; i++) {
+        final pp = cs[i].platformPosition!;
+        final spine = path.slice(arcOf(pp.start), arcOf(pp.end));
+        final outline = TrainGeometry.body(spine,
+            halfWidthM: 2.85 / 2,
+            noseStart: i == 0,
+            noseEnd: i == cs.length - 1,
+            noseLenM: 2.5);
+        if (outline.length >= 3) {
+          coaches.add((
+            outline: outline,
+            color: cs[i].isFirstClass
+                ? Colors.amber.shade600
+                : AppColors.secondClass,
+          ));
+        }
+      }
+      for (final s in _cs!.platform.sectors) {
+        dbSectors.add(
+            (letter: s.name, pos: path.pointAt(arcOf((s.start + s.end) / 2))));
+      }
+      if (coaches.isNotEmpty) {
+        final mid = cs[cs.length ~/ 2].platformPosition!;
+        center = path.pointAt(arcOf(mid.center));
+      }
+    }
+    center ??= (letters.isNotEmpty
+        ? letters[letters.length ~/ 2].pos
+        : _map.center);
+
+    final info = _cs == null
+        ? 'keine Wagenreihung-Fixture'
+        : '${_cs!.groups.map((g) => g.transport.category).toSet().join("/")} '
+            '· ${coaches.length} Wagen · Sektoren '
+            '${_cs!.platform.sectors.map((s) => s.name).join("")} '
+            '· Shift ${_shiftM.toStringAsFixed(0)} m';
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Hamburg Hbf — Gleis 7 · Zug I→A'),
+        title: const Text('Hamburg Hbf — Gleis 7 · echter Zug'),
         backgroundColor: AppColors.secondClass,
         foregroundColor: Colors.white,
       ),
-      body: FlutterMap(
-        options: MapOptions(
-          initialCenter: center,
-          initialZoom: 18,
-          minZoom: 15,
-          maxZoom: 20,
-        ),
+      body: Column(
         children: [
-          TileLayer(
-            urlTemplate:
-                'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}.png',
-            subdomains: const ['a', 'b', 'c', 'd'],
-            maxNativeZoom: 20,
-            maxZoom: 20,
-            userAgentPackageName: 'dev.chuk.besserbahn.preview',
-            errorTileCallback: (_, _, _) {},
+          Container(
+            width: double.infinity,
+            color: AppColors.secondClass,
+            padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 12),
+            child: Text(info,
+                style: const TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.w600)),
           ),
-          // The train body — built on the clipped OSM rail (Gleis 7, I→A).
-          if (body.length >= 3)
-            PolygonLayer(polygons: [
-              Polygon(
-                points: body,
-                color: AppColors.secondClass.withValues(alpha: 0.55),
-                borderColor: Colors.black87,
-                borderStrokeWidth: 1.5,
+          Expanded(
+            child: FlutterMap(
+              options: MapOptions(
+                initialCenter: center,
+                initialZoom: 18,
+                minZoom: 15,
+                maxZoom: 20,
               ),
-            ]),
-          // Sector letters A–I pinned on the rail.
-          MarkerLayer(markers: [
-            for (final s in sectors)
-              Marker(
-                point: s.pos,
-                width: 20,
-                height: 20,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: Colors.amber,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.black87, width: 1.5),
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(s.letter,
-                      style: const TextStyle(
-                          color: Colors.black,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w900)),
+              children: [
+                TileLayer(
+                  urlTemplate:
+                      'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_nolabels/{z}/{x}/{y}.png',
+                  subdomains: const ['a', 'b', 'c', 'd'],
+                  maxNativeZoom: 20,
+                  maxZoom: 20,
+                  userAgentPackageName: 'dev.chuk.besserbahn.preview',
+                  errorTileCallback: (_, _, _) {},
+                ),
+                // Faint OSM rails, to judge alignment.
+                PolylineLayer(polylines: [
+                  for (final r in _osmRails)
+                    Polyline(
+                        points: r,
+                        strokeWidth: 1,
+                        color: Colors.lightBlue.withValues(alpha: 0.4)),
+                ]),
+                // One polygon per real coach, to scale, on the rail.
+                PolygonLayer(polygons: [
+                  for (final c in coaches)
+                    Polygon(
+                      points: c.outline,
+                      color: c.color.withValues(alpha: 0.55),
+                      borderColor: Colors.black87,
+                      borderStrokeWidth: 1.2,
+                    ),
+                ]),
+                // DB platform sectors A–I, mapped onto the rail at their metres.
+                MarkerLayer(markers: [
+                  for (final s in dbSectors)
+                    Marker(
+                      point: s.pos,
+                      width: 20,
+                      height: 20,
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: Colors.amber,
+                          shape: BoxShape.circle,
+                          border:
+                              Border.all(color: Colors.black87, width: 1.5),
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(s.letter,
+                            style: const TextStyle(
+                                color: Colors.black,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w900)),
+                      ),
+                    ),
+                ]),
+              ],
+            ),
+          ),
+          // Shift the whole train left/right along the rail (DB↔OSM offset).
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            child: Row(children: [
+              const Text('◀ Shift'),
+              Expanded(
+                child: Slider(
+                  value: _shiftM,
+                  min: -60,
+                  max: 60,
+                  divisions: 120,
+                  label: '${_shiftM.toStringAsFixed(0)} m',
+                  onChanged: (v) => setState(() => _shiftM = v),
                 ),
               ),
-          ]),
+              const Text('▶'),
+            ]),
+          ),
         ],
       ),
     );
