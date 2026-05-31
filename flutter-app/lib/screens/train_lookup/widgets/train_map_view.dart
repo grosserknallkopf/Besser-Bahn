@@ -454,8 +454,10 @@ class _TrainMapState extends ConsumerState<TrainMap> {
         ),
         // Static parked trains, one polygon per Wagen on every stop's platform.
         // Drawn under the live train so the moving train wins where they meet.
-        if (parkedPolygons.isNotEmpty)
-          PolygonLayer(polygons: parkedPolygons, simplificationTolerance: 0),
+        // These are STATIC (don't move), so we let flutter_map simplify them
+        // (default tolerance) — fewer points reprojected per pan/zoom frame than
+        // tolerance:0, which we only need for the gliding live train.
+        if (parkedPolygons.isNotEmpty) PolygonLayer(polygons: parkedPolygons),
         // Wagon-number labels, only once a car is large enough on screen — i.e.
         // when the rider has zoomed into a stop (gated by metres/pixel, like the
         // live train), so they don't clutter the overview.

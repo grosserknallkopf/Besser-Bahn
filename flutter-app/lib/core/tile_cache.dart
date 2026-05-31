@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_tile_caching/flutter_map_tile_caching.dart';
+import 'package:vector_map_tiles/vector_map_tiles.dart';
 
 import 'app_log.dart';
 
@@ -103,24 +104,77 @@ class TileCache {
     }
   }
 
-  /// CARTO "Positron" raster tiles — same clean light-grey look, but plain PNG
-  /// RASTER instead of vector. Raster renders far lighter: the GPU just blits
-  /// ready images, whereas vector tiles re-rasterise geometry on the CPU every
-  /// pan/zoom — which was the "ultra slow" map rendering, brutal on desktop GL.
-  /// Keyless, multi-subdomain CDN, no style JSON to fetch → opens instantly.
-  static const String _positronRaster =
+  /// OpenFreeMap "Positron" — clean light-grey Positron look, German local
+  /// labels, free/keyless. Served as VECTOR tiles (rendered by vector_map_tiles)
+  /// — this is the host that's REACHABLE on the user's network (CARTO's raster
+  /// CDN is not, so a raster switch left the map blank + stormed). Warmed at
+  /// startup so the style is ready before the first map opens.
+  static const String _styleUri =
+      'https://tiles.openfreemap.org/styles/positron';
+
+  /// CARTO Positron raster — last-resort fallback ONLY if the vector style
+  /// permanently fails. (Not used during loading — see [outdoorLayer].)
+  static const String _fallbackTileUrl =
       'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png';
 
-  /// The shared outdoor base layer for every map. Plain raster — no style fetch,
-  /// no vector rasterisation, so it opens immediately and pans smoothly.
-  static Widget outdoorLayer() => TileLayer(
-        urlTemplate: _positronRaster,
+  static Future<Style>? _styleFuture;
+  static Style? _style;
+
+  /// Start loading the vector style NOW (fire-and-forget) at app startup, so the
+  /// first map already has it ready instead of paying the ~1-6 s fetch then.
+  static void warmStyle() {
+    _loadStyle().then((_) {}).catchError((_) {});
+  }
+
+  static Future<Style> _loadStyle() {
+    final sw = Stopwatch()..start();
+    return _styleFuture ??= StyleReader(uri: _styleUri)
+        .read()
+        .timeout(const Duration(seconds: 12))
+        .then((s) {
+      _style = s;
+      AppLog.log('vector basemap style loaded in ${sw.elapsedMilliseconds}ms',
+          tag: 'map');
+      return s;
+    }).catchError((Object e) {
+      AppLog.log('vector basemap style FAILED after ${sw.elapsedMilliseconds}ms '
+          '($e) → raster fallback', tag: 'map');
+      throw e;
+    });
+  }
+
+  /// The shared outdoor base layer (every map). Vector Positron once the style
+  /// is ready (warmed at startup). While still loading → plain background (NOT
+  /// a second tile host, which would double the load / storm if unreachable).
+  /// Only if the vector style PERMANENTLY fails do we drop to the CARTO raster.
+  static Widget outdoorLayer() {
+    final ready = _style;
+    if (ready != null) return _vectorLayer(ready);
+    return FutureBuilder<Style>(
+      future: _loadStyle(),
+      builder: (context, snap) {
+        if (snap.data != null) return _vectorLayer(snap.data!);
+        if (snap.hasError) return _rasterFallback();
+        return const SizedBox.shrink();
+      },
+    );
+  }
+
+  static Widget _vectorLayer(Style style) => VectorTileLayer(
+        theme: style.theme,
+        sprites: style.sprites,
+        tileProviders: style.providers,
+        fileCacheTtl: const Duration(days: 30),
+        maximumZoom: 20,
+        layerMode: VectorTileLayerMode.raster,
+      );
+
+  static TileLayer _rasterFallback() => TileLayer(
+        urlTemplate: _fallbackTileUrl,
         subdomains: const ['a', 'b', 'c', 'd'],
         userAgentPackageName: 'de.chuk.besserebahn',
         tileProvider: provider(),
         maxZoom: 20,
-        // Failed tile → transparent (no red FMTCBrowsingError dump); feed the
-        // circuit breaker + the quiet [tiles] timeline.
         evictErrorTileStrategy: EvictErrorTileStrategy.notVisible,
         errorImage: MemoryImage(_transparentTile),
         errorTileCallback: (_, error, _) {

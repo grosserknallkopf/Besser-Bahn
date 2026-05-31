@@ -17,6 +17,9 @@ Future<void> main() async {
   AppLog.installErrorCollapsing();
   // Best-effort: persistent on-disk tile cache. Failure is non-fatal.
   await TileCache.init();
+  // Warm the vector basemap style in the background so the first map opens with
+  // it ready (the style fetch was the main "takes a bit to open"). Fire-and-forget.
+  TileCache.warmStyle();
   // Best-effort: local notifications (Split-Ticket-Ergebnis). Non-fatal.
   await NotificationService.init();
   runApp(
