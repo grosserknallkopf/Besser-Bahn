@@ -900,9 +900,26 @@ def check_wagenreihung_split() -> str:
                 "+00:00", "Z"),
         }, headers=_browser_headers(), timeout=TIMEOUT)
     rr.raise_for_status()
-    groups = rr.json().get("groups", [])
+    seq = rr.json()
+    groups = seq.get("groups", [])
     if not groups:
         raise CheckError("vehicle-sequence returned no groups")
+
+    # The platform-train map (lib/dev/platform_preview + core/platform_train)
+    # places each coach to scale by MAPPING the DB metre axis onto the track:
+    # it needs platform.sectors[].{start,end} (sector A–I metre ranges) and each
+    # vehicle's platformPosition.{start,end,sector}. Assert that shape survives.
+    sectors = (seq.get("platform") or {}).get("sectors") or []
+    if not sectors or any(
+            not isinstance(s.get("start"), (int, float))
+            or not isinstance(s.get("end"), (int, float)) for s in sectors):
+        raise CheckError("platform.sectors missing numeric start/end metres")
+    positioned = [v for g in groups for v in (g.get("vehicles") or [])
+                  if isinstance(v.get("platformPosition"), dict)
+                  and (v["platformPosition"].get("end", 0)
+                       - v["platformPosition"].get("start", 0)) > 0]
+    if not positioned:
+        raise CheckError("no vehicle has a metre platformPosition (start<end)")
     dests = []
     for g in groups:
         t = g.get("transport")
