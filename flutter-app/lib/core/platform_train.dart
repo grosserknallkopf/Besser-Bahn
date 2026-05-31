@@ -487,14 +487,21 @@ List<({List<LatLng> outline, Coach coach, bool boarding})> platformTrainCars(
 /// the per-car, composition and generic bodies).
 ///
 /// Robustness matters: a sector cube occasionally gets assigned to the WRONG
-/// track island (the cubes carry no track id), and chaining it in letter order
-/// then yanks the curve 90° across to a neighbouring Gleis (the "ICE jumps to
-/// Gleis A" bug). So we (1) order cubes by their projection ALONG the
-/// platform's own best-fit axis — not by letter, which can be physically out of
-/// order — and (2) drop any cube sitting far off that axis (a stray from
-/// another track). Finally we extend both ends along their tangents so a train
-/// slightly longer than the cube span keeps going straight past the platform
-/// instead of piling up / cutting off.
+/// track island (the cubes carry no track id), and chaining their raw positions
+/// in letter order yanks the curve 90° across to a neighbouring Gleis (the "ICE
+/// jumps to Gleis A" bug) or folds it into a thin zig-zag.
+///
+/// So we DON'T chain raw cubes. We work in the platform's own axis frame
+/// (project each cube to a distance `t` ALONG the best-fit axis and a signed
+/// offset `perp` across it), then LEAST-SQUARES fit a gentle parabola
+/// `perp = A·t² + B·t + C`. That single smooth curve:
+///   * follows real platform curvature (Hamburg bends hard) — and stays curved
+///     all the way to the last sector, since nothing is dropped;
+///   * collapses to a straight line when the platform is straight (Kiel);
+///   * is barely moved by a stray cube on another track (least-squares damps a
+///     lone outlier to ~1/n of its offset) — no 90° jump, no fold;
+///   * is sampled densely so the body bends smoothly, and extended past both
+///     end sectors so a train longer than the cube span keeps going straight.
 List<LatLng> _cubeCurvePts(
     ({List<({int idx, LatLng pos})> cubes, double dLat, double dLon, PlatformLine? axis})
         island) {
@@ -508,72 +515,96 @@ List<LatLng> _cubeCurvePts(
   const mlat = 111320.0;
   final mlon = 111320.0 * math.cos(lat0 * math.pi / 180);
   math.Point<double> xy(LatLng p) => math.Point(p.longitude * mlon, p.latitude * mlat);
+  LatLng ll(math.Point<double> p) => LatLng(p.y / mlat, p.x / mlon);
 
   final line = fitLine([for (final c in cubes) xy(c.pos)]);
   if (line == null) return [for (final c in cubes) nud(c.pos)];
+  // Axis unit direction + its left normal, both in the metre frame.
+  final dx = line.dx, dy = line.dy;
+  final nx = -dy, ny = dx;
 
-  // Order cubes physically along the platform (by projection onto its axis),
-  // not by letter — letters can be slightly out of order.
-  final entries = [
-    for (final c in cubes)
-      (
-        pos: nud(c.pos),
-        mp: xy(c.pos),
-        t: (xy(c.pos).x - line.cx) * line.dx + (xy(c.pos).y - line.cy) * line.dy,
-      )
-  ]..sort((a, b) => a.t.compareTo(b.t));
+  // Project every cube: t along the axis, perp across it.
+  final ts = <double>[], ps = <double>[];
+  for (final c in cubes) {
+    final m = xy(c.pos);
+    final rx = m.x - line.cx, ry = m.y - line.cy;
+    ts.add(rx * dx + ry * dy);
+    ps.add(rx * nx + ry * ny);
+  }
 
-  // Drop strays LOCALLY, not against the straight axis: a cube assigned to a
-  // neighbouring track makes a sharp KINK relative to its two ordered
-  // neighbours, whereas honest platform curvature is smooth (every cube sits
-  // close to the chord of its neighbours). A global axis-distance filter would
-  // instead delete the cubes at a curved end (e.g. the last B), straightening
-  // the train — which is exactly the bug. So we iteratively remove the single
-  // worst kink while it exceeds the threshold; gentle curves (sagitta < ~3 m)
-  // survive untouched, a 90° stray (≫ track spacing) is dropped.
-  final kept = entries.toList();
-  while (kept.length > 2) {
-    var worst = -1;
-    var worstD = 0.0;
-    for (var i = 1; i < kept.length - 1; i++) {
-      final d = _distToChord(kept[i - 1].mp, kept[i].mp, kept[i + 1].mp);
-      if (d > worstD) {
-        worstD = d;
-        worst = i;
-      }
+  // Least-squares perp(t): quadratic when ≥3 cubes, else linear.
+  final coef = _fitPerp(ts, ps);
+  double perpAt(double t) => coef.a * t * t + coef.b * t + coef.c;
+
+  // Sample the smooth curve from before the first sector to past the last, so
+  // the body bends gradually and a long train continues straight off the ends.
+  var tMin = ts.reduce(math.min), tMax = ts.reduce(math.max);
+  const ext = 60.0;
+  tMin -= ext;
+  tMax += ext;
+  final span = tMax - tMin;
+  final steps = math.max(2, (span / 5.0).ceil());
+  final out = <LatLng>[];
+  for (var i = 0; i <= steps; i++) {
+    final t = tMin + span * i / steps;
+    final p = perpAt(t);
+    final mx = line.cx + dx * t + nx * p;
+    final my = line.cy + dy * t + ny * p;
+    out.add(nud(ll(math.Point(mx, my))));
+  }
+  return out;
+}
+
+/// Least-squares fit of `perp = a·t² + b·t + c`. Falls back to a line (a=0)
+/// for <3 points or a near-singular system (collinear t's).
+({double a, double b, double c}) _fitPerp(List<double> t, List<double> p) {
+  final n = t.length;
+  // Least-squares LINE perp = b·t + c — the fallback shape.
+  ({double a, double b, double c}) linear() {
+    var st = 0.0, sp = 0.0, stt = 0.0, stp = 0.0;
+    for (var i = 0; i < n; i++) {
+      st += t[i];
+      sp += p[i];
+      stt += t[i] * t[i];
+      stp += t[i] * p[i];
     }
-    if (worst < 0 || worstD <= 7.0) break;
-    kept.removeAt(worst);
+    final den = n * stt - st * st;
+    final b = den.abs() < 1e-9 ? 0.0 : (n * stp - st * sp) / den;
+    return (a: 0.0, b: b, c: (sp - b * st) / n);
   }
-  return _extendEnds([for (final e in kept) e.pos], 60.0);
-}
 
-/// Perpendicular distance from [p] to the infinite line through [a] and [b].
-double _distToChord(
-    math.Point<double> a, math.Point<double> p, math.Point<double> b) {
-  final abx = b.x - a.x, aby = b.y - a.y;
-  final len = math.sqrt(abx * abx + aby * aby);
-  if (len < 1e-6) return (p - a).magnitude;
-  return ((p.x - a.x) * aby - (p.y - a.y) * abx).abs() / len;
-}
+  if (n < 3) return linear();
 
-/// Extend a polyline by [byM] metres beyond each end along its end tangents, so
-/// a body sliced a little past the last vertex keeps going straight instead of
-/// clamping into a stub at the platform end.
-List<LatLng> _extendEnds(List<LatLng> pts, double byM) {
-  if (pts.length < 2) return pts;
-  const mlat = 111320.0;
-  final mlon = 111320.0 * math.cos(pts.first.latitude * math.pi / 180);
-  math.Point<double> xy(LatLng p) => math.Point(p.longitude * mlon, p.latitude * mlat);
-  LatLng ll(math.Point<double> p) => LatLng(p.y / mlat, p.x / mlon);
-  math.Point<double> unit(math.Point<double> d) {
-    final m = d.magnitude;
-    return m == 0 ? const math.Point(1.0, 0.0) : d * (1 / m);
+  var s0 = n.toDouble(),
+      s1 = 0.0,
+      s2 = 0.0,
+      s3 = 0.0,
+      s4 = 0.0,
+      sp0 = 0.0,
+      sp1 = 0.0,
+      sp2 = 0.0;
+  for (var i = 0; i < n; i++) {
+    final ti = t[i], pi = p[i];
+    final t2 = ti * ti;
+    s1 += ti;
+    s2 += t2;
+    s3 += t2 * ti;
+    s4 += t2 * t2;
+    sp0 += pi;
+    sp1 += pi * ti;
+    sp2 += pi * t2;
   }
-  final v = [for (final p in pts) xy(p)];
-  final head = v.first + unit(v.first - v[1]) * byM;
-  final tail = v.last + unit(v.last - v[v.length - 2]) * byM;
-  return [ll(head), ...pts, ll(tail)];
+  // Solve the 3×3 normal equations [[s4,s3,s2],[s3,s2,s1],[s2,s1,s0]]·[a,b,c]
+  // = [sp2,sp1,sp0] by Cramer's rule.
+  double det3(double a, double b, double c, double d, double e, double f,
+          double g, double h, double i) =>
+      a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+  final det = det3(s4, s3, s2, s3, s2, s1, s2, s1, s0);
+  if (det.abs() < 1e-6) return linear();
+  final a = det3(sp2, s3, s2, sp1, s2, s1, sp0, s1, s0) / det;
+  final b = det3(s4, sp2, s2, s3, sp1, s1, s2, sp0, s0) / det;
+  final c = det3(s4, s3, sp2, s3, s2, sp1, s2, s1, sp0) / det;
+  return (a: a, b: b, c: c);
 }
 
 /// The boarding-rail-nudged LatLng of a resolved sector cube.
