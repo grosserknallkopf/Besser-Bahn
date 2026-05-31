@@ -35,9 +35,20 @@ class TicketDetailScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final key = '$auftragsnummer/$kundenwunschId';
     final ticket = ref.watch(ticketProvider(key));
+    final reservations = ticket.asData?.value.reservierungen ?? const [];
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Ticket')),
+      appBar: AppBar(
+        title: const Text('Ticket'),
+        actions: [
+          if (reservations.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.event_seat_outlined),
+              tooltip: 'Reservierte Sitzplätze',
+              onPressed: () => _showReservations(context, reservations),
+            ),
+        ],
+      ),
       body: ticket.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(
@@ -64,6 +75,82 @@ class TicketDetailScreen extends ConsumerWidget {
             ? _OfficialTicketWebView(html: t.ticketHtml!)
             : _FallbackTicket(ticket: t),
       ),
+    );
+  }
+
+  void _showReservations(
+      BuildContext context, List<DbReservierung> reservations) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        final theme = Theme.of(ctx);
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Deine Reservierung', style: theme.textTheme.titleLarge),
+                const SizedBox(height: 12),
+                for (final r in reservations) ...[
+                  Card(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(Icons.train,
+                                  size: 20, color: theme.colorScheme.primary),
+                              const SizedBox(width: 8),
+                              Text(r.trainLabel,
+                                  style: theme.textTheme.titleMedium),
+                            ],
+                          ),
+                          if (r.vonName != null || r.nachName != null) ...[
+                            const SizedBox(height: 4),
+                            Text('${r.vonName ?? ''} → ${r.nachName ?? ''}',
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                    color: theme.colorScheme.outline)),
+                          ],
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Icon(Icons.event_seat,
+                                  size: 20, color: theme.colorScheme.primary),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                    r.plaetze.isEmpty
+                                        ? '${r.anzahlPlaetze} Platz reserviert'
+                                        : r.seatLabel,
+                                    style: theme.textTheme.bodyLarge),
+                              ),
+                            ],
+                          ),
+                          if (r.firstWagon != null) ...[
+                            const SizedBox(height: 6),
+                            Text(
+                              'Wagen ${r.firstWagon} — am Bahnsteig findest du '
+                              'die Wagenreihung in der Bahnhofskarte.',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.colorScheme.outline),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }

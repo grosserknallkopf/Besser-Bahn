@@ -61,6 +61,9 @@ class DbTicket {
   final String? kciTicketRefId;
   final String? tripUUID;
 
+  /// Seat/bike reservations on this ticket (train, coach, seat).
+  final List<DbReservierung> reservierungen;
+
   const DbTicket({
     required this.auftragsnummer,
     required this.kundenwunschId,
@@ -80,6 +83,7 @@ class DbTicket {
     this.ticketHtml,
     this.kciTicketRefId,
     this.tripUUID,
+    this.reservierungen = const [],
   });
 
   bool get firstClass => klasse == 'KLASSE_1';
@@ -121,6 +125,10 @@ class DbTicket {
       kciTicketRefId: info['kciTicketRefId'] as String?,
       tripUUID: ((info['verbindung'] as Map<String, dynamic>?)?['tripUUID'])
           as String?,
+      reservierungen: (info['reservierungen'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(DbReservierung.fromJson)
+          .toList(),
     );
   }
 
@@ -197,4 +205,69 @@ class DbTicket {
     if (r.contains('BAHNCARD25')) return 'BahnCard 25';
     return null;
   }
+}
+
+/// A single seat/bike reservation on a ticket (from `reiseInfos.reservierungen`).
+class DbReservierung {
+  final String? serviceName; // "ICE", "RJ" …
+  final String zugnummer;
+  final String? kategorie; // SITZPLATZ / FAHRRAD …
+  final int anzahlPlaetze;
+  final List<DbPlatz> plaetze; // coach + seat description
+  final String? vonName;
+  final String? nachName;
+
+  const DbReservierung({
+    required this.zugnummer,
+    this.serviceName,
+    this.kategorie,
+    this.anzahlPlaetze = 1,
+    this.plaetze = const [],
+    this.vonName,
+    this.nachName,
+  });
+
+  /// First reserved coach number (for locating it on the platform), if numeric.
+  int? get firstWagon =>
+      plaetze.isEmpty ? null : int.tryParse(plaetze.first.wagen);
+
+  /// "ICE 584" / "RJ 88".
+  String get trainLabel =>
+      [serviceName, zugnummer].where((s) => (s ?? '').isNotEmpty).join(' ');
+
+  /// "Wagen 22 · Platz 88" (joins all reserved seats).
+  String get seatLabel => plaetze
+      .map((p) => 'Wagen ${p.wagen}'
+          '${p.platz.isNotEmpty ? ' · Platz ${p.platz}' : ''}')
+      .join('   ');
+
+  factory DbReservierung.fromJson(Map<String, dynamic> j) {
+    final wagen = (j['wagen'] as List<dynamic>? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map(DbPlatz.fromJson)
+        .toList();
+    final von = j['abgangsOrt'] as Map<String, dynamic>?;
+    final nach = j['ankunftsOrt'] as Map<String, dynamic>?;
+    return DbReservierung(
+      serviceName: j['serviceName'] as String?,
+      zugnummer: (j['zugnummer'] ?? '').toString(),
+      kategorie: j['kategorie'] as String?,
+      anzahlPlaetze: (j['anzahlPlaetze'] as num?)?.toInt() ?? 1,
+      plaetze: wagen,
+      vonName: von?['name'] as String?,
+      nachName: nach?['name'] as String?,
+    );
+  }
+}
+
+class DbPlatz {
+  final String wagen;
+  final String platz; // seat description, e.g. "88" or "12"
+
+  const DbPlatz({required this.wagen, required this.platz});
+
+  factory DbPlatz.fromJson(Map<String, dynamic> j) => DbPlatz(
+        wagen: (j['nummer'] ?? '').toString(),
+        platz: (j['plaetzeBeschreibung'] ?? '').toString(),
+      );
 }
