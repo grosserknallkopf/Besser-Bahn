@@ -123,7 +123,14 @@ class _ParkedStop {
   /// coach-less entry (`coach == null`) when there's no Wagenreihung and we draw
   /// just a generic to-scale body to mark where the train stands.
   final List<({List<LatLng> outline, Coach? coach, bool boarding})> cars;
-  const _ParkedStop(this.cars);
+
+  /// True only when DB gave this stop's exact sector positions (the cube-
+  /// anchored placement). False = best-effort: we know the track but placed the
+  /// train centred on the platform because DB published no position here — shown
+  /// transparent + dashed + a "ca." badge so the rider sees it's an estimate.
+  final bool exact;
+
+  const _ParkedStop(this.cars, {required this.exact});
 }
 
 /// The actual flutter_map for a trip: route polyline, stops, the parked trains
@@ -361,17 +368,25 @@ class _TrainMapState extends ConsumerState<TrainMap> {
       departureTime: s.departure ?? s.arrival,
     );
 
+    // Exact placement needs BOTH a per-stop Wagenreihung AND sector cubes to
+    // anchor it (the cube-LSQ path). Without cubes the cars are merely centred
+    // on the platform — an estimate — even with a Wagenreihung.
+    final hasCubes = pt.platformCubeSide(map, gleis).length >= 2;
+    var exact = false;
+
     final cars = <({List<LatLng> outline, Coach? coach, bool boarding})>[];
     if (cs != null) {
-      // Real coaches at EXACT, DB-given positions: cube-anchored where cubes
-      // exist (exact sector alignment), else composition-on-rail.
-      cars.addAll(pt.platformTrainCars(
+      // Real coaches: cube-anchored where cubes exist (EXACT sector alignment),
+      // else composition-on-rail (right track, centred — an estimate).
+      final placed = pt.platformTrainCars(
         map,
         gleis: gleis,
         section: section,
         cs: cs,
         osmRail: osmRail,
-      ));
+      );
+      cars.addAll(placed);
+      if (placed.isNotEmpty) exact = hasCubes;
     }
     if (cars.isEmpty && widget.coachSequence != null) {
       // No per-stop Wagenreihung (DB publishes it per DEPARTURE; at a terminus
@@ -405,7 +420,7 @@ class _TrainMapState extends ConsumerState<TrainMap> {
       }
     }
     if (cars.isNotEmpty) {
-      _parked[i] = _ParkedStop(cars);
+      _parked[i] = _ParkedStop(cars, exact: exact);
       if (mounted) setState(() {});
     }
     // If this stop is the one the rider just zoomed to, now that its map is in
@@ -535,22 +550,48 @@ class _TrainMapState extends ConsumerState<TrainMap> {
     // zooms into a stop — intended.
     final parkedPolygons = <Polygon>[];
     final parkedCars = <({List<LatLng> outline, Coach? coach, bool boarding})>[];
+    // Centre of each ESTIMATED stop's train, for the "ca." (Position geschätzt)
+    // badge — so the rider clearly sees where we're sure vs. just guessing.
+    final estimatedCenters = <LatLng>[];
     for (final entry in _parked.entries) {
       if (entry.key < seg.lo || entry.key > seg.hi) continue;
-      for (final car in entry.value.cars) {
-        if (car.outline.length < 3) continue;
+      final stop = entry.value;
+      final cars = stop.cars.where((c) => c.outline.length >= 3).toList();
+      if (cars.isEmpty) continue;
+      if (!stop.exact) {
+        // Mean of all car centroids → one badge anchor for the whole train.
+        var lat = 0.0, lon = 0.0, n = 0;
+        for (final c in cars) {
+          for (final p in c.outline) {
+            lat += p.latitude;
+            lon += p.longitude;
+            n++;
+          }
+        }
+        if (n > 0) estimatedCenters.add(LatLng(lat / n, lon / n));
+      }
+      for (final car in cars) {
         parkedCars.add(car);
         // A coach-less generic body (no Wagenreihung) uses the neutral loco
         // colour; real coaches keep their class colour.
         final base = car.coach != null
             ? coachColor(car.coach!)
             : AppColors.locomotive;
-        final fill = car.boarding ? base : base.withValues(alpha: 0.45);
+        var fill = car.boarding ? base : base.withValues(alpha: 0.45);
+        // ESTIMATED placement (DB gave no position here): draw it clearly
+        // unsure — more transparent, dashed white-ish border — so it never
+        // reads as a precise "the train stands exactly here".
+        if (!stop.exact) fill = fill.withValues(alpha: 0.28);
         parkedPolygons.add(Polygon(
           points: car.outline,
           color: fill,
-          borderColor: Colors.white.withValues(alpha: 0.9),
-          borderStrokeWidth: 1.2,
+          borderColor: stop.exact
+              ? Colors.white.withValues(alpha: 0.9)
+              : const Color(0xFFCC8800).withValues(alpha: 0.95),
+          borderStrokeWidth: stop.exact ? 1.2 : 1.4,
+          pattern: stop.exact
+              ? const StrokePattern.solid()
+              : StrokePattern.dashed(segments: const [6, 4]),
         ));
       }
     }
@@ -606,6 +647,10 @@ class _TrainMapState extends ConsumerState<TrainMap> {
         // when the rider has zoomed into a stop (gated by metres/pixel, like the
         // live train), so they don't clutter the overview.
         if (parkedCars.isNotEmpty) _ParkedNumbers(cars: parkedCars),
+        // "ca." badge over any train placed WITHOUT an exact DB position, shown
+        // once zoomed into the platform — the rider sees it's an estimate.
+        if (estimatedCenters.isNotEmpty)
+          _EstimatedBadges(centers: estimatedCenters),
         // Gleis ("Gleis 5") + sector (A–E) labels for the focused stop, shown
         // only when zoomed in. Static geometry, computed once on focus change.
         if (_focusSectors.isNotEmpty || _focusGleise.isNotEmpty)
@@ -687,6 +732,53 @@ class _ParkedNumbers extends StatelessWidget {
           ),
         ),
       );
+}
+
+/// A small "ca." chip centred on a train that was placed WITHOUT an exact DB
+/// position (DB published no Wagenreihung at that stop, so it's centred on the
+/// platform as a best guess). Shown only when zoomed into the platform, so the
+/// rider unmistakably sees which trains are precise and which are estimated.
+/// Static geometry — rebuilds on camera change via flutter_map's listenable.
+class _EstimatedBadges extends StatelessWidget {
+  final List<LatLng> centers;
+  const _EstimatedBadges({required this.centers});
+
+  @override
+  Widget build(BuildContext context) {
+    final cam = MapCamera.of(context);
+    // Only at platform-level zoom — otherwise the chip clutters the overview
+    // where the to-scale train is a speck anyway.
+    if (cam.zoom < 16.5) return const SizedBox.shrink();
+    return MarkerLayer(
+      markers: [
+        for (final c in centers)
+          Marker(
+            point: c,
+            width: 80,
+            height: 18,
+            child: Center(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFCC8800).withValues(alpha: 0.92),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: const Text(
+                  'ca. Position',
+                  overflow: TextOverflow.clip,
+                  maxLines: 1,
+                  style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 /// The focused stop's platform labels: the Gleis numbers (e.g. "Gleis 5") at
