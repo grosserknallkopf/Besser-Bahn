@@ -119,14 +119,22 @@ class TileCache {
   static Future<Style>? _styleFuture;
   static Style? _style; // resolved style, cached so later maps skip the fetch
 
+  /// Start loading the vector style NOW (fire-and-forget), so the FIRST map the
+  /// rider opens already has it ready instead of paying the ~5 s fetch then.
+  /// Called once at app startup. Errors are swallowed (falls back to raster).
+  static void warmStyle() {
+    _loadStyle().then((_) {}).catchError((_) {});
+  }
+
   static Future<Style> _loadStyle() {
     final sw = Stopwatch()..start();
     return _styleFuture ??= StyleReader(uri: _styleUri)
         .read()
-        // Fail fast to the raster fallback if the vector style host is slow /
-        // unreachable, instead of blocking the map for 10 s+ (a normal device
-        // resolves this in 1-2 s, so the timeout only bites when offline).
-        .timeout(const Duration(seconds: 6))
+        // Generous timeout: this is warmed at startup in the background (not
+        // blocking any map), and on a congested link the style legitimately
+        // takes ~6 s — cutting it shorter would needlessly drop to the raster
+        // fallback. A normal device resolves it in 1-2 s.
+        .timeout(const Duration(seconds: 12))
         .then((s) {
       _style = s;
       AppLog.log('vector basemap style loaded in ${sw.elapsedMilliseconds}ms',
