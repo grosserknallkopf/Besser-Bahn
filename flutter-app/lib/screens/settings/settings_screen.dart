@@ -134,6 +134,19 @@ class SettingsScreen extends ConsumerWidget {
                     },
                   ),
                 ],
+                const Divider(height: 1),
+                SwitchListTile(
+                  secondary: const Icon(Icons.my_location),
+                  title: const Text('GPS-Ausstiegsalarm'),
+                  subtitle: const Text(
+                      'Klingelt per Standort, sobald du am Ziel ankommst — '
+                      'verspätungssicher (App muss offen sein).'),
+                  value: settings.exitAlarmEnabled,
+                  onChanged: (v) {
+                    notifier.setExitAlarmEnabled(v);
+                    if (v) NotificationService.requestPermissions();
+                  },
+                ),
               ],
             ),
           ),

@@ -182,6 +182,24 @@ class NotificationService {
     }
   }
 
+  /// Fire the loud "Ankunfts-Wecker" *right now* — the GPS exit-alarm path
+  /// (live tracker noticed we're inside the destination's radius). Same
+  /// insistent, stoppable alarm as the scheduled one. [id] in 3000-3999 so it
+  /// replaces rather than stacks.
+  static Future<void> showExitAlarm({
+    required int id,
+    required String title,
+    required String body,
+  }) async {
+    if (!_ready) await init();
+    await _ensurePermission();
+    try {
+      await _plugin.show(3000 + (id % 1000), title, body, _alarmDetails());
+    } catch (e) {
+      AppLog.log('exit alarm show failed ($e)', tag: 'notify');
+    }
+  }
+
   // ---- Scheduled trip reminders (planned offline from the timetable) ----
 
   /// Schedule a reminder to fire at [when] (a wall-clock instant in the local

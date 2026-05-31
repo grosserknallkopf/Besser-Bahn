@@ -44,6 +44,11 @@ class AppSettings {
   /// since it's deliberately hard to sleep through.
   final bool arrivalAlarmSound;
 
+  /// GPS "Ausstiegsalarm": while on board and the app is open, ring the loud
+  /// alarm the moment the device enters the destination's radius — delay-proof,
+  /// unlike the timetable-based arrival ping. Off by default (uses location).
+  final bool exitAlarmEnabled;
+
   const AppSettings({
     this.bahnCard = BahnCardType.none,
     this.hasDeutschlandTicket = false,
@@ -56,6 +61,7 @@ class AppSettings {
     this.transferAlerts = true,
     this.arrivalAlertEnabled = true,
     this.arrivalAlarmSound = false,
+    this.exitAlarmEnabled = false,
     this.searchParty = const SearchParty(),
   });
 
@@ -71,6 +77,7 @@ class AppSettings {
     bool? transferAlerts,
     bool? arrivalAlertEnabled,
     bool? arrivalAlarmSound,
+    bool? exitAlarmEnabled,
     SearchParty? searchParty,
   }) {
     return AppSettings(
@@ -85,6 +92,7 @@ class AppSettings {
       transferAlerts: transferAlerts ?? this.transferAlerts,
       arrivalAlertEnabled: arrivalAlertEnabled ?? this.arrivalAlertEnabled,
       arrivalAlarmSound: arrivalAlarmSound ?? this.arrivalAlarmSound,
+      exitAlarmEnabled: exitAlarmEnabled ?? this.exitAlarmEnabled,
       searchParty: searchParty ?? this.searchParty,
     );
   }
@@ -113,6 +121,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
       transferAlerts: prefs.getBool('transferAlerts') ?? true,
       arrivalAlertEnabled: prefs.getBool('arrivalAlertEnabled') ?? true,
       arrivalAlarmSound: prefs.getBool('arrivalAlarmSound') ?? false,
+      exitAlarmEnabled: prefs.getBool('exitAlarmEnabled') ?? false,
       // First run (no stored party): seed from the single-card settings so the
       // search behaves exactly as before until the user customises the party.
       searchParty: SearchParty.tryDecode(prefs.getString('searchParty')) ??
@@ -133,6 +142,7 @@ class SettingsNotifier extends Notifier<AppSettings> {
     await prefs.setBool('transferAlerts', state.transferAlerts);
     await prefs.setBool('arrivalAlertEnabled', state.arrivalAlertEnabled);
     await prefs.setBool('arrivalAlarmSound', state.arrivalAlarmSound);
+    await prefs.setBool('exitAlarmEnabled', state.exitAlarmEnabled);
     await prefs.setString('searchParty', state.searchParty.encode());
   }
 
@@ -202,6 +212,11 @@ class SettingsNotifier extends Notifier<AppSettings> {
 
   void setArrivalAlarmSound(bool value) {
     state = state.copyWith(arrivalAlarmSound: value);
+    _save();
+  }
+
+  void setExitAlarmEnabled(bool value) {
+    state = state.copyWith(exitAlarmEnabled: value);
     _save();
   }
 }

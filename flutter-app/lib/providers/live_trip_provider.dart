@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:latlong2/latlong.dart';
 
 import '../core/app_log.dart';
 import '../core/extensions.dart';
@@ -197,6 +198,11 @@ class LiveTripTracker extends Notifier<LiveTripState>
       }
     }
 
+    // GPS "Ausstiegsalarm": once on board and closing in on the alighting stop,
+    // ring the loud alarm the moment we physically enter its radius — works
+    // even when the timetable is wrong.
+    if (boarded) await _checkExitGeofence(leg);
+
     // Transfer risk: is there still time to catch the next train?
     final next = idx + 1 < transit.length ? transit[idx + 1] : null;
     if (next != null && next.tripId != null) {
@@ -260,6 +266,41 @@ class LiveTripTracker extends Notifier<LiveTripState>
       body = 'Nur $gap Min in $station · ab ${dep.hhmm}, beeil dich.';
     }
     _alertOnce('transfer:$tripId', '$gap', title: title, body: body);
+  }
+
+  /// Radius around the alighting stop that trips the GPS exit alarm.
+  static const double _exitRadiusMetres = 1500;
+
+  /// GPS exit alarm. Only runs when the user opted in, the alighting stop has
+  /// coordinates, and arrival is within ~20 min (so we don't burn GPS the whole
+  /// trip). Fires the loud alarm once when the device is inside the radius.
+  Future<void> _checkExitGeofence(JourneyLeg leg) async {
+    if (!ref.read(settingsProvider).exitAlarmEnabled) return;
+    final dest = leg.destination;
+    if (!dest.hasLocation) return;
+    final arr = leg.arrival ?? leg.plannedArrival;
+    if (arr != null && arr.difference(DateTime.now()) > const Duration(minutes: 20)) {
+      return;
+    }
+    final key = 'exit:${dest.id}';
+    if (_lastAlert[key] != null) return; // already rung for this stop
+    try {
+      final fix = await ref.read(locationServiceProvider).currentFix();
+      final metres = const Distance().as(
+        LengthUnit.Meter,
+        fix.latLng,
+        LatLng(dest.latitude!, dest.longitude!),
+      );
+      if (metres <= _exitRadiusMetres) {
+        _lastAlert[key] = '1';
+        NotificationService.showExitAlarm(
+          id: key.hashCode,
+          title: 'Gleich aussteigen: ${dest.name}',
+          body: 'Du bist fast da — ${dest.name}. Sachen schnappen!',
+        );
+        AppLog.log('exit alarm fired near ${dest.name}', tag: 'live');
+      }
+    } catch (_) {/* no fix / permission denied — stay quiet */}
   }
 
   /// Fire an alert for [key] only when [value] differs from what we last sent
