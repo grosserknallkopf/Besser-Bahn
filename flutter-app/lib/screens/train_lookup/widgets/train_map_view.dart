@@ -495,27 +495,16 @@ class _ParkedNumbers extends StatelessWidget {
     final markers = <Marker>[];
     for (final car in cars) {
       if (car.coach.wagonNumber <= 0 || car.outline.length < 3) continue;
-      // Cheap early-out for the overview zoom (where every car is a speck and
-      // all of these get rejected): the body's two long ends sit at the start
-      // of the ring and just past its half — project only those and skip the
-      // full O(n²) span scan unless that one span is already near the
-      // threshold. Avoids projecting every ring point of every car per camera
-      // frame across a whole multi-stop route.
+      // O(1) per car: the body is a thin sleeve, so its on-screen length is the
+      // distance between the two NOSE ends — the first ring vertex and the one
+      // at the half-way point. Project only those two (not the whole ring, and
+      // NOT an O(n²) all-pairs scan) — this runs every camera frame across all
+      // stops, so it has to stay cheap. Show the number once that span is big
+      // enough that the rider has zoomed into the platform.
       final ring = car.outline;
       final a = cam.latLngToScreenOffset(ring.first);
       final b = cam.latLngToScreenOffset(ring[ring.length ~/ 2]);
-      if ((a - b).distance < 18) continue;
-      // Car width on screen: the longest screen span between ring points. Show
-      // the number only when it comfortably fits (≈ a zoomed-in platform).
-      final pts = [for (final p in ring) cam.latLngToScreenOffset(p)];
-      var maxSpan = 0.0;
-      for (var i = 0; i < pts.length; i++) {
-        for (var j = i + 1; j < pts.length; j++) {
-          final d = (pts[i] - pts[j]).distance;
-          if (d > maxSpan) maxSpan = d;
-        }
-      }
-      if (maxSpan < 22) continue;
+      if ((a - b).distance < 22) continue;
       markers.add(_numberMarker(
           _centroid(car.outline), car.coach.wagonNumber, coachColor(car.coach)));
     }
