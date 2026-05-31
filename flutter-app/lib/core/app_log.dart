@@ -83,12 +83,15 @@ class AppLog {
     if (h.isNotEmpty) _tileHost = h;
     if (_tileBurstStartMs == 0) _tileBurstStartMs = _tileClock.elapsedMilliseconds;
     _tileTimer ??= Timer.periodic(const Duration(seconds: 2), (_) => _tileTick());
-    // Burst → pause the base map so the storm can't form. Probe again in 10s.
-    if (!tilesPaused.value && _tileWindow >= 30) {
+    // Pause ONLY on a true flood — the Linux socket-exhaustion storm was
+    // 3000-4000 fails/2s; normal tile churn (zoom loads many tiles, a few blip)
+    // must never trip it, or the map needlessly goes blank. High threshold,
+    // short probe.
+    if (!tilesPaused.value && _tileWindow >= 250) {
       tilesPaused.value = true;
-      log('tile host(s) unreachable → pausing base map 10s', tag: 'tiles');
+      log('tile flood ($_tileWindow/2s) → pausing base map 4s', tag: 'tiles');
       _pauseTimer?.cancel();
-      _pauseTimer = Timer(const Duration(seconds: 10), () {
+      _pauseTimer = Timer(const Duration(seconds: 4), () {
         _tileWindow = 0;
         tilesPaused.value = false; // probe whether tiles are back
       });

@@ -1,8 +1,11 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_map_tile_caching/flutter_map_tile_caching.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 import 'package:vector_map_tiles/vector_map_tiles.dart';
 
 import 'app_log.dart';
@@ -61,8 +64,25 @@ class TileCache {
     }
   }
 
+  /// Shared HTTP client for ALL tile fetches, with a HARD cap on concurrent
+  /// connections per host. This is the core fix for "the map chokes the whole
+  /// app": flutter_map/FMTC otherwise open UNLIMITED parallel connections, and
+  /// NetworkTileProvider's default wraps a RetryClient that retries every
+  /// failure — so a wide map fires hundreds-to-thousands of tile requests at
+  /// once, saturating the app's connection pool until unrelated calls
+  /// (bahnhof.de station maps, the route polyline) time out. Verified: the
+  /// device reaches every host in <1 s via curl, yet the app timed out at 12 s —
+  /// self-inflicted by the flood. Capping connections makes excess tiles QUEUE
+  /// instead of flooding, and NO RetryClient means no failure amplification.
+  static final http.Client _tileHttp = IOClient(
+    HttpClient()
+      ..maxConnectionsPerHost = 6
+      ..connectionTimeout = const Duration(seconds: 12),
+  );
+
   /// A caching tile provider when the cache is up, else a plain network one,
-  /// wrapped in a circuit breaker (see [_BreakerTileProvider]).
+  /// wrapped in a circuit breaker (see [_BreakerTileProvider]). Both use the
+  /// shared connection-capped [_tileHttp].
   /// [headers] is forwarded (e.g. the `Referer` the indoor tiles require).
   static TileProvider provider({Map<String, String>? headers}) {
     final TileProvider inner = _ready
@@ -71,8 +91,12 @@ class TileCache {
             loadingStrategy: BrowseLoadingStrategy.cacheFirst,
             cachedValidDuration: const Duration(days: 30),
             headers: headers,
+            httpClient: _tileHttp,
           )
-        : NetworkTileProvider(headers: headers ?? const {});
+        : NetworkTileProvider(
+            headers: headers ?? const {},
+            httpClient: _tileHttp,
+          );
     return _BreakerTileProvider(inner);
   }
 
@@ -97,10 +121,9 @@ class TileCache {
       _failCount = 0;
     }
     _failCount++;
-    if (_failCount >= 24) {
-      _blockUntil = now.add(const Duration(seconds: 8));
+    if (_failCount >= 250) {
+      _blockUntil = now.add(const Duration(seconds: 4));
       _failCount = 0;
-      AppLog.log('tile host unreachable → pausing tile fetches 8s', tag: 'tiles');
     }
   }
 
