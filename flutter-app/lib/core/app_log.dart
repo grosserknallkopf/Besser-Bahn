@@ -162,6 +162,14 @@ class AppLog {
         tileError(s);
         return true; // handled — don't dump the stack
       }
+      // vector_map_tiles cancels in-flight tile-render jobs when tiles scroll
+      // out of view — benign, but surfaces as an unhandled 'Cancelled' with a
+      // long executor stack. Swallow quietly (NOT counted as a tile failure).
+      if (s == 'Cancelled' &&
+          (stack.toString().contains('vector_map_tiles') ||
+              stack.toString().contains('executor_lib'))) {
+        return true;
+      }
       return prevPlatform?.call(error, stack) ?? false;
     };
 
