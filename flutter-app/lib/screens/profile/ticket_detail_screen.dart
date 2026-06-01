@@ -5,12 +5,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart'
+    show AndroidWebViewController;
 
+import '../../models/db_account.dart' show DbBahnCard;
 import '../../models/db_ticket.dart';
 import '../../models/journey.dart';
 import '../../providers/account_provider.dart';
 import '../../providers/service_providers.dart';
 import '../connection_search/connection_detail_screen.dart';
+import 'widgets/bahncard_view.dart' show openBahnCardControl;
 
 /// Entry point for a booked ticket from the Reisen tab. Loads the ticket,
 /// parses its `verbindung` into a [Journey], then defers to
@@ -108,6 +112,11 @@ class TicketViewScreen extends ConsumerWidget {
     final key = '${ticketRef.auftragsnummer}/${ticketRef.kundenwunschId}';
     final ticket = ref.watch(ticketProvider(key));
     final reservations = ticket.asData?.value.reservierungen ?? const [];
+    // Conductors usually want both ticket and BahnCard during inspection —
+    // surface a fast-switch button here when the user holds one.
+    final bahncardsAsync = ref.watch(bahncardsProvider);
+    final bahncards =
+        bahncardsAsync.asData?.value ?? const <DbBahnCard>[];
 
     return Scaffold(
       // Theme background (the dark/brown app surface) shows between the two
@@ -116,6 +125,13 @@ class TicketViewScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Ticket'),
         actions: [
+          if (bahncards.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.credit_card),
+              tooltip: 'BahnCard · Kontrolle',
+              onPressed: () =>
+                  openBahnCardControl(context, bahncards.first),
+            ),
           if (reservations.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.event_seat_outlined),
@@ -141,30 +157,26 @@ class TicketViewScreen extends ConsumerWidget {
   Widget _body(BuildContext context, DbTicket t) {
     return Column(
       children: [
-        // White status card at the top of the page, sitting on the theme bg.
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+        // White status block, edge-to-edge, square corners — the only "brown"
+        // surface visible is the AppBar at the top and the horizontal stripe
+        // between this block and the ticket. Matches the official app.
+        ColoredBox(
+          color: Colors.white,
           child: _TicketStatusBlock(ticket: t),
         ),
-        // Visible ~1cm gap of theme background between the validity header
-        // and the ticket itself — matches the official app's spacing.
-        const SizedBox(height: 24),
-        // White ticket card, bigger inset around the WebView so the QR/Aztec
-        // has equal breathing room on all sides.
+        // Themed horizontal divider stripe ("die kleine Lücke mit dem braunen
+        // wieder, so 1 cm") — only the gap is themed; sides stay white.
+        const SizedBox(height: 16),
+        // White ticket card, also edge-to-edge + square, with comfortable
+        // inner padding so the Aztec/QR has breathing room on all sides.
         Expanded(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: ColoredBox(
-                color: Colors.white,
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: (_webViewSupported && t.ticketHtml != null)
-                      ? _OfficialTicketWebView(html: t.ticketHtml!)
-                      : _FallbackTicket(ticket: t),
-                ),
-              ),
+          child: ColoredBox(
+            color: Colors.white,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+              child: (_webViewSupported && t.ticketHtml != null)
+                  ? _OfficialTicketWebView(html: t.ticketHtml!)
+                  : _FallbackTicket(ticket: t),
             ),
           ),
         ),
@@ -280,11 +292,8 @@ class _TicketStatusBlock extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -418,6 +427,15 @@ class _OfficialTicketWebViewState extends State<_OfficialTicketWebView> {
       ..setJavaScriptMode(JavaScriptMode.disabled)
       ..setBackgroundColor(Colors.white)
       ..loadHtmlString(html);
+    // The Android system WebView draws its OWN overlay scrollbar during a
+    // scroll gesture — CSS alone can't kill that, the platform view has to.
+    // Cast to the platform-specific controller and disable the scroll chrome
+    // on both axes. No-op on iOS / desktop / web.
+    final platform = _controller.platform;
+    if (platform is AndroidWebViewController) {
+      platform.setVerticalScrollBarEnabled(false);
+      platform.setHorizontalScrollBarEnabled(false);
+    }
   }
 
   @override

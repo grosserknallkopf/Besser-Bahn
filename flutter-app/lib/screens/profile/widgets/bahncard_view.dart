@@ -46,14 +46,8 @@ class BahnCardView extends StatelessWidget {
     );
   }
 
-  void _openControlView(BuildContext context) {
-    Navigator.of(context, rootNavigator: true).push(
-      MaterialPageRoute<void>(
-        fullscreenDialog: true,
-        builder: (_) => _BahnCardControlScreen(card: card),
-      ),
-    );
-  }
+  void _openControlView(BuildContext context) =>
+      openBahnCardControl(context, card);
 
   Widget _fallback(BuildContext context) {
     return AspectRatio(
@@ -140,6 +134,18 @@ class _ControlChip extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Open DB's BahnCard Kontrollansicht for [card] — same screen as tapping the
+/// card in Profil, exposed so the Ticket view can jump to it (a conductor
+/// usually checks both, so the user needs a fast switch).
+void openBahnCardControl(BuildContext context, DbBahnCard card) {
+  Navigator.of(context, rootNavigator: true).push(
+    MaterialPageRoute<void>(
+      fullscreenDialog: true,
+      builder: (_) => _BahnCardControlScreen(card: card),
+    ),
+  );
 }
 
 /// Fullscreen Kontrollansicht — the control-view image DB shows for ticket
