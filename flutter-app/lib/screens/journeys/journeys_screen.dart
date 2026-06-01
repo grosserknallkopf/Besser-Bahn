@@ -53,7 +53,13 @@ class JourneysScreen extends ConsumerWidget {
           ? _empty(context)
           : RefreshIndicator(
               onRefresh: () async {
-                if (loggedIn) ref.invalidate(reisenuebersichtProvider);
+                // Pull-to-refresh = force a foreground fetch (bypasses the
+                // disk cache's stale-while-revalidate). The controller
+                // handles fallback to the cache on failure so the user is
+                // never left with an empty list.
+                if (loggedIn) {
+                  await ref.read(reisenuebersichtProvider.notifier).refresh();
+                }
               },
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
@@ -66,20 +72,17 @@ class JourneysScreen extends ConsumerWidget {
                     TripProgressCard(
                         journey: upcoming.first.journey, activeOnly: true),
                   if (!stats.isEmpty) _statsTeaser(context, stats),
-                  // Official DB tickets (bought on the account).
+                  // Official DB tickets (bought on the account). No section
+                  // header — tickets render directly so the surface stays
+                  // glanceable, the way DB Navigator's Reisen tab does.
                   if (loggedIn && tickets != null)
                     tickets.when(
-                      data: (list) => list.isEmpty
-                          ? const SizedBox.shrink()
-                          : Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                _sectionHeader(
-                                    context, 'Meine Tickets', list.length),
-                                for (final t in list)
-                                  _OfficialTicketTile(index: t),
-                              ],
-                            ),
+                      data: (list) => Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          for (final t in list) _OfficialTicketTile(index: t),
+                        ],
+                      ),
                       loading: () => const Padding(
                         padding: EdgeInsets.symmetric(vertical: 28),
                         child: Center(child: CircularProgressIndicator()),

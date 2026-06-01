@@ -65,6 +65,33 @@ class DbProfile {
       bahnbonusStatus: j['bahnbonusStatus'] as String?,
     );
   }
+
+  /// Serialise to the same shape `kundenkonten/{id}` returns (so [fromJson]
+  /// re-parses it byte-identically). Used by the on-disk profile cache.
+  Map<String, dynamic> toJson() => {
+        'kundenkontoId': kundenkontoId,
+        'kundennummer': kundennummer,
+        'vorname': vorname,
+        'nachname': nachname,
+        if (anrede != null) 'anrede': anrede,
+        if (geburtsdatum != null) 'geburtsdatum': geburtsdatum,
+        if (kundendatensatzId != null)
+          'kundendatensatzId': kundendatensatzId,
+        if (bahnbonusStatus != null) 'bahnbonusStatus': bahnbonusStatus,
+        if (adresse != null)
+          'hauptadresse': {
+            if (adresse!.strasse != null) 'strasse': adresse!.strasse,
+            if (adresse!.plz != null) 'plz': adresse!.plz,
+            if (adresse!.ort != null) 'ort': adresse!.ort,
+            if (adresse!.land != null) 'land': adresse!.land,
+          },
+        'kundenprofile': [
+          {
+            if (kundenprofilId != null) 'id': kundenprofilId,
+            if (email != null) 'kontaktmailadresse': {'email': email},
+          }
+        ],
+      };
 }
 
 /// One server-side Bahnhof favorite — from

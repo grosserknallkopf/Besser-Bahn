@@ -607,7 +607,11 @@ class DbAccountService {
   /// hit "Reise merken" on a search result). Both kinds are returned together
   /// so the Reisen tab can render them side by side. [onlyCurrent] false also
   /// includes past entries.
-  Future<DbReisenUebersicht> reisenuebersicht({bool onlyCurrent = false}) async {
+  /// Raw `reisenuebersicht` JSON — exposed so callers can persist it
+  /// byte-identically to disk (offline-friendly Reisen tab) and re-parse with
+  /// [parseReisenuebersicht]. Returns null on 304 Not Modified.
+  Future<Map<String, dynamic>?> reisenuebersichtJson(
+      {bool onlyCurrent = false}) async {
     final p = await profile();
     final profilId = p.kundenprofilId;
     if (profilId == null) {
@@ -620,7 +624,13 @@ class DbAccountService {
     });
     final res = await _send('GET', uri.toString(),
         media: DbAccountConstants.reisenMedia);
-    final data = _decode(res, 'reisenuebersicht');
+    if (res.statusCode == 304) return null;
+    return _decode(res, 'reisenuebersicht');
+  }
+
+  /// Same parsing the live `reisenuebersicht()` method does, but on a JSON
+  /// that may have come from disk-cache instead of a fresh response.
+  static DbReisenUebersicht parseReisenuebersicht(Map<String, dynamic> data) {
     final orders = (data['auftragsIndizes'] as List<dynamic>? ?? const [])
         .whereType<Map<String, dynamic>>()
         .map(DbReiseIndex.fromJson)
@@ -633,10 +643,17 @@ class DbAccountService {
         .toList()
       ..sort((a, b) => (b.startDatum ?? b.aenderungsDatum ?? DateTime(0))
           .compareTo(a.startDatum ?? a.aenderungsDatum ?? DateTime(0)));
-    AppLog.log(
-        '${orders.length} Auftrag/Aufträge, ${saved.length} gemerkte Reise(n)',
-        tag: 'db-account');
     return DbReisenUebersicht(orders: orders, saved: saved);
+  }
+
+  Future<DbReisenUebersicht> reisenuebersicht({bool onlyCurrent = false}) async {
+    final data = await reisenuebersichtJson(onlyCurrent: onlyCurrent);
+    if (data == null) return const DbReisenUebersicht();
+    final parsed = parseReisenuebersicht(data);
+    AppLog.log(
+        '${parsed.orders.length} Auftrag/Aufträge, ${parsed.saved.length} gemerkte Reise(n)',
+        tag: 'db-account');
+    return parsed;
   }
 
   /// Fetch ONE tracked Reise's full verbindung by `rkUuid` (the id returned
@@ -691,13 +708,18 @@ class DbAccountService {
     return data.whereType<Map<String, dynamic>>().toList();
   }
 
-  /// A single booked ticket with its barcode.
-  Future<DbTicket> ticket(String auftragsnummer, String kundenwunschId) async {
+  /// A single booked ticket — raw `auftrag` JSON (kept raw so the caller can
+  /// persist it byte-identically to disk and re-parse offline, which is how
+  /// the Reisen tab keeps showing real ticket cards across cold starts and
+  /// no-network). Parse with [DbTicket.fromJson]. Returns null on 304.
+  Future<Map<String, dynamic>?> ticketJson(
+      String auftragsnummer, String kundenwunschId) async {
     final url = '${DbAccountConstants.mobBase}/auftrag/$auftragsnummer'
         '/kundenwunsch/$kundenwunschId';
     final res =
         await _send('GET', url, media: DbAccountConstants.auftragMedia);
-    return DbTicket.fromJson(_decode(res, 'auftrag'));
+    if (res.statusCode == 304) return null;
+    return _decode(res, 'auftrag');
   }
 
   // --- Saved trips ("Meine Reisen") -----------------------------------------

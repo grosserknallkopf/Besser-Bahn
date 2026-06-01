@@ -85,6 +85,38 @@ class _BahnCardCache {
   }
 }
 
+/// On-disk profile cache — survives cold start + offline so the Profil tab
+/// and the Reisen header render real data the moment the app opens. Wiped
+/// on logout (privacy: don't leak previous holder's name/address).
+class _ProfileCache {
+  static const _kKey = 'db_profile_v1';
+
+  static Future<DbProfile?> load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_kKey);
+      if (raw == null || raw.isEmpty) return null;
+      final data = json.decode(raw);
+      if (data is Map<String, dynamic>) return DbProfile.fromJson(data);
+    } catch (_) {}
+    return null;
+  }
+
+  static Future<void> save(DbProfile p) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kKey, json.encode(p.toJson()));
+    } catch (_) {}
+  }
+
+  static Future<void> clear() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_kKey);
+    } catch (_) {}
+  }
+}
+
 /// Auth state for the DB account login.
 class DbAuthState {
   /// false until storage has been checked (initial splash).
@@ -129,12 +161,22 @@ class DbAuthNotifier extends Notifier<DbAuthState> {
   }
 
   /// On startup: if a token exists, load the profile to validate the session.
+  /// If the cached profile is on disk, surface it immediately so the Profil
+  /// tab + Reisen header render real data offline and across cold starts —
+  /// the live `profile()` call happens behind it and replaces the state once
+  /// the network confirms (or quietly errors).
   Future<void> _restore() async {
+    final cached = await _ProfileCache.load();
+    if (cached != null) {
+      // Optimistic: show last-known profile first, refresh in the background.
+      state = state.copyWith(initialized: true, profile: cached);
+    }
     try {
       final has = await _service.hasSession();
       AppLog.log('restore start · session=$has', tag: 'db-account');
       if (has) {
         final profile = await _service.profile();
+        await _ProfileCache.save(profile);
         state = state.copyWith(initialized: true, profile: profile);
         _seedSearchDefaults(profile);
         AppLog.log('restore ok · ${profile.kundennummer}', tag: 'db-account');
@@ -151,11 +193,20 @@ class DbAuthNotifier extends Notifier<DbAuthState> {
           tag: 'db-account');
       if (e.status == 401) await _service.logout();
     } catch (e) {
-      // Network/platform hiccup — keep the tokens, just show logged-out for
-      // now; the next launch (or a manual retry) re-validates the session.
+      // Network/platform hiccup — keep tokens AND the cached profile so the
+      // user still sees their data offline; next launch (or manual retry)
+      // re-validates the session.
       AppLog.log('restore non-auth error: $e', tag: 'db-account');
+      if (cached != null) {
+        state = state.copyWith(initialized: true);
+        return;
+      }
     }
-    state = state.copyWith(initialized: true, clearProfile: true);
+    if (state.profile == null) {
+      state = state.copyWith(initialized: true, clearProfile: true);
+    } else {
+      state = state.copyWith(initialized: true);
+    }
   }
 
   /// Runs the DB browser login.
@@ -163,6 +214,7 @@ class DbAuthNotifier extends Notifier<DbAuthState> {
     state = state.copyWith(isLoading: true, clearError: true);
     try {
       final profile = await _service.login();
+      await _ProfileCache.save(profile);
       state = state.copyWith(isLoading: false, profile: profile);
       _invalidateData();
       _seedSearchDefaults(profile);
@@ -246,9 +298,14 @@ class DbAuthNotifier extends Notifier<DbAuthState> {
     // sync and were never used locally — leftover would otherwise leak the
     // signed-out account's data into the Schnellauswahl.
     ref.read(libraryProvider.notifier).dropServerFavorites();
-    // And drop the cached BahnCard list so a signed-out user can't open the
-    // Kontrollansicht of the previous holder.
+    // And drop every cache that carries personal data — BahnCards, the Meine-
+    // Reisen overview, every individually-cached ticket, and the cached
+    // profile — so a signed-out user can't read or open the previous
+    // holder's data.
     await _BahnCardCache.clear();
+    await _ReisenCache.clear();
+    await _DbTicketCache.clearAll();
+    await _ProfileCache.clear();
   }
 
   /// Re-pull the profile (e.g. pull-to-refresh on the Profile tab).
@@ -256,6 +313,7 @@ class DbAuthNotifier extends Notifier<DbAuthState> {
     if (!state.isLoggedIn) return;
     try {
       final profile = await _service.profile();
+      await _ProfileCache.save(profile);
       state = state.copyWith(profile: profile, clearError: true);
     } catch (e) {
       state = state.copyWith(error: _message(e));
@@ -376,17 +434,101 @@ final bahncardsProvider =
     AsyncNotifierProvider<BahncardsController, List<DbBahnCard>>(
         BahncardsController.new);
 
-/// Full "Meine Reisen" overview from DB (orders + tracked-but-unpaid trips).
-/// Cached for the session; both [ticketIndicesProvider] and
-/// [savedReisenProvider] derive from this one network call.
-final reisenuebersichtProvider =
-    FutureProvider<DbReisenUebersicht>((ref) async {
-  final auth = ref.watch(dbAuthProvider);
-  if (!auth.isLoggedIn) return const DbReisenUebersicht();
-  return ref
-      .read(dbAccountServiceProvider)
-      .reisenuebersicht(onlyCurrent: false);
-});
+/// On-disk cache for the full Meine-Reisen overview. Restores the Reisen tab
+/// instantly across cold starts + completely offline; a background refresh
+/// replaces it once the network is back.
+class _ReisenCache {
+  static const _kKey = 'db_reisenuebersicht_v1';
+
+  static Future<DbReisenUebersicht?> load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_kKey);
+      if (raw == null || raw.isEmpty) return null;
+      final data = json.decode(raw);
+      if (data is Map<String, dynamic>) {
+        return DbAccountService.parseReisenuebersicht(data);
+      }
+    } catch (_) {/* fall through */}
+    return null;
+  }
+
+  static Future<void> save(Map<String, dynamic> data) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kKey, json.encode(data));
+    } catch (_) {/* best effort */}
+  }
+
+  static Future<void> clear() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_kKey);
+    } catch (_) {}
+  }
+}
+
+/// Full "Meine Reisen" overview — stale-while-revalidate. Cold start returns
+/// the on-disk cache instantly so the Reisen tab renders the real tile design
+/// from the first frame (no placeholder flicker) and works offline; a
+/// background refresh updates it when the network is reachable. Pull-to-
+/// refresh calls [ReisenUebersichtController.refresh] for an explicit
+/// foreground re-fetch.
+class ReisenUebersichtController extends AsyncNotifier<DbReisenUebersicht> {
+  @override
+  Future<DbReisenUebersicht> build() async {
+    final auth = ref.watch(dbAuthProvider);
+    if (!auth.isLoggedIn) return const DbReisenUebersicht();
+    final cached = await _ReisenCache.load();
+    if (cached != null) {
+      _refreshInBackground();
+      return cached;
+    }
+    return _fetchAndPersist();
+  }
+
+  Future<void> refresh() async {
+    state = const AsyncLoading();
+    try {
+      state = AsyncData(await _fetchAndPersist());
+    } catch (e, st) {
+      final cached = await _ReisenCache.load();
+      if (cached != null) {
+        state = AsyncData(cached);
+      } else {
+        state = AsyncError(e, st);
+      }
+    }
+  }
+
+  Future<DbReisenUebersicht> _fetchAndPersist() async {
+    final data = await ref
+        .read(dbAccountServiceProvider)
+        .reisenuebersichtJson(onlyCurrent: false);
+    if (data == null) {
+      // 304 — disk cache is still authoritative.
+      return (await _ReisenCache.load()) ?? const DbReisenUebersicht();
+    }
+    await _ReisenCache.save(data);
+    return DbAccountService.parseReisenuebersicht(data);
+  }
+
+  void _refreshInBackground() {
+    Future.microtask(() async {
+      try {
+        state = AsyncData(await _fetchAndPersist());
+      } catch (e) {
+        AppLog.log('reisenuebersicht bg refresh failed: $e',
+            tag: 'db-account');
+      }
+    });
+  }
+}
+
+final reisenuebersichtProvider = AsyncNotifierProvider<
+    ReisenUebersichtController, DbReisenUebersicht>(
+  ReisenUebersichtController.new,
+);
 
 /// Bought tickets only (auftragsIndizes), newest first.
 final ticketIndicesProvider = FutureProvider<List<DbReiseIndex>>((ref) async {
@@ -424,11 +566,85 @@ final dbStationFavoritesProvider =
   return ref.read(dbAccountServiceProvider).stationFavorites();
 });
 
-/// A single booked ticket, keyed by "auftragsnummer/kundenwunschId".
+/// On-disk per-ticket cache (raw `auftrag` JSON, byte-identical to the API
+/// response, keyed by `auftragsnummer/kundenwunschId`). Lets a bought ticket
+/// — barcode, route, embedded Handyticket HTML, Sitzplatzreservierungen —
+/// open instantly and offline.
+class _DbTicketCache {
+  static String _k(String key) => 'db_ticket_raw_v1:$key';
+
+  static Future<Map<String, dynamic>?> load(String key) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_k(key));
+      if (raw == null || raw.isEmpty) return null;
+      final data = json.decode(raw);
+      if (data is Map<String, dynamic>) return data;
+    } catch (_) {}
+    return null;
+  }
+
+  static Future<void> save(String key, Map<String, dynamic> data) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_k(key), json.encode(data));
+    } catch (_) {}
+  }
+
+  static Future<void> clearAll() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final hits =
+          prefs.getKeys().where((k) => k.startsWith('db_ticket_raw_v1:'));
+      for (final k in hits) {
+        await prefs.remove(k);
+      }
+    } catch (_) {}
+  }
+}
+
+/// A single booked ticket — stale-while-revalidate per
+/// `auftragsnummer/kundenwunschId`. Cold start returns the cached parse
+/// instantly so the Reisen tile renders as a real JourneyCard from the first
+/// frame; a background fetch refreshes it when the network is reachable
+/// (via `ref.invalidate(ticketProvider(key))` on tap / refresh).
+///
+/// Implemented as a FutureProvider.family because Riverpod 3 doesn't ship
+/// `FamilyAsyncNotifier` — the cache-first logic is just the provider body.
 final ticketProvider =
     FutureProvider.family<DbTicket, String>((ref, key) async {
+  final cached = await _DbTicketCache.load(key);
+  if (cached != null) {
+    // Best-effort background revalidation so future opens reflect any
+    // server-side change. Fire-and-forget; failure stays silent (we still
+    // have the cache).
+    Future.microtask(() async {
+      try {
+        final parts = key.split('/');
+        final fresh = await ref
+            .read(dbAccountServiceProvider)
+            .ticketJson(parts[0], parts[1]);
+        if (fresh != null) {
+          await _DbTicketCache.save(key, fresh);
+          ref.invalidateSelf();
+        }
+      } catch (e) {
+        AppLog.log('ticket($key) bg refresh failed: $e', tag: 'db-account');
+      }
+    });
+    return DbTicket.fromJson(cached);
+  }
   final parts = key.split('/');
-  return ref.read(dbAccountServiceProvider).ticket(parts[0], parts[1]);
+  final fresh = await ref
+      .read(dbAccountServiceProvider)
+      .ticketJson(parts[0], parts[1]);
+  if (fresh == null) {
+    final retry = await _DbTicketCache.load(key);
+    if (retry != null) return DbTicket.fromJson(retry);
+    throw const DbAccountException('Ticket nicht im Cache, 304 vom Server');
+  }
+  await _DbTicketCache.save(key, fresh);
+  return DbTicket.fromJson(fresh);
 });
 
 /// Maps a locally-saved journey key → the `rkUuid` of the matching DB "Meine
