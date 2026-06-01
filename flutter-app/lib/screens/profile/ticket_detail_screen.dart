@@ -358,13 +358,24 @@ class _OfficialTicketWebView extends StatefulWidget {
 class _OfficialTicketWebViewState extends State<_OfficialTicketWebView> {
   late final WebViewController _controller;
 
+  /// Hides the Android WebView's overlay scrollbar AND the WebKit scroll
+  /// gutter (the thin grey strip the user sees on the right). Scrolling
+  /// itself stays on — only the chrome goes away.
+  static const _hideScrollbarsCss = '<style>'
+      'html,body{scrollbar-width:none;-ms-overflow-style:none;}'
+      'html::-webkit-scrollbar,body::-webkit-scrollbar{display:none;width:0;}'
+      '</style>';
+
   @override
   void initState() {
     super.initState();
+    final html = widget.html.contains('</head>')
+        ? widget.html.replaceFirst('</head>', '$_hideScrollbarsCss</head>')
+        : '$_hideScrollbarsCss${widget.html}';
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.disabled)
       ..setBackgroundColor(Colors.white)
-      ..loadHtmlString(widget.html);
+      ..loadHtmlString(html);
   }
 
   @override
