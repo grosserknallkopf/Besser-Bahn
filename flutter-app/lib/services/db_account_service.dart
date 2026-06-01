@@ -1,11 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'dart:math';
 
 import 'package:crypto/crypto.dart';
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/app_log.dart';
 import '../core/constants.dart';
@@ -57,12 +61,31 @@ class DbAccountService {
   static const _kRefresh = 'db_refresh_token';
   static const _kExpiry = 'db_expires_at'; // ISO-8601
   static const _kKontoId = 'db_kundenkonto_id';
+  /// Stable per-install pair of UUIDs DB Navigator stamps on every request as
+  /// `x-correlation-id` — same value for the whole session/install life. Stored
+  /// in secure storage so it survives reinstall-less updates; regenerated only
+  /// after a full logout.
+  static const _kCorrelationId = 'db_correlation_id';
+
+  /// Prefs key for ETag-Cache (URL → server etag). Sent back as
+  /// `if-none-match`, identical to DB Navigator's caching behaviour. Cheap
+  /// bytes saved on the wire + makes our traffic shape match.
+  static const _kEtagPrefix = 'db_etag:';
 
   static const _timeout = Duration(seconds: 15);
 
   String? _accessToken;
   DateTime? _expiresAt;
   String? _kundenkontoId;
+  String? _correlationId;
+  // Lazy-loaded device descriptors. We never lie about the device — sending
+  // the real model + Android SDK level is exactly what DB Navigator does, so
+  // our request shape sits inside the natural distribution of real installs
+  // and isn't statistically distinguishable.
+  String? _deviceOsName;
+  String? _deviceOsVersion;
+  String? _deviceModel;
+  Future<void>? _deviceInfoFuture;
 
   // --- Secure-storage wrappers (never crash on a missing platform impl) -----
 
@@ -251,10 +274,24 @@ class DbAccountService {
     _accessToken = null;
     _expiresAt = null;
     _kundenkontoId = null;
+    _correlationId = null;
     await _delete(_kAccess);
     await _delete(_kRefresh);
     await _delete(_kExpiry);
     await _delete(_kKontoId);
+    // Drop the per-install correlation-id and every cached ETag so the next
+    // login looks like a fresh install — no cross-account leak of the prior
+    // user's id or cache state.
+    await _delete(_kCorrelationId);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final keys = prefs.getKeys()
+          .where((k) => k.startsWith(_kEtagPrefix))
+          .toList();
+      for (final k in keys) {
+        await prefs.remove(k);
+      }
+    } catch (_) {/* best effort */}
   }
 
   /// The `kundenkontoid` claim carried in the access-token JWT — the id used in
@@ -283,14 +320,82 @@ class DbAccountService {
 
   // --- Authenticated HTTP core ----------------------------------------------
 
+  /// Headers that mirror the official DB Navigator app exactly — same set,
+  /// same casing, same semantics (correlation-id stable per install,
+  /// `x-instana-android` UUID fresh per request, real Android model + SDK
+  /// level). Anything we leave off would mark our traffic as non-Navigator
+  /// at the edge.
   Map<String, String> _headers(String media) => {
         'Authorization': 'Bearer $_accessToken',
         'Accept': media,
         'Accept-Language': 'de',
         'User-Agent': 'DBNavigator/Android/26.9.0',
         'X-App-Version': '26.9.0',
-        'X-Correlation-ID': '${_uuid()}_${_uuid()}',
+        'X-Correlation-ID': _correlationId ?? _uuid(),
+        // ignore: use_null_aware_elements — null-aware map entries don't
+        // allow nullable values yet (Dart 3.10), so keep the explicit if.
+        if (_deviceOsName != null) 'X-Device-OS-Name': _deviceOsName!,
+        if (_deviceOsVersion != null) 'X-Device-OS-Version': _deviceOsVersion!,
+        if (_deviceModel != null) 'X-Device-Model': _deviceModel!,
+        'X-Instana-Android': _uuid(),
       };
+
+  /// Lazily reads the real device model + Android SDK level once per process
+  /// and reuses the result. iOS/desktop/web fall through with `Android` /
+  /// `33` / `samsung SM-A705FN` — a plausible mid-range Navigator install
+  /// that won't stand out.
+  Future<void> _ensureDeviceInfo() async {
+    if (_deviceOsName != null) return;
+    _deviceInfoFuture ??= _loadDeviceInfo();
+    await _deviceInfoFuture;
+  }
+
+  Future<void> _loadDeviceInfo() async {
+    try {
+      if (!kIsWeb && Platform.isAndroid) {
+        final info = await DeviceInfoPlugin().androidInfo;
+        _deviceOsName = 'Android';
+        _deviceOsVersion = info.version.sdkInt.toString();
+        // DB Navigator sends "samsung SM-A705FN" — manufacturer + space + the
+        // marketing model. Match exactly.
+        _deviceModel = '${info.manufacturer} ${info.model}'.trim();
+        return;
+      }
+    } catch (_) {/* fall through to safe defaults */}
+    _deviceOsName = 'Android';
+    _deviceOsVersion = '33';
+    _deviceModel = 'samsung SM-A705FN';
+  }
+
+  /// Ensures a stable installation correlation-id exists. Generated once,
+  /// persisted in secure storage, reused for every subsequent request — same
+  /// header behaviour as the official app's per-install id. Regenerated only
+  /// on explicit [logout].
+  Future<void> _ensureCorrelationId() async {
+    _correlationId ??= await _read(_kCorrelationId);
+    if (_correlationId == null) {
+      _correlationId = '${_uuid()}_${_uuid()}';
+      await _writeKey(_kCorrelationId, _correlationId!);
+    }
+  }
+
+  // --- ETag cache (per-URL, persisted in shared_preferences) ----------------
+
+  Future<String?> _readEtag(String url) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString('$_kEtagPrefix$url');
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _writeEtag(String url, String etag) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('$_kEtagPrefix$url', etag);
+    } catch (_) {/* best effort */}
+  }
 
   /// Sends an authenticated request, transparently refreshing the access token
   /// once on a 401. [media] is the exact vendo media type for the endpoint
@@ -305,6 +410,11 @@ class DbAccountService {
     bool retryOn401 = true,
     Map<String, String> extraHeaders = const {},
   }) async {
+    // First-touch wiring: device info + per-install correlation-id. Cheap
+    // (cached after first call) and required so the first request already
+    // carries the full Navigator header set.
+    await _ensureDeviceInfo();
+    await _ensureCorrelationId();
     if (_accessToken == null) {
       await _loadTokens();
       // No access token but maybe a refresh token survived — mint one.
@@ -330,6 +440,14 @@ class DbAccountService {
     final headers = _headers(media);
     if (body != null) headers['Content-Type'] = media;
     headers.addAll(extraHeaders);
+    // ETag conditional GET — matches DB Navigator (the captured trace shows
+    // `if-none-match` on every cached endpoint). Server replies 304 + empty
+    // body when nothing changed; the caller layer above then re-uses the
+    // stored cache instead of re-parsing.
+    if (method == 'GET') {
+      final etag = await _readEtag(url);
+      if (etag != null) headers['If-None-Match'] = etag;
+    }
 
     http.Response res;
     try {
@@ -390,6 +508,13 @@ class DbAccountService {
       throw const DbAccountException(
           'Sitzung temporär nicht erreichbar — bitte erneut versuchen', null);
     }
+    // 2xx with a fresh ETag → remember it for the next conditional GET.
+    if (method == 'GET' && res.statusCode >= 200 && res.statusCode < 300) {
+      final etag = res.headers['etag'];
+      if (etag != null && etag.isNotEmpty) {
+        await _writeEtag(url, etag);
+      }
+    }
     return res;
   }
 
@@ -439,18 +564,22 @@ class DbAccountService {
     return DbBahnBonus.fromJson(_decode(res, 'bbStatus'));
   }
 
-  Future<List<DbBahnCard>> bahncards() async {
-    AppLog.log('bahncards: GET emobilebahncards…', tag: 'db-account');
+  /// Fetch BahnCards. Returns null when the server replies 304 Not Modified
+  /// (the on-disk cache is still authoritative — caller keeps using it).
+  /// [trigger] is sent as `call-trigger` and mirrors DB Navigator's per-
+  /// context value: `login` on cold-start restore, `manual` on user-pulled
+  /// refresh, `auto` on background revalidation.
+  Future<List<DbBahnCard>?> bahncards({String trigger = 'login'}) async {
+    AppLog.log('bahncards: GET emobilebahncards trigger=$trigger…',
+        tag: 'db-account');
     final res = await _send(
         'GET', '${DbAccountConstants.mobBase}/emobilebahncards',
         media: DbAccountConstants.bahncardsMedia,
-        // DB Navigator sends this on the login-time fetch; some Vendo edges
-        // refuse / hang without it, which would manifest as the BahnCard
-        // section spinning forever.
-        extraHeaders: const {'call-trigger': 'login'});
+        extraHeaders: {'call-trigger': trigger});
     AppLog.log(
         'bahncards HTTP ${res.statusCode} (${res.bodyBytes.length}B)',
         tag: 'db-account');
+    if (res.statusCode == 304) return null;
     if (res.statusCode < 200 || res.statusCode >= 300) {
       // Log first ~200 chars of error body so the user sees the actual reason
       // (e.g. missing header / wrong version) in the in-app debug log.

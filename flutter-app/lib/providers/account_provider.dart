@@ -19,7 +19,12 @@ import 'settings_provider.dart';
 /// the Kontrollansicht) work offline and across cold starts, exactly like
 /// the official DB Navigator caches it locally.
 class _BahnCardCache {
-  static const _kKey = 'db_bahncards_cache_v2';
+  // v3: fields renamed from `Uint8List? bildSicht/kontrollSicht` (raw bytes
+  // we wrongly tried to decode as PNG) to `String? bildSichtHtml /
+  // kontrollSichtHtml` (the actual HTML payload DB serves). The persisted
+  // JSON shape still mirrors the API (base64-encoded HTML), but v2 may have
+  // half-baked entries — bump key + drop v2 to be safe.
+  static const _kKey = 'db_bahncards_cache_v3';
 
   static Future<({List<DbBahnCard> cards, DateTime? fetchedAt})> load() async {
     try {
@@ -73,8 +78,9 @@ class _BahnCardCache {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.remove(_kKey);
-      // Also drop the v1 key from the old cache shape if it lingers.
+      // Also drop legacy cache shapes if they linger.
       await prefs.remove('db_bahncards_cache_v1');
+      await prefs.remove('db_bahncards_cache_v2');
     } catch (_) {}
   }
 }
@@ -299,17 +305,18 @@ class BahncardsController extends AsyncNotifier<List<DbBahnCard>> {
     final entry = await _BahnCardCache.load();
     if (entry.cards.isNotEmpty) {
       // The BahnCard's Kontrollansicht carries its own server-side expiry
-      // (kontrollSichtGueltigBis). Until then the cached PNG is valid for
+      // (kontrollSichtGueltigBis). Until then the cached HTML is valid for
       // an inspection — no point re-fetching. Only refresh when any card's
       // Kontrollsicht has actually expired (or the date is missing, which
       // means we don't know and should err on the side of fresh data).
       if (entry.cards.any(_kontrollSichtExpired)) {
-        _refreshInBackground();
+        // Background revalidation = `auto` trigger (Navigator's wording).
+        _refreshInBackground(trigger: 'auto');
       }
       return entry.cards;
     }
-    // No cache yet — block on the network for the very first fetch.
-    return _fetchAndPersist();
+    // No cache yet — cold-start fetch, mirrors Navigator's `login` trigger.
+    return _fetchAndPersist(trigger: 'login');
   }
 
   static bool _kontrollSichtExpired(DbBahnCard c) {
@@ -320,11 +327,13 @@ class BahncardsController extends AsyncNotifier<List<DbBahnCard>> {
     return DateTime.now().isAfter(until);
   }
 
-  /// Foreground refresh — the Profile "Aktualisieren" button.
+  /// Foreground refresh — the Profile "Aktualisieren" button. Sends
+  /// `call-trigger: manual` so the request looks like a user-initiated pull
+  /// in DB Navigator's telemetry, not a background poll.
   Future<void> refresh() async {
     state = const AsyncLoading();
     try {
-      final fresh = await _fetchAndPersist();
+      final fresh = await _fetchAndPersist(trigger: 'manual');
       state = AsyncData(fresh);
     } catch (e, st) {
       // Keep showing the cache on failure so the rider isn't stranded.
@@ -337,16 +346,23 @@ class BahncardsController extends AsyncNotifier<List<DbBahnCard>> {
     }
   }
 
-  Future<List<DbBahnCard>> _fetchAndPersist() async {
-    final fresh = await ref.read(dbAccountServiceProvider).bahncards();
+  Future<List<DbBahnCard>> _fetchAndPersist({required String trigger}) async {
+    final fresh =
+        await ref.read(dbAccountServiceProvider).bahncards(trigger: trigger);
+    // 304 Not Modified → server confirms our cache is still authoritative;
+    // re-save isn't needed, just hand the cached entry back.
+    if (fresh == null) {
+      final entry = await _BahnCardCache.load();
+      return entry.cards;
+    }
     await _BahnCardCache.save(fresh);
     return fresh;
   }
 
-  void _refreshInBackground() {
+  void _refreshInBackground({required String trigger}) {
     Future.microtask(() async {
       try {
-        final fresh = await _fetchAndPersist();
+        final fresh = await _fetchAndPersist(trigger: trigger);
         state = AsyncData(fresh);
       } catch (e) {
         AppLog.log('bahncards background refresh failed: $e',

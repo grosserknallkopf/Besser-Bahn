@@ -1,13 +1,26 @@
+import 'package:flutter/foundation.dart'
+    show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:webview_flutter/webview_flutter.dart';
 
 import '../../../models/db_account.dart';
 import '../../../providers/account_provider.dart';
 
-/// Renders a single BahnCard. Prefers DB's own card artwork (`bildSicht`,
-/// the exact image the DB Navigator app shows); falls back to a styled card
-/// built from the card's fields when no artwork is available.
+/// True when the platform has a [WebViewWidget] implementation. Linux /
+/// Windows / web don't — fall back to a native card there.
+bool get _webViewSupported =>
+    !kIsWeb &&
+    (defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS);
+
+/// Renders one BahnCard. The official `bildSicht` is an HTML document (a
+/// `<div>` with the card art as `background-image` and CSS-positioned text
+/// for the holder name, BC number, and validity dates) — rendered inside a
+/// WebView so it matches DB Navigator pixel-for-pixel. Falls back to a
+/// styled card on platforms without a WebView (or when the API doesn't
+/// supply HTML).
 class BahnCardView extends StatelessWidget {
   final DbBahnCard card;
   const BahnCardView({super.key, required this.card});
@@ -15,23 +28,26 @@ class BahnCardView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final radius = BorderRadius.circular(16);
-    final hasControl = card.kontrollSicht != null;
-    final child = card.bildSicht != null
+    final hasControl = card.kontrollSichtHtml != null;
+    final canRenderHtml = _webViewSupported && card.bildSichtHtml != null;
+    final child = canRenderHtml
         ? ClipRRect(
             borderRadius: radius,
             child: AspectRatio(
-              aspectRatio: 1.586, // ID-1 / credit-card ratio
+              // DB's bildSicht is laid out at ~1.538:1 (the CSS uses
+              // padding-top:65% of width = ~1.538 aspect). Match it so no
+              // letterboxing appears around the card.
+              aspectRatio: 1 / 0.65,
               child: Stack(
                 fit: StackFit.expand,
                 children: [
-                  Image.memory(
-                    card.bildSicht!,
-                    fit: BoxFit.cover,
-                    gaplessPlayback: true,
-                    errorBuilder: (_, _, _) => _fallback(context),
+                  // The WebView itself doesn't receive gestures — the parent
+                  // InkWell owns the tap-to-open-Kontrollansicht.
+                  IgnorePointer(
+                    child: _BahnCardHtml(html: card.bildSichtHtml!),
                   ),
                   if (hasControl)
-                    Positioned(
+                    const Positioned(
                       right: 10,
                       bottom: 10,
                       child: _ControlChip(),
@@ -90,7 +106,8 @@ class BahnCardView extends StatelessWidget {
                 Text(
                   card.firstClass ? '1. Klasse' : '2. Klasse',
                   style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.85), fontSize: 13),
+                      color: Colors.white.withValues(alpha: 0.85),
+                      fontSize: 13),
                 ),
                 if (card.gueltigBis != null)
                   Text(
@@ -130,7 +147,9 @@ class _ControlChip extends StatelessWidget {
           Icon(Icons.verified_user, color: Colors.white, size: 14),
           SizedBox(width: 4),
           Text('Kontrolle',
-              style: TextStyle(color: Colors.white, fontSize: 12,
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
                   fontWeight: FontWeight.w600)),
         ],
       ),
@@ -182,75 +201,85 @@ Future<void> openFirstBahnCardControl(
     openBahnCardControl(context, fresh.first);
   } catch (e) {
     if (!context.mounted) return;
-    messenger.showSnackBar(SnackBar(content: Text('BahnCard nicht ladbar: $e')));
+    messenger
+        .showSnackBar(SnackBar(content: Text('BahnCard nicht ladbar: $e')));
   }
 }
 
-/// Fullscreen Kontrollansicht — the control-view image DB shows for ticket
-/// inspection, the same `kontrollSicht` PNG the DB Navigator app renders.
+/// Fullscreen Kontrollansicht — DB Navigator's exact control-view HTML
+/// (PNG + CSS overlay) in a WebView so the conductor sees the same
+/// `sichtpruefmerkmal` artwork the official app shows.
 class _BahnCardControlScreen extends StatelessWidget {
   final DbBahnCard card;
   const _BahnCardControlScreen({required this.card});
 
   @override
   Widget build(BuildContext context) {
+    final html = card.kontrollSichtHtml;
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: Colors.white,
       appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black,
         title: const Text('BahnCard · Kontrolle'),
       ),
       body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (card.karteninhaber != null) ...[
-                Text(card.karteninhaber!,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold)),
-                const SizedBox(height: 4),
-              ],
-              Text(card.produktBezeichnung,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white70, fontSize: 14)),
-              const SizedBox(height: 12),
-              Expanded(
-                child: InteractiveViewer(
-                  maxScale: 4,
-                  child: Center(
-                    child: card.kontrollSicht != null
-                        ? Image.memory(card.kontrollSicht!,
-                            fit: BoxFit.contain, gaplessPlayback: true)
-                        : const Text('Keine Kontrollansicht verfügbar.',
-                            style: TextStyle(color: Colors.white70)),
-                  ),
-                ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+              child: Column(
+                children: [
+                  if (card.karteninhaber != null)
+                    Text(card.karteninhaber!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            color: Colors.black,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 2),
+                  Text(card.produktBezeichnung,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          color: Colors.black54, fontSize: 14)),
+                ],
               ),
-              const SizedBox(height: 8),
-              Text('BahnCard-Nr ${card.nummer}',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white54, fontSize: 12)),
-              if (card.gueltigBis != null)
-                Text(
-                  'BahnCard gültig bis ${_fmt(card.gueltigBis!)}',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white54, fontSize: 12),
-                ),
-              if (card.kontrollSichtGueltigBis != null)
-                Text(
-                  'Kontrollansicht gültig bis '
-                  '${_fmt(card.kontrollSichtGueltigBis!)}',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(color: Colors.white38, fontSize: 11),
-                ),
-            ],
-          ),
+            ),
+            Expanded(
+              child: (_webViewSupported && html != null)
+                  ? _BahnCardHtml(html: html)
+                  : const Center(
+                      child: Text('Keine Kontrollansicht verfügbar.',
+                          style: TextStyle(color: Colors.black54))),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: Column(
+                children: [
+                  Text('BahnCard-Nr ${card.nummer}',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          color: Colors.black54, fontSize: 12)),
+                  if (card.gueltigBis != null)
+                    Text(
+                      'BahnCard gültig bis ${_fmt(card.gueltigBis!)}',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          color: Colors.black54, fontSize: 12),
+                    ),
+                  if (card.kontrollSichtGueltigBis != null)
+                    Text(
+                      'Kontrollansicht gültig bis '
+                      '${_fmt(card.kontrollSichtGueltigBis!)}',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          color: Colors.black38, fontSize: 11),
+                    ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -260,4 +289,41 @@ class _BahnCardControlScreen extends StatelessWidget {
     final dt = DateTime.tryParse(iso);
     return dt != null ? DateFormat('dd.MM.yyyy').format(dt) : iso;
   }
+}
+
+/// Shared WebView wrapper for the BahnCard's `bildSicht` / `kontrollSicht`
+/// HTML payloads. JS disabled (DB's HTML is static), white background, no
+/// scrollbars.
+class _BahnCardHtml extends StatefulWidget {
+  final String html;
+  const _BahnCardHtml({required this.html});
+
+  @override
+  State<_BahnCardHtml> createState() => _BahnCardHtmlState();
+}
+
+class _BahnCardHtmlState extends State<_BahnCardHtml> {
+  late final WebViewController _controller;
+
+  static const _injectedCss = '<style>'
+      'html,body{margin:0;padding:0;background:#fff;'
+      'scrollbar-width:none;-ms-overflow-style:none;}'
+      'html::-webkit-scrollbar,body::-webkit-scrollbar{display:none;width:0;}'
+      '</style>';
+
+  @override
+  void initState() {
+    super.initState();
+    final html = widget.html.contains('</head>')
+        ? widget.html.replaceFirst('</head>', '$_injectedCss</head>')
+        : '$_injectedCss${widget.html}';
+    _controller = WebViewController()
+      ..setJavaScriptMode(JavaScriptMode.disabled)
+      ..setBackgroundColor(Colors.white)
+      ..loadHtmlString(html);
+  }
+
+  @override
+  Widget build(BuildContext context) =>
+      WebViewWidget(controller: _controller);
 }

@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 
 /// The signed-in DB customer profile — from `POST /mob/kundenkonten/{id}`.
 class DbProfile {
@@ -166,8 +165,13 @@ class DbBahnBonus {
       );
 }
 
-/// A BahnCard — from `GET /mob/emobilebahncards`. `bildSicht`/`kontrollSicht`
-/// are base64 PNGs of the card faces DB renders in its own app.
+/// A BahnCard — from `GET /mob/emobilebahncards`. `bildSichtHtml` /
+/// `kontrollSichtHtml` are the DB Navigator's card face and Kontrollansicht
+/// rendered as HTML (a `<div>` with a PNG `background-image` plus CSS
+/// overlays for name, BC number, and validity dates). Stored as decoded
+/// HTML strings; rendered in a WebView to match the official app pixel-for-
+/// pixel — decoding them as raw PNG (the previous shape) fails because the
+/// payload is HTML, not an image.
 class DbBahnCard {
   final String nummer;
   final String typ; // BC25 / BC50 / BC100 …
@@ -177,14 +181,14 @@ class DbBahnCard {
   final String? gueltigAb; // YYYY-MM-DD
   final String? gueltigBis;
 
-  /// DB rotates the Kontrollsicht PNG periodically as anti-fraud measure;
-  /// this is the date until which the cached image is considered valid for
-  /// a ticket check. Past it, the app should re-fetch.
+  /// DB rotates the Kontrollsicht HTML/PNG periodically as anti-fraud
+  /// measure; until this date the cached payload is considered valid for a
+  /// ticket check. Past it, the app should re-fetch.
   final String? kontrollSichtGueltigBis;
 
   final bool business;
-  final Uint8List? bildSicht; // decoded card face PNG
-  final Uint8List? kontrollSicht; // decoded control-view PNG
+  final String? bildSichtHtml; // decoded card-face HTML
+  final String? kontrollSichtHtml; // decoded control-view HTML
 
   const DbBahnCard({
     required this.nummer,
@@ -196,8 +200,8 @@ class DbBahnCard {
     this.gueltigBis,
     this.kontrollSichtGueltigBis,
     this.business = false,
-    this.bildSicht,
-    this.kontrollSicht,
+    this.bildSichtHtml,
+    this.kontrollSichtHtml,
   });
 
   bool get firstClass => klasse == 'KLASSE_1';
@@ -212,13 +216,13 @@ class DbBahnCard {
         gueltigBis: j['gueltigBis'] as String?,
         kontrollSichtGueltigBis: j['kontrollSichtGueltigBis'] as String?,
         business: j['isBahnCardBusiness'] as bool? ?? false,
-        bildSicht: _decodePng(j['bildSicht'] as String?),
-        kontrollSicht: _decodePng(j['kontrollSicht'] as String?),
+        bildSichtHtml: _decodeHtml(j['bildSicht'] as String?),
+        kontrollSichtHtml: _decodeHtml(j['kontrollSicht'] as String?),
       );
 
-  /// Persistable shape — mirrors the API JSON so the same [fromJson] reads
-  /// it back. Used by the on-disk cache so the BahnCard view (incl. the
-  /// Kontrollansicht PNG) survives offline / between launches.
+  /// Persistable shape — mirrors the API JSON (base64-HTML) so the same
+  /// [fromJson] reads it back. Used by the on-disk cache so the BahnCard
+  /// view (incl. the Kontrollansicht) survives offline / between launches.
   Map<String, dynamic> toJson() => {
         'bahnCardNummer': nummer,
         'bahnCardTyp': typ,
@@ -230,17 +234,18 @@ class DbBahnCard {
         if (kontrollSichtGueltigBis != null)
           'kontrollSichtGueltigBis': kontrollSichtGueltigBis,
         'isBahnCardBusiness': business,
-        if (bildSicht != null) 'bildSicht': base64Encode(bildSicht!),
-        if (kontrollSicht != null)
-          'kontrollSicht': base64Encode(kontrollSicht!),
+        if (bildSichtHtml != null)
+          'bildSicht': base64Encode(utf8.encode(bildSichtHtml!)),
+        if (kontrollSichtHtml != null)
+          'kontrollSicht': base64Encode(utf8.encode(kontrollSichtHtml!)),
       };
 
-  static Uint8List? _decodePng(String? b64) {
+  static String? _decodeHtml(String? b64) {
     if (b64 == null || b64.isEmpty) return null;
     try {
       // Strip a possible data-URI prefix before decoding.
       final raw = b64.contains(',') ? b64.split(',').last : b64;
-      return base64Decode(raw);
+      return utf8.decode(base64Decode(raw));
     } catch (_) {
       return null;
     }
