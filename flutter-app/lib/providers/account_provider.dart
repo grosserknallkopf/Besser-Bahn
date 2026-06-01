@@ -4,7 +4,6 @@ import '../core/app_log.dart';
 import '../models/db_account.dart';
 import '../models/db_ticket.dart';
 import '../models/journey.dart';
-import '../models/library_models.dart';
 import '../models/split_ticket.dart' show BahnCardType;
 import '../models/station.dart';
 import '../services/db_account_service.dart';
@@ -118,7 +117,11 @@ class DbAuthNotifier extends Notifier<DbAuthState> {
     }
     BahnCardType? card;
     try {
-      final cards = await ref.read(dbAccountServiceProvider).bahncards();
+      // Go through the provider's future so the cached result is shared with
+      // the Profile / Ticket / search-prefill paths — calling the service
+      // directly here was firing a SECOND concurrent GET that DB 429'd, and
+      // the user saw "BahnCard nicht ladbar · 429".
+      final cards = await ref.read(bahncardsProvider.future);
       if (cards.isNotEmpty) card = _toBahnCardType(cards.first);
     } catch (_) {/* no cards / network — leave settings untouched */}
     ref.read(settingsProvider.notifier).applyFromDbAccount(
@@ -128,7 +131,8 @@ class DbAuthNotifier extends Notifier<DbAuthState> {
     // Pull the DB account's Bahnhof-Favoriten into the local library so
     // they show up in the search Schnellauswahl without re-entering them.
     try {
-      final favs = await ref.read(dbAccountServiceProvider).stationFavorites();
+      // Same shared-cache reasoning as bahncards above.
+      final favs = await ref.read(dbStationFavoritesProvider.future);
       if (favs.isNotEmpty) {
         final stations = favs.map(_stationFromFavorite).toList();
         ref.read(libraryProvider.notifier).mergeServerFavorites(stations);

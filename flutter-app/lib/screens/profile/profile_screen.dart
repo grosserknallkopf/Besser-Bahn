@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -339,6 +340,19 @@ class _LoggedIn extends ConsumerWidget {
       title: Text(label, style: theme.textTheme.bodySmall),
       subtitle: Text(value, style: theme.textTheme.bodyLarge),
       dense: false,
+      // Long-press → copy. Mirrors what users expect from a contact-detail row:
+      // grab the Kundennummer / E-Mail / address with one gesture, paste it
+      // into a form. Snackbar confirms which field landed in the clipboard.
+      onLongPress: () async {
+        await Clipboard.setData(ClipboardData(text: value));
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 2),
+            content: Text('$label kopiert'),
+          ),
+        );
+      },
     );
   }
 

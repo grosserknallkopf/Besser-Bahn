@@ -17,7 +17,6 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../providers/library_provider.dart';
 import '../../providers/account_provider.dart';
 import '../../providers/service_providers.dart';
-import '../profile/widgets/bahncard_view.dart' show openFirstBahnCardControl;
 import '../../providers/settings_provider.dart';
 import '../../providers/split_ticket_provider.dart';
 import '../../providers/station_map_provider.dart';
@@ -133,23 +132,16 @@ class _ConnectionDetailScreenState
         // Full route is cut off on a phone here → moved into the summary block.
         title: Text(ticketRef != null ? 'Reiseplan' : 'Verbindung'),
         actions: [
-          // For a booked ticket: prominent "Ticket" action top-right, opening
-          // the official Handyticket WebView. Search-result connections don't
-          // carry a ticket and skip this. The BahnCard quick-jump sits next
-          // to it so a conductor can be shown both without leaving Reiseplan.
-          if (ticketRef != null) ...[
-            IconButton(
-              icon: const Icon(Icons.credit_card),
-              tooltip: 'BahnCard · Kontrolle',
-              onPressed: () => openFirstBahnCardControl(context, ref),
-            ),
+          // For a booked ticket: prominent "Ticket" action top-right. The
+          // BahnCard quick-jump lives on the Ticket view itself, not here —
+          // one tap deeper but keeps the Reiseplan AppBar uncluttered.
+          if (ticketRef != null)
             IconButton(
               icon: const Icon(Icons.qr_code_2),
               tooltip: 'Ticket anzeigen',
               onPressed: () =>
                   context.push('/ticket-view', extra: ticketRef),
             ),
-          ],
           // Teilen + Öffnen folded into one button → a small menu asks which.
           PopupMenuButton<int>(
             icon: const Icon(Icons.ios_share),

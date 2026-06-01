@@ -295,12 +295,15 @@ class DbAccountService {
   /// Sends an authenticated request, transparently refreshing the access token
   /// once on a 401. [media] is the exact vendo media type for the endpoint
   /// (sent as both Accept and, for bodied requests, Content-Type).
+  /// [extraHeaders] are merged on top of the default ones — used for the
+  /// `call-trigger: login` header some endpoints require.
   Future<http.Response> _send(
     String method,
     String url, {
     required String media,
     List<int>? body,
     bool retryOn401 = true,
+    Map<String, String> extraHeaders = const {},
   }) async {
     if (_accessToken == null) {
       await _loadTokens();
@@ -326,6 +329,7 @@ class DbAccountService {
     final uri = Uri.parse(url);
     final headers = _headers(media);
     if (body != null) headers['Content-Type'] = media;
+    headers.addAll(extraHeaders);
 
     http.Response res;
     try {
@@ -346,6 +350,22 @@ class DbAccountService {
     } on TimeoutException {
       throw const DbAccountException(
           'Zeitüberschreitung – die Bahn antwortet nicht.');
+    }
+
+    // 429: caller spammed the endpoint (multiple concurrent fetches of the
+    // same resource). Honour Retry-After if set, otherwise back off briefly
+    // and try once more — the BahnCard endpoint hit this when restore and
+    // the profile-screen provider both fired in parallel.
+    if (res.statusCode == 429 && retryOn401) {
+      final retryAfterSec =
+          int.tryParse(res.headers['retry-after'] ?? '') ?? 2;
+      final delay = Duration(seconds: retryAfterSec.clamp(1, 5));
+      AppLog.log('429 on ${Uri.parse(url).path} → backoff ${delay.inSeconds}s',
+          tag: 'db-account');
+      await Future.delayed(delay);
+      return _send(method, url,
+          media: media, body: body, retryOn401: false,
+          extraHeaders: extraHeaders);
     }
 
     // DB's mob backend returns **403** (not 401) when the access token has
@@ -420,9 +440,14 @@ class DbAccountService {
   }
 
   Future<List<DbBahnCard>> bahncards() async {
+    AppLog.log('bahncards: GET emobilebahncards…', tag: 'db-account');
     final res = await _send(
         'GET', '${DbAccountConstants.mobBase}/emobilebahncards',
-        media: DbAccountConstants.bahncardsMedia);
+        media: DbAccountConstants.bahncardsMedia,
+        // DB Navigator sends this on the login-time fetch; some Vendo edges
+        // refuse / hang without it, which would manifest as the BahnCard
+        // section spinning forever.
+        extraHeaders: const {'call-trigger': 'login'});
     AppLog.log(
         'bahncards HTTP ${res.statusCode} (${res.bodyBytes.length}B)',
         tag: 'db-account');
