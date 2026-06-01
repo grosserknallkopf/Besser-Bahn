@@ -99,9 +99,18 @@ class DbAccountConstants {
   static const auftragMedia = 'application/x.db.vendo.mob.auftraege.v11+json';
   static const kciMedia = 'application/x.db.vendo.mob.kci.v3+json';
 
-  /// Saved "Meine Reisen" tracked trips (`POST/DELETE /mob/reisen`).
+  /// Saved "Meine Reisen" tracked trips (`POST/GET/DELETE /mob/reisen`).
   static const freieReisenMedia =
       'application/x.db.vendo.mob.freiereisen.v5+json';
+
+  /// Bahnhof-Favoriten (GET /mob/kundendatensatz/{id}/favoriten).
+  static const favoritenMedia =
+      'application/x.db.vendo.mob.favoriten.v1+json';
+
+  /// Customer contingents (abos like the Deutschland-Ticket) —
+  /// GET /mob/kundenkontingente.
+  static const kundenkontingenteMedia =
+      'application/x.db.vendo.mob.kundenkontingente.v1+json';
 }
 
 class AppConstants {

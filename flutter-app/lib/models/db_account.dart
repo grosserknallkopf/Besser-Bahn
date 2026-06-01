@@ -14,6 +14,11 @@ class DbProfile {
 
   /// `kundenprofile[].id` — needed as `kundenprofilId` for the trip overview.
   final String? kundenprofilId;
+
+  /// `kundendatensatzId` — needed for the favorites endpoint
+  /// (`/mob/kundendatensatz/{id}/favoriten`).
+  final String? kundendatensatzId;
+
   final String? bahnbonusStatus; // raw enum, e.g. "UNBEKANNT"
 
   const DbProfile({
@@ -26,6 +31,7 @@ class DbProfile {
     this.geburtsdatum,
     this.adresse,
     this.kundenprofilId,
+    this.kundendatensatzId,
     this.bahnbonusStatus,
   });
 
@@ -56,7 +62,50 @@ class DbProfile {
       geburtsdatum: j['geburtsdatum'] as String?,
       adresse: addr != null ? DbAddress.fromJson(addr) : null,
       kundenprofilId: profile?['id'] as String?,
+      kundendatensatzId: j['kundendatensatzId'] as String?,
       bahnbonusStatus: j['bahnbonusStatus'] as String?,
+    );
+  }
+}
+
+/// One server-side Bahnhof favorite — from
+/// `GET /mob/kundendatensatz/{kundendatensatzId}/favoriten`.
+class DbStationFavorite {
+  final String id; // server uuid
+  final String locationId; // HAFAS location string
+  final String locationName; // raw DB name
+  final String? name; // optional custom alias the user set ("wp", "Zuhause")
+  final String? evaNr;
+  final double? lat;
+  final double? lng;
+
+  const DbStationFavorite({
+    required this.id,
+    required this.locationId,
+    required this.locationName,
+    this.name,
+    this.evaNr,
+    this.lat,
+    this.lng,
+  });
+
+  /// Display label — alias if the user set one, else the raw station name.
+  String get displayName =>
+      (name != null && name!.trim().isNotEmpty) ? name!.trim() : locationName;
+
+  factory DbStationFavorite.fromJson(Map<String, dynamic> j) {
+    final loc = j['location'] as Map<String, dynamic>?;
+    final coords = loc?['coordinates'] as Map<String, dynamic>?;
+    return DbStationFavorite(
+      id: (j['id'] ?? '').toString(),
+      locationId: (j['locationId'] ?? '').toString(),
+      locationName: (j['locationName'] ?? loc?['name'] ?? '').toString(),
+      name: j['name'] as String?,
+      evaNr: (loc?['evaNr'] ?? '').toString().isEmpty
+          ? null
+          : (loc?['evaNr']).toString(),
+      lat: (coords?['latitude'] as num?)?.toDouble(),
+      lng: (coords?['longitude'] as num?)?.toDouble(),
     );
   }
 }

@@ -3,8 +3,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/app_log.dart';
 import '../models/db_account.dart';
 import '../models/db_ticket.dart';
+import '../models/journey.dart';
+import '../models/library_models.dart';
 import '../models/split_ticket.dart' show BahnCardType;
+import '../models/station.dart';
 import '../services/db_account_service.dart';
+import 'library_provider.dart';
 import 'service_providers.dart';
 import 'settings_provider.dart';
 
@@ -121,7 +125,25 @@ class DbAuthNotifier extends Notifier<DbAuthState> {
           age: age,
           card: card,
         );
+    // Pull the DB account's Bahnhof-Favoriten into the local library so
+    // they show up in the search Schnellauswahl without re-entering them.
+    try {
+      final favs = await ref.read(dbAccountServiceProvider).stationFavorites();
+      if (favs.isNotEmpty) {
+        final stations = favs.map(_stationFromFavorite).toList();
+        ref.read(libraryProvider.notifier).mergeServerFavorites(stations);
+      }
+    } catch (_) {/* offline / endpoint changed — local library untouched */}
   }
+
+  Station _stationFromFavorite(DbStationFavorite f) => Station(
+        id: f.evaNr ?? '',
+        name: f.displayName,
+        locationId:
+            f.locationId.contains('@') ? f.locationId : null,
+        latitude: f.lat,
+        longitude: f.lng,
+      );
 
   /// Maps a DB-account BahnCard (BC25/BC50/BC100 × KLASSE_1/2) to the local
   /// [BahnCardType] enum the search uses. BC100 isn't an enum value yet — it
@@ -159,7 +181,8 @@ class DbAuthNotifier extends Notifier<DbAuthState> {
   void _invalidateData() {
     ref.invalidate(bahnbonusProvider);
     ref.invalidate(bahncardsProvider);
-    ref.invalidate(ticketIndicesProvider);
+    ref.invalidate(reisenuebersichtProvider);
+    ref.invalidate(dbStationFavoritesProvider);
   }
 
   String _message(Object e) {
@@ -188,11 +211,52 @@ final bahncardsProvider = FutureProvider<List<DbBahnCard>>((ref) async {
   return ref.read(dbAccountServiceProvider).bahncards();
 });
 
-/// Booked-trip overview (all orders, newest first).
+/// Full "Meine Reisen" overview from DB (orders + tracked-but-unpaid trips).
+/// Cached for the session; both [ticketIndicesProvider] and
+/// [savedReisenProvider] derive from this one network call.
+final reisenuebersichtProvider =
+    FutureProvider<DbReisenUebersicht>((ref) async {
+  final auth = ref.watch(dbAuthProvider);
+  if (!auth.isLoggedIn) return const DbReisenUebersicht();
+  return ref
+      .read(dbAccountServiceProvider)
+      .reisenuebersicht(onlyCurrent: false);
+});
+
+/// Bought tickets only (auftragsIndizes), newest first.
 final ticketIndicesProvider = FutureProvider<List<DbReiseIndex>>((ref) async {
+  final uebersicht = await ref.watch(reisenuebersichtProvider.future);
+  return uebersicht.orders;
+});
+
+/// Tracked-but-unpaid trips (reiseIndizes, "Reise merken"), newest start first.
+final savedReisenProvider =
+    FutureProvider<List<DbSavedReiseIndex>>((ref) async {
+  final uebersicht = await ref.watch(reisenuebersichtProvider.future);
+  return uebersicht.saved;
+});
+
+/// The Journey parsed from one saved DB Reise (`/mob/reisen/{rkUuid}`), cached
+/// per rkUuid. Feeds the Reisen tile's JourneyCard.
+final savedReiseJourneyProvider =
+    FutureProvider.family<Journey?, String>((ref, rkUuid) async {
+  final wrap = await ref
+      .read(dbAccountServiceProvider)
+      .savedReiseVerbindung(rkUuid);
+  if (wrap == null) return null;
+  try {
+    return ref.read(vendoServiceProvider).parseConnection(wrap);
+  } catch (_) {
+    return null;
+  }
+});
+
+/// Server-side Bahnhof favorites — read-only sync on login.
+final dbStationFavoritesProvider =
+    FutureProvider<List<DbStationFavorite>>((ref) async {
   final auth = ref.watch(dbAuthProvider);
   if (!auth.isLoggedIn) return const [];
-  return ref.read(dbAccountServiceProvider).reisenuebersicht(onlyCurrent: false);
+  return ref.read(dbAccountServiceProvider).stationFavorites();
 });
 
 /// A single booked ticket, keyed by "auftragsnummer/kundenwunschId".

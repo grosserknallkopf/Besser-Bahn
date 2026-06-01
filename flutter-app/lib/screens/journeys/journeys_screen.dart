@@ -33,6 +33,8 @@ class JourneysScreen extends ConsumerWidget {
     final loggedIn = ref.watch(dbAuthProvider).isLoggedIn;
     final tickets =
         loggedIn ? ref.watch(ticketIndicesProvider) : null;
+    final savedReisen =
+        loggedIn ? ref.watch(savedReisenProvider) : null;
     final hasLocal = upcoming.isNotEmpty || past.isNotEmpty;
 
     return Scaffold(
@@ -51,7 +53,7 @@ class JourneysScreen extends ConsumerWidget {
           ? _empty(context)
           : RefreshIndicator(
               onRefresh: () async {
-                if (loggedIn) ref.invalidate(ticketIndicesProvider);
+                if (loggedIn) ref.invalidate(reisenuebersichtProvider);
               },
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
@@ -89,6 +91,24 @@ class JourneysScreen extends ConsumerWidget {
                             style: TextStyle(
                                 color: Theme.of(context).colorScheme.error)),
                       ),
+                    ),
+                  // Gemerkte Reisen — official "Meine Reisen" the user marked
+                  // on DB. Rendered as JourneyCard via the per-rkUuid lookup.
+                  if (loggedIn && savedReisen != null)
+                    savedReisen.when(
+                      data: (list) => list.isEmpty
+                          ? const SizedBox.shrink()
+                          : Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                _sectionHeader(
+                                    context, 'Gemerkte Reisen', list.length),
+                                for (final s in list)
+                                  _SavedReiseTile(index: s),
+                              ],
+                            ),
+                      loading: () => const SizedBox.shrink(),
+                      error: (_, _) => const SizedBox.shrink(),
                     ),
                   if (upcoming.isNotEmpty) ...[
                     _sectionHeader(
@@ -258,6 +278,39 @@ class JourneysScreen extends ConsumerWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// One server-side "Gemerkte Reise" (tracked but unpaid). Lazily fetches the
+/// individual reise via `/mob/reisen/{rkUuid}` and renders it as a regular
+/// JourneyCard. Tap → /connection (no ticket — just the Reiseplan).
+class _SavedReiseTile extends ConsumerWidget {
+  final DbSavedReiseIndex index;
+  const _SavedReiseTile({required this.index});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final journey = ref.watch(savedReiseJourneyProvider(index.rkUuid));
+    final j = journey.asData?.value;
+    if (j != null && j.legs.isNotEmpty) {
+      return JourneyCard(
+        journey: j,
+        onTap: () => context.push('/connection', extra: j),
+      );
+    }
+    final theme = Theme.of(context);
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: ListTile(
+        leading: Icon(Icons.bookmark, color: theme.colorScheme.primary),
+        title: Text(index.startDatum != null
+            ? DateFormat('EEE, dd.MM.yyyy · HH:mm', 'de')
+                .format(index.startDatum!)
+            : 'Gemerkte Reise'),
+        subtitle:
+            Text(journey is AsyncLoading ? 'lädt…' : 'Konnte nicht laden'),
       ),
     );
   }

@@ -192,6 +192,42 @@ class LibraryNotifier extends Notifier<LibraryState> {
     _saveStations();
   }
 
+  /// Merge a server-side list of stations into the local favorites — used to
+  /// pull the DB account's Bahnhof-Favoriten on login. Each [serverStations]
+  /// entry is added as a pinned favorite if not already present; existing
+  /// entries are upgraded to pinned (useCount/lastUsedMs are preserved). No
+  /// network write-back here — the user's local pins remain authoritative.
+  void mergeServerFavorites(List<Station> serverStations) {
+    if (serverStations.isEmpty) return;
+    final list = List<FavoriteStation>.from(state.stations);
+    var changed = false;
+    for (final s in serverStations) {
+      if (s.id.isEmpty && s.locationId == null) continue;
+      final idx = list.indexWhere((e) =>
+          (e.station.id.isNotEmpty && e.station.id == s.id) ||
+          (e.station.locationId != null &&
+              e.station.locationId == s.locationId));
+      if (idx >= 0) {
+        if (!list[idx].pinned) {
+          list[idx] = list[idx].copyWith(pinned: true);
+          changed = true;
+        }
+      } else {
+        list.add(FavoriteStation(
+          station: s,
+          useCount: 1,
+          lastUsedMs: _nowMs(),
+          pinned: true,
+        ));
+        changed = true;
+      }
+    }
+    if (changed) {
+      state = state.copyWith(stations: list);
+      _saveStations();
+    }
+  }
+
   /// Manually star/unstar a station. Unstarring keeps the entry (so it can
   /// still appear in recents) but clears the pin.
   void toggleStationPin(Station station) {

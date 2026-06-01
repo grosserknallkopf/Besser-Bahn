@@ -380,11 +380,12 @@ class DbAccountService {
     return cards;
   }
 
-  /// The trip/ticket overview. [onlyCurrent] false returns past trips too.
-  Future<List<DbReiseIndex>> reisenuebersicht({bool onlyCurrent = false}) async {
-    final id = await _kontoId();
-    // We need the kundenprofilId (not kundenkontoId) for this call. Pull it
-    // from the profile (cheap, cached upstream by the provider layer).
+  /// The combined "Meine Reisen" overview: paid orders (`auftragsIndizes` —
+  /// real tickets) PLUS tracked-but-unpaid trips (`reiseIndizes` — the user
+  /// hit "Reise merken" on a search result). Both kinds are returned together
+  /// so the Reisen tab can render them side by side. [onlyCurrent] false also
+  /// includes past entries.
+  Future<DbReisenUebersicht> reisenuebersicht({bool onlyCurrent = false}) async {
     final p = await profile();
     final profilId = p.kundenprofilId;
     if (profilId == null) {
@@ -398,19 +399,74 @@ class DbAccountService {
     final res = await _send('GET', uri.toString(),
         media: DbAccountConstants.reisenMedia);
     final data = _decode(res, 'reisenuebersicht');
-    final indices = <DbReiseIndex>[];
-    for (final key in const ['auftragsIndizes', 'reiseIndizes']) {
-      for (final e in (data[key] as List<dynamic>? ?? const [])
-          .whereType<Map<String, dynamic>>()) {
-        indices.add(DbReiseIndex.fromJson(e));
-      }
-    }
-    // Newest change first.
-    indices.sort((a, b) => (b.aenderungsDatum ?? DateTime(0))
-        .compareTo(a.aenderungsDatum ?? DateTime(0)));
-    AppLog.log('${indices.length} Reise(n) (konto ${id ?? '?'})',
+    final orders = (data['auftragsIndizes'] as List<dynamic>? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map(DbReiseIndex.fromJson)
+        .toList()
+      ..sort((a, b) => (b.aenderungsDatum ?? DateTime(0))
+          .compareTo(a.aenderungsDatum ?? DateTime(0)));
+    final saved = (data['reiseIndizes'] as List<dynamic>? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map(DbSavedReiseIndex.fromJson)
+        .toList()
+      ..sort((a, b) => (b.startDatum ?? b.aenderungsDatum ?? DateTime(0))
+          .compareTo(a.startDatum ?? a.aenderungsDatum ?? DateTime(0)));
+    AppLog.log(
+        '${orders.length} Auftrag/Aufträge, ${saved.length} gemerkte Reise(n)',
         tag: 'db-account');
-    return indices;
+    return DbReisenUebersicht(orders: orders, saved: saved);
+  }
+
+  /// Fetch ONE tracked Reise's full verbindung by `rkUuid` (the id returned
+  /// from [saveReise] / `reiseIndizes`). The body shape matches a search
+  /// result's `verbindung`, so the result is fed to
+  /// `VendoService.parseConnection` to render the same Reiseplan view.
+  Future<Map<String, dynamic>?> savedReiseVerbindung(String rkUuid) async {
+    final uri =
+        Uri.parse('${DbAccountConstants.mobBase}/reisen/$rkUuid').replace(
+      queryParameters: {'alternativeHalteBerechnung': 'true'},
+    );
+    final res = await _send('GET', uri.toString(),
+        media: DbAccountConstants.freieReisenMedia);
+    if (res.statusCode != 200) return null;
+    final data = _decode(res, 'reise/$rkUuid');
+    final details = data['reiseDetails'] as Map<String, dynamic>?;
+    final verbindung = details?['verbindung'] as Map<String, dynamic>?;
+    if (verbindung == null) return null;
+    // Wrap so VendoService._parseConnection's "c['verbindung'] ?? c" logic
+    // picks it up cleanly.
+    return {'verbindung': verbindung};
+  }
+
+  /// Server-side Bahnhof favorites (Kiel Hbf etc.) with optional custom aliases.
+  Future<List<DbStationFavorite>> stationFavorites() async {
+    final p = await profile();
+    final kdId = p.kundendatensatzId;
+    if (kdId == null) return const [];
+    final url =
+        '${DbAccountConstants.mobBase}/kundendatensatz/$kdId/favoriten';
+    final res = await _send('GET', url,
+        media: DbAccountConstants.favoritenMedia);
+    if (res.statusCode < 200 || res.statusCode >= 300) return const [];
+    final data = json.decode(utf8.decode(res.bodyBytes));
+    if (data is! List) return const [];
+    return data
+        .whereType<Map<String, dynamic>>()
+        .map(DbStationFavorite.fromJson)
+        .toList();
+  }
+
+  /// Raw `kundenkontingente` list — likely the Deutschland-Ticket / abo carrier.
+  /// Returns the raw maps for now (the populated shape is only observable when
+  /// the user actually owns an abo); the caller decides how to interpret them.
+  Future<List<Map<String, dynamic>>> kundenkontingente() async {
+    final res = await _send(
+        'GET', '${DbAccountConstants.mobBase}/kundenkontingente',
+        media: DbAccountConstants.kundenkontingenteMedia);
+    if (res.statusCode < 200 || res.statusCode >= 300) return const [];
+    final data = json.decode(utf8.decode(res.bodyBytes));
+    if (data is! List) return const [];
+    return data.whereType<Map<String, dynamic>>().toList();
   }
 
   /// A single booked ticket with its barcode.

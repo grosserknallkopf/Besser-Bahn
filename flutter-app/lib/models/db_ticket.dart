@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-/// One entry of the trip overview (`GET /mob/reisenuebersicht`). Identifies a
-/// booked order; the full ticket is fetched lazily per [kundenwunschId].
+/// One entry of `reisenuebersicht.auftragsIndizes` — a paid order with one or
+/// more `kundenwunschIds`. The full ticket is fetched lazily per id.
 class DbReiseIndex {
   final String auftragsnummer;
   final List<String> kundenwunschIds;
@@ -23,6 +23,46 @@ class DbReiseIndex {
                 (j['aenderungsDatum'] ?? '').toString())
             ?.toLocal(),
       );
+}
+
+/// One entry of `reisenuebersicht.reiseIndizes` — a *tracked* but unpaid trip
+/// (the user hit "Reise merken" on a search result; the official Meine-Reisen
+/// equivalent of a local bookmark). Different shape than an order: identified
+/// by `rkUuid` and carries the planned start date directly.
+class DbSavedReiseIndex {
+  final String rkUuid;
+  final int? reisekettenId;
+  final DateTime? aenderungsDatum;
+  final DateTime? startDatum;
+
+  const DbSavedReiseIndex({
+    required this.rkUuid,
+    this.reisekettenId,
+    this.aenderungsDatum,
+    this.startDatum,
+  });
+
+  factory DbSavedReiseIndex.fromJson(Map<String, dynamic> j) =>
+      DbSavedReiseIndex(
+        rkUuid: (j['rkUuid'] ?? '').toString(),
+        reisekettenId: (j['reisekettenId'] as num?)?.toInt(),
+        aenderungsDatum:
+            DateTime.tryParse((j['aenderungsDatum'] ?? '').toString())
+                ?.toLocal(),
+        startDatum:
+            DateTime.tryParse((j['startDatum'] ?? '').toString())?.toLocal(),
+      );
+}
+
+/// The combined "Meine Reisen" overview: paid orders and tracked (unpaid)
+/// trips arrive together from `GET /mob/reisenuebersicht`.
+class DbReisenUebersicht {
+  final List<DbReiseIndex> orders;
+  final List<DbSavedReiseIndex> saved;
+
+  const DbReisenUebersicht({this.orders = const [], this.saved = const []});
+
+  bool get isEmpty => orders.isEmpty && saved.isEmpty;
 }
 
 /// A fully-loaded booked ticket — from
