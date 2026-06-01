@@ -346,7 +346,13 @@ class DbAccountService {
           'Zeitüberschreitung – die Bahn antwortet nicht.');
     }
 
-    if (res.statusCode == 401 && retryOn401) {
+    // DB's mob backend returns **403** (not 401) when the access token has
+    // expired — found in a real device cold-start trace where kundenkonto
+    // answered 403 immediately while a refresh-able session sat on disk.
+    // Treat 401 and 403 identically: refresh + retry once.
+    if ((res.statusCode == 401 || res.statusCode == 403) && retryOn401) {
+      AppLog.log('${res.statusCode} on ${Uri.parse(url).path} → refreshing',
+          tag: 'db-account');
       final r = await _refresh();
       if (r == _RefreshOutcome.success) {
         return _send(method, url, media: media, body: body, retryOn401: false);

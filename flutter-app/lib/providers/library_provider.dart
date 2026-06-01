@@ -208,16 +208,21 @@ class LibraryNotifier extends Notifier<LibraryState> {
           (e.station.locationId != null &&
               e.station.locationId == s.locationId));
       if (idx >= 0) {
+        // The user already knows this station — pin it but don't claim it
+        // back as server-only; their useCount/manual pin make it theirs.
         if (!list[idx].pinned) {
           list[idx] = list[idx].copyWith(pinned: true);
           changed = true;
         }
       } else {
+        // Brand-new entry from the server — flag it so we can drop it on
+        // logout without touching anything the user typed themselves.
         list.add(FavoriteStation(
           station: s,
-          useCount: 1,
+          useCount: 0,
           lastUsedMs: _nowMs(),
           pinned: true,
+          fromServer: true,
         ));
         changed = true;
       }
@@ -226,6 +231,30 @@ class LibraryNotifier extends Notifier<LibraryState> {
       state = state.copyWith(stations: list);
       _saveStations();
     }
+  }
+
+  /// Privacy: remove every entry that was pulled in via [mergeServerFavorites]
+  /// and never used locally. Called from the auth notifier on logout so the
+  /// search suggestions no longer leak a signed-out account's favorites.
+  void dropServerFavorites() {
+    final kept = state.stations
+        .where((s) => !(s.fromServer && s.useCount == 0))
+        .map((s) => s.fromServer && s.useCount > 0
+            ? s.copyWith(fromServer: false)
+            : s)
+        .toList();
+    if (kept.length == state.stations.length) {
+      // Still strip the fromServer flag on entries the user has since used.
+      final cleaned = state.stations
+          .map((s) => s.fromServer ? s.copyWith(fromServer: false) : s)
+          .toList();
+      final anyFromServer = state.stations.any((s) => s.fromServer);
+      if (!anyFromServer) return;
+      state = state.copyWith(stations: cleaned);
+    } else {
+      state = state.copyWith(stations: kept);
+    }
+    _saveStations();
   }
 
   /// Manually star/unstar a station. Unstarring keeps the entry (so it can

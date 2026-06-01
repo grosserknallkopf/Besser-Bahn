@@ -164,6 +164,10 @@ class DbAuthNotifier extends Notifier<DbAuthState> {
     await _service.logout();
     state = const DbAuthState(initialized: true);
     _invalidateData();
+    // Privacy: strip any Bahnhof-Favoriten that came from the server-side
+    // sync and were never used locally — leftover would otherwise leak the
+    // signed-out account's data into the Schnellauswahl.
+    ref.read(libraryProvider.notifier).dropServerFavorites();
   }
 
   /// Re-pull the profile (e.g. pull-to-refresh on the Profile tab).

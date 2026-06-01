@@ -11,23 +11,33 @@ class FavoriteStation {
   final int useCount;
   final int lastUsedMs;
 
+  /// True if this entry was *only* added because we pulled the DB account's
+  /// server-side favorites in. On logout we drop these so the search no longer
+  /// shows suggestions tied to a signed-out account. Anything the user
+  /// touched themselves (useCount > 0 or manually pinned) is treated as
+  /// theirs even after the merge — it stays.
+  final bool fromServer;
+
   const FavoriteStation({
     required this.station,
     this.pinned = false,
     this.useCount = 0,
     this.lastUsedMs = 0,
+    this.fromServer = false,
   });
 
   FavoriteStation copyWith({
     bool? pinned,
     int? useCount,
     int? lastUsedMs,
+    bool? fromServer,
   }) {
     return FavoriteStation(
       station: station,
       pinned: pinned ?? this.pinned,
       useCount: useCount ?? this.useCount,
       lastUsedMs: lastUsedMs ?? this.lastUsedMs,
+      fromServer: fromServer ?? this.fromServer,
     );
   }
 
@@ -36,6 +46,7 @@ class FavoriteStation {
         'pinned': pinned,
         'useCount': useCount,
         'lastUsedMs': lastUsedMs,
+        if (fromServer) 'fromServer': true,
       };
 
   factory FavoriteStation.fromJson(Map<String, dynamic> json) =>
@@ -45,6 +56,7 @@ class FavoriteStation {
         pinned: json['pinned'] as bool? ?? false,
         useCount: json['useCount'] as int? ?? 0,
         lastUsedMs: json['lastUsedMs'] as int? ?? 0,
+        fromServer: json['fromServer'] as bool? ?? false,
       );
 }
 
