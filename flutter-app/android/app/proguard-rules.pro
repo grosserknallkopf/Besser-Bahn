@@ -22,3 +22,14 @@
 -keep @io.objectbox.annotation.Entity class * { *; }
 -keepclassmembers class * { @io.objectbox.annotation.* <fields>; }
 -dontwarn io.objectbox.**
+
+# flutter_secure_storage (DB account + Träwelling token persistence) and its
+# Tink crypto backend. Without these, R8 full-mode strips internal cipher /
+# JNI bridge helpers and reads silently return null on the next cold start —
+# which presents as "every launch I'm logged out again". Plugin package is
+# com.it_nomads.fluttersecurestorage in 10.x.
+-keep class com.it_nomads.fluttersecurestorage.** { *; }
+-keep class com.google.crypto.tink.** { *; }
+-dontwarn com.it_nomads.fluttersecurestorage.**
+-dontwarn com.google.crypto.tink.**
+-dontwarn javax.annotation.**
