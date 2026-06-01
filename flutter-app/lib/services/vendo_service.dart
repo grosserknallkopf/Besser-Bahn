@@ -402,6 +402,11 @@ class VendoService {
 
   // -- parsing ---------------------------------------------------------------
 
+  /// Public entry to the connection parser — accepts a raw vendo `verbindung`
+  /// wrapper (e.g. `reise.reiseInfos.verbindung` from a booked ticket) and
+  /// returns a parsed [Journey] usable by the same UI as a search result.
+  Journey parseConnection(Map<String, dynamic> c) => _parseConnection(c);
+
   Journey _parseConnection(Map<String, dynamic> c) {
     // /angebote/fahrplan wraps the connection in `verbindung`; the
     // /trip/weitereabfahrten response puts the same fields directly on the

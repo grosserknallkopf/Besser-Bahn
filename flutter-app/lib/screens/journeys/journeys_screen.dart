@@ -9,6 +9,7 @@ import '../../models/db_ticket.dart';
 import '../../models/travel_stats.dart';
 import '../../providers/account_provider.dart';
 import '../../providers/library_provider.dart';
+import '../../providers/service_providers.dart';
 import '../../providers/travel_stats_provider.dart';
 import '../../widgets/app_menu_button.dart';
 import '../../widgets/trip_progress_card.dart';
@@ -262,9 +263,11 @@ class JourneysScreen extends ConsumerWidget {
   }
 }
 
-/// A booked official ticket in the Reisen list. Lazily loads the ticket detail
-/// (cached by [ticketProvider]) to show route, date and class; taps through to
-/// the full official Handyticket.
+/// A booked official ticket in the Reisen list. Lazily loads the ticket
+/// detail (cached by [ticketProvider]) and, once the trip plan is parsed,
+/// renders the same [JourneyCard] used in search — so a bought ticket looks
+/// exactly like a found connection, just routed to the ticket detail on tap.
+/// Falls back to a compact placeholder tile while the ticket is loading.
 class _OfficialTicketTile extends ConsumerWidget {
   final DbReiseIndex index;
   const _OfficialTicketTile({required this.index});
@@ -273,50 +276,54 @@ class _OfficialTicketTile extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final kwId =
         index.kundenwunschIds.isNotEmpty ? index.kundenwunschIds.first : '';
+    if (kwId.isEmpty) return const SizedBox.shrink();
     final key = '${index.auftragsnummer}/$kwId';
-    final ticket = kwId.isEmpty ? null : ref.watch(ticketProvider(key));
+    final ticket = ref.watch(ticketProvider(key));
+    void onTap() => context.push('/ticket', extra: {
+          'auftragsnummer': index.auftragsnummer,
+          'kundenwunschId': kwId,
+        });
 
+    final t = ticket.asData?.value;
+    if (t != null && t.verbindungJson != null) {
+      try {
+        final journey =
+            ref.read(vendoServiceProvider).parseConnection(t.verbindungJson!);
+        if (journey.legs.isNotEmpty) {
+          return JourneyCard(journey: journey, onTap: onTap);
+        }
+      } catch (_) {/* fall through to placeholder */}
+    }
+
+    // Placeholder while loading / when verbindung can't be parsed.
     final theme = Theme.of(context);
-    final card = Card(
-      margin: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: ListTile(
         leading: Icon(Icons.confirmation_number_outlined,
             color: theme.colorScheme.primary),
-        title: _title(ticket),
-        subtitle: _subtitle(context, ticket),
+        title: Text(
+          t != null && (t.vonName != null || t.nachName != null)
+              ? '${t.vonName ?? '—'} → ${t.nachName ?? '—'}'
+              : 'Auftrag ${index.auftragsnummer}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
+        subtitle: Text(
+          [
+            if ((t?.gueltigAb ?? index.aenderungsDatum) != null)
+              DateFormat('dd.MM.yyyy')
+                  .format(t?.gueltigAb ?? index.aenderungsDatum!),
+            if (t != null) t.firstClass ? '1. Kl.' : '2. Kl.',
+            if (t?.angebotsname != null) t!.angebotsname!,
+            if (ticket is AsyncLoading) 'lädt…',
+          ].where((s) => s.isNotEmpty).join(' · '),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        ),
         trailing: const Icon(Icons.chevron_right),
-        onTap: kwId.isEmpty
-            ? null
-            : () => context.push('/ticket', extra: {
-                  'auftragsnummer': index.auftragsnummer,
-                  'kundenwunschId': kwId,
-                }),
+        onTap: onTap,
       ),
     );
-    return card;
-  }
-
-  Widget _title(AsyncValue<DbTicket>? ticket) {
-    final t = ticket?.asData?.value;
-    if (t != null && (t.vonName != null || t.nachName != null)) {
-      return Text('${t.vonName ?? '—'} → ${t.nachName ?? '—'}',
-          maxLines: 1, overflow: TextOverflow.ellipsis);
-    }
-    return Text('Auftrag ${index.auftragsnummer}');
-  }
-
-  Widget? _subtitle(BuildContext context, AsyncValue<DbTicket>? ticket) {
-    final t = ticket?.asData?.value;
-    final parts = <String>[];
-    final d = t?.gueltigAb ?? index.aenderungsDatum;
-    if (d != null) parts.add(DateFormat('dd.MM.yyyy').format(d));
-    if (t != null) {
-      parts.add(t.firstClass ? '1. Kl.' : '2. Kl.');
-      if (t.angebotsname != null) parts.add(t.angebotsname!);
-    } else if (ticket is AsyncLoading) {
-      parts.add('lädt…');
-    }
-    return parts.isEmpty ? null : Text(parts.join(' · '),
-        maxLines: 1, overflow: TextOverflow.ellipsis);
   }
 }

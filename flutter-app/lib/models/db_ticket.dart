@@ -64,6 +64,11 @@ class DbTicket {
   /// Seat/bike reservations on this ticket (train, coach, seat).
   final List<DbReservierung> reservierungen;
 
+  /// Raw `reise.reiseInfos.verbindung` map — same shape as a search result's
+  /// verbindung wrapper, so [VendoService.parseConnection] turns it into a
+  /// [Journey] for the Reiseplan tab and the Reisen tile.
+  final Map<String, dynamic>? verbindungJson;
+
   const DbTicket({
     required this.auftragsnummer,
     required this.kundenwunschId,
@@ -84,6 +89,7 @@ class DbTicket {
     this.kciTicketRefId,
     this.tripUUID,
     this.reservierungen = const [],
+    this.verbindungJson,
   });
 
   bool get firstClass => klasse == 'KLASSE_1';
@@ -129,6 +135,7 @@ class DbTicket {
           .whereType<Map<String, dynamic>>()
           .map(DbReservierung.fromJson)
           .toList(),
+      verbindungJson: info['verbindung'] as Map<String, dynamic>?,
     );
   }
 

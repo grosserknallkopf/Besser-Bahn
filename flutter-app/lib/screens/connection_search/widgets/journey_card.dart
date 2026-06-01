@@ -16,7 +16,16 @@ import '../../../widgets/prediction_badge.dart';
 class JourneyCard extends ConsumerWidget {
   final Journey journey;
 
-  const JourneyCard({super.key, required this.journey});
+  /// Optional tap override — used to open the ticket detail when the card
+  /// stands in for a booked ticket in the Reisen tab. Defaults to pushing the
+  /// full connection-detail screen.
+  final VoidCallback? onTap;
+
+  const JourneyCard({
+    super.key,
+    required this.journey,
+    this.onTap,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -27,10 +36,11 @@ class JourneyCard extends ConsumerWidget {
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        onTap: () {
-          // Show the FULL connection (all legs + transfers), not just leg 1.
-          context.push('/connection', extra: journey);
-        },
+        onTap: onTap ??
+            () {
+              // Show the FULL connection (all legs + transfers), not just leg 1.
+              context.push('/connection', extra: journey);
+            },
         // Long-press shares the official bahn.de "Reise teilen" link to this
         // exact connection — no need to open the detail screen first.
         onLongPress: () => _share(context, ref),
