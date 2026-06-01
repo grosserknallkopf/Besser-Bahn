@@ -366,7 +366,18 @@ class DbAccountService {
     final res = await _send(
         'GET', '${DbAccountConstants.mobBase}/emobilebahncards',
         media: DbAccountConstants.bahncardsMedia);
+    AppLog.log(
+        'bahncards HTTP ${res.statusCode} (${res.bodyBytes.length}B)',
+        tag: 'db-account');
     if (res.statusCode < 200 || res.statusCode >= 300) {
+      // Log first ~200 chars of error body so the user sees the actual reason
+      // (e.g. missing header / wrong version) in the in-app debug log.
+      try {
+        final body = utf8.decode(res.bodyBytes);
+        AppLog.log(
+            'bahncards body: ${body.substring(0, body.length.clamp(0, 200))}',
+            tag: 'db-account');
+      } catch (_) {}
       throw DbAccountException('bahncards HTTP ${res.statusCode}',
           res.statusCode);
     }
@@ -376,7 +387,7 @@ class DbAccountService {
         .whereType<Map<String, dynamic>>()
         .map(DbBahnCard.fromJson)
         .toList();
-    AppLog.log('${cards.length} BahnCard(s)', tag: 'db-account');
+    AppLog.log('${cards.length} BahnCard(s) parsed', tag: 'db-account');
     return cards;
   }
 

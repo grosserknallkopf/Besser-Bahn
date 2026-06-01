@@ -192,27 +192,60 @@ class _LoggedIn extends ConsumerWidget {
           ),
           _detailsCard(context),
           const SizedBox(height: 20),
-          // BahnCards
-          cards.when(
-            data: (list) => list.isEmpty
-                ? const SizedBox.shrink()
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _sectionTitle(context, 'BahnCard'),
-                      for (final c in list)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: BahnCardView(card: c),
+          // BahnCards — section always renders so the user can see *why*
+          // there's nothing here when the endpoint failed (silent SizedBox.
+          // shrink was hiding the bug; now error/empty surface explicitly).
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _sectionTitle(context, 'BahnCard'),
+              cards.when(
+                data: (list) => list.isEmpty
+                    ? Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Text(
+                          'Keine BahnCard in deinem Konto.',
+                          style: TextStyle(
+                              color: Theme.of(context).colorScheme.outline),
                         ),
-                      const SizedBox(height: 8),
+                      )
+                    : Column(
+                        children: [
+                          for (final c in list)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: BahnCardView(card: c),
+                            ),
+                        ],
+                      ),
+                loading: () => const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 12),
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+                error: (e, _) => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  child: Row(
+                    children: [
+                      Icon(Icons.error_outline,
+                          size: 18,
+                          color: Theme.of(context).colorScheme.error),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text('BahnCard nicht ladbar: $e',
+                            style: TextStyle(
+                                color: Theme.of(context).colorScheme.error)),
+                      ),
+                      TextButton(
+                        onPressed: () =>
+                            ref.invalidate(bahncardsProvider),
+                        child: const Text('Erneut'),
+                      ),
                     ],
                   ),
-            loading: () => const Padding(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              child: Center(child: CircularProgressIndicator()),
-            ),
-            error: (_, _) => const SizedBox.shrink(),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
           ),
           // Tickets
           _sectionTitle(context, 'Meine Tickets'),
