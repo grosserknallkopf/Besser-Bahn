@@ -35,6 +35,17 @@ class SplitTicketScreen extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.only(bottom: 32),
         children: [
+          // Whole-trip header: which route this analysis is for. Falls back to
+          // the journey origin/destination when state hasn't carried a label
+          // yet (first frame after navigation).
+          if (state.routeLabel != null || journey != null)
+            _buildRouteHeader(
+              context,
+              state.routeLabel ??
+                  '${journey?.origin?.name ?? ''} → '
+                      '${journey?.destination?.name ?? ''}',
+            ),
+
           // Disclaimer
           Card(
             margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -139,6 +150,50 @@ class SplitTicketScreen extends ConsumerWidget {
             label: const Text('Zur Verbindungssuche'),
           ),
         ],
+      ),
+    );
+  }
+
+  /// Bold "Origin → Destination" card at the very top of the screen, so the
+  /// rider knows the whole route this analysis covers (e.g. Reisdorf →
+  /// Kaltenkirchen) the moment the screen opens — before the first price
+  /// request comes back.
+  Widget _buildRouteHeader(BuildContext context, String label) {
+    final theme = Theme.of(context);
+    return Card(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      color: theme.colorScheme.primaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            Icon(Icons.alt_route,
+                size: 20, color: theme.colorScheme.onPrimaryContainer),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Split-Ticket für',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onPrimaryContainer
+                          .withAlpha(180),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    label,
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.bold,
+                      color: theme.colorScheme.onPrimaryContainer,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

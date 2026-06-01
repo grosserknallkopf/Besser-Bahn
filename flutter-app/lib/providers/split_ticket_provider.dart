@@ -13,6 +13,10 @@ class SplitTicketState {
   final SplitTicketProgress? progress;
   final String? error;
   final List<String> logs;
+  /// Origin → destination of the whole trip being analysed. Set at analyze()
+  /// start so the screen can show "Reisdorf → Kaltenkirchen" the moment it
+  /// opens, before any price query has returned.
+  final String? routeLabel;
 
   const SplitTicketState({
     this.isLoading = false,
@@ -21,6 +25,7 @@ class SplitTicketState {
     this.progress,
     this.error,
     this.logs = const [],
+    this.routeLabel,
   });
 
   SplitTicketState copyWith({
@@ -30,6 +35,7 @@ class SplitTicketState {
     SplitTicketProgress? progress,
     String? error,
     List<String>? logs,
+    String? routeLabel,
   }) {
     return SplitTicketState(
       isLoading: isLoading ?? this.isLoading,
@@ -38,6 +44,7 @@ class SplitTicketState {
       progress: progress ?? this.progress,
       error: error,
       logs: logs ?? this.logs,
+      routeLabel: routeLabel ?? this.routeLabel,
     );
   }
 }
@@ -95,13 +102,25 @@ class SplitTicketNotifier extends Notifier<SplitTicketState> {
       bahnCard: settings.bahnCard,
     );
 
-    state = const SplitTicketState(isLoading: true);
-    _log('Starte Split-Ticket-Analyse...');
-
     final stopwatch = Stopwatch()..start();
     final n = stops.length;
     final totalCombinations = (n * (n - 1)) ~/ 2;
     var processed = 0;
+
+    final initialRouteLabel = routeLabel ??
+        (stops.isNotEmpty
+            ? '${stops.first['name']} → ${stops.last['name']}'
+            : null);
+    state = SplitTicketState(
+      isLoading: true,
+      routeLabel: initialRouteLabel,
+      progress: SplitTicketProgress(
+        totalCombinations: totalCombinations,
+        processedCombinations: 0,
+        currentSegment: 'Analyse wird vorbereitet…',
+      ),
+    );
+    _log('Starte Split-Ticket-Analyse...');
 
     // Collect segment prices
     final prices = <String, SegmentPrice>{};
