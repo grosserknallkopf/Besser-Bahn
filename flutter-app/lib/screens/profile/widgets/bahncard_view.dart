@@ -35,24 +35,16 @@ class BahnCardView extends StatelessWidget {
             borderRadius: radius,
             child: AspectRatio(
               // DB's bildSicht is laid out at ~1.538:1 (the CSS uses
-              // padding-top:65% of width = ~1.538 aspect). Match it so no
-              // letterboxing appears around the card.
+              // padding-top:65% of width). The injected fill-CSS in
+              // [_BahnCardHtml] then stretches .image to 100% height so the
+              // PNG covers the entire AspectRatio box without trailing
+              // whitespace.
               aspectRatio: 1 / 0.65,
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  // The WebView itself doesn't receive gestures — the parent
-                  // InkWell owns the tap-to-open-Kontrollansicht.
-                  IgnorePointer(
-                    child: _BahnCardHtml(html: card.bildSichtHtml!),
-                  ),
-                  if (hasControl)
-                    const Positioned(
-                      right: 10,
-                      bottom: 10,
-                      child: _ControlChip(),
-                    ),
-                ],
+              // Stretched to fill: tile is a single WebView, no overlay
+              // chip — tapping anywhere on the card opens the Kontrolle
+              // (the obvious affordance for the card surface).
+              child: IgnorePointer(
+                child: _BahnCardHtml(html: card.bildSichtHtml!, fill: true),
               ),
             ),
           )
@@ -130,33 +122,6 @@ class BahnCardView extends StatelessWidget {
   }
 }
 
-class _ControlChip extends StatelessWidget {
-  const _ControlChip();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.55),
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: const Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(Icons.verified_user, color: Colors.white, size: 14),
-          SizedBox(width: 4),
-          Text('Kontrolle',
-              style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600)),
-        ],
-      ),
-    );
-  }
-}
-
 /// Open DB's BahnCard Kontrollansicht for [card] — same screen as tapping the
 /// card in Profil, exposed so the Ticket view can jump to it (a conductor
 /// usually checks both, so the user needs a fast switch).
@@ -208,7 +173,11 @@ Future<void> openFirstBahnCardControl(
 
 /// Fullscreen Kontrollansicht — DB Navigator's exact control-view HTML
 /// (PNG + CSS overlay) in a WebView so the conductor sees the same
-/// `sichtpruefmerkmal` artwork the official app shows.
+/// `sichtpruefmerkmal` artwork the official app shows. Layout mirrors
+/// [TicketViewScreen]: title in the AppBar (`MyBahnCard 50 (2. Klasse)`),
+/// white card with the same ~20/16 inset padding around the WebView, and
+/// metadata (BC-Nr, Gültig-bis) underneath — the official card image
+/// already carries the holder name inline so we don't duplicate it.
 class _BahnCardControlScreen extends StatelessWidget {
   final DbBahnCard card;
   const _BahnCardControlScreen({required this.card});
@@ -216,71 +185,53 @@ class _BahnCardControlScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final html = card.kontrollSichtHtml;
+    final title = card.produktBezeichnung.isNotEmpty
+        ? card.produktBezeichnung
+        : 'BahnCard · Kontrolle';
     return Scaffold(
-      backgroundColor: Colors.white,
-      appBar: AppBar(
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
-        title: const Text('BahnCard · Kontrolle'),
-      ),
-      body: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-              child: Column(
-                children: [
-                  if (card.karteninhaber != null)
-                    Text(card.karteninhaber!,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                            color: Colors.black,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 2),
-                  Text(card.produktBezeichnung,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                          color: Colors.black54, fontSize: 14)),
-                ],
+      appBar: AppBar(title: Text(title)),
+      body: Column(
+        children: [
+          Expanded(
+            child: ColoredBox(
+              color: Colors.white,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+                child: (_webViewSupported && html != null)
+                    ? _BahnCardHtml(html: html)
+                    : const Center(
+                        child: Text('Keine Kontrollansicht verfügbar.',
+                            style: TextStyle(color: Colors.black54))),
               ),
             ),
-            Expanded(
-              child: (_webViewSupported && html != null)
-                  ? _BahnCardHtml(html: html)
-                  : const Center(
-                      child: Text('Keine Kontrollansicht verfügbar.',
-                          style: TextStyle(color: Colors.black54))),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+          ),
+          SafeArea(
+            top: false,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
               child: Column(
                 children: [
                   Text('BahnCard-Nr ${card.nummer}',
                       textAlign: TextAlign.center,
-                      style: const TextStyle(
-                          color: Colors.black54, fontSize: 12)),
+                      style: Theme.of(context).textTheme.bodySmall),
                   if (card.gueltigBis != null)
-                    Text(
-                      'BahnCard gültig bis ${_fmt(card.gueltigBis!)}',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                          color: Colors.black54, fontSize: 12),
-                    ),
+                    Text('BahnCard gültig bis ${_fmt(card.gueltigBis!)}',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.bodySmall),
                   if (card.kontrollSichtGueltigBis != null)
                     Text(
-                      'Kontrollansicht gültig bis '
-                      '${_fmt(card.kontrollSichtGueltigBis!)}',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                          color: Colors.black38, fontSize: 11),
-                    ),
+                        'Kontrollansicht gültig bis '
+                        '${_fmt(card.kontrollSichtGueltigBis!)}',
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(fontSize: 11)),
                 ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -292,11 +243,15 @@ class _BahnCardControlScreen extends StatelessWidget {
 }
 
 /// Shared WebView wrapper for the BahnCard's `bildSicht` / `kontrollSicht`
-/// HTML payloads. JS disabled (DB's HTML is static), white background, no
-/// scrollbars.
+/// HTML payloads. JS disabled (DB's HTML is static), no scrollbars. When
+/// [fill] is true (inline profile tile) the embedded `.image` div is forced
+/// to fill 100% of the viewport via injected CSS so the PNG covers the
+/// AspectRatio box edge-to-edge — without it the div's natural
+/// `padding-top:65%` leaves trailing white below the card.
 class _BahnCardHtml extends StatefulWidget {
   final String html;
-  const _BahnCardHtml({required this.html});
+  final bool fill;
+  const _BahnCardHtml({required this.html, this.fill = false});
 
   @override
   State<_BahnCardHtml> createState() => _BahnCardHtmlState();
@@ -305,21 +260,33 @@ class _BahnCardHtml extends StatefulWidget {
 class _BahnCardHtmlState extends State<_BahnCardHtml> {
   late final WebViewController _controller;
 
-  static const _injectedCss = '<style>'
-      'html,body{margin:0;padding:0;background:#fff;'
+  static const _baseCss =
+      'html,body{margin:0;padding:0;background:transparent;'
       'scrollbar-width:none;-ms-overflow-style:none;}'
-      'html::-webkit-scrollbar,body::-webkit-scrollbar{display:none;width:0;}'
-      '</style>';
+      'html::-webkit-scrollbar,body::-webkit-scrollbar{display:none;width:0;}';
+
+  /// Forces DB's `.image` div to fill the WebView viewport (100%×100%) and
+  /// `background-size:cover` keeps the PNG aspect-correct. The four
+  /// `position:absolute` overlay divs stay correct because their
+  /// `top:NN%`/`left:NN%`/`right:NN%` are relative to `.image`, which is
+  /// now fullscreen instead of `padding-top:65%`-shaped. `img` is treated
+  /// the same way for the kontrollSicht's `<img>` payload.
+  static const _fillCss =
+      'html,body{height:100%;overflow:hidden;}'
+      '.image{padding-top:0!important;width:100%!important;height:100%!important;'
+      'background-size:cover!important;background-position:center!important;}'
+      'img{display:block;max-width:100%;height:auto;}';
 
   @override
   void initState() {
     super.initState();
+    final style = '<style>$_baseCss${widget.fill ? _fillCss : ''}</style>';
     final html = widget.html.contains('</head>')
-        ? widget.html.replaceFirst('</head>', '$_injectedCss</head>')
-        : '$_injectedCss${widget.html}';
+        ? widget.html.replaceFirst('</head>', '$style</head>')
+        : '$style${widget.html}';
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.disabled)
-      ..setBackgroundColor(Colors.white)
+      ..setBackgroundColor(Colors.transparent)
       ..loadHtmlString(html);
   }
 
