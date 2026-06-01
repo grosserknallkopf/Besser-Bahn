@@ -143,7 +143,7 @@ class TicketViewScreen extends ConsumerWidget {
   Widget _body(BuildContext context, DbTicket t) {
     return Column(
       children: [
-        _TicketMarquee(ticket: t),
+        _TicketStatusBlock(ticket: t),
         Expanded(
           child: Padding(
             // The half-cm white border around the ticket itself, matching the
@@ -231,20 +231,133 @@ class TicketViewScreen extends ConsumerWidget {
   }
 }
 
-// --- Anti-fraud marquee strip ----------------------------------------------
+// --- Ticket status header (matches DB Navigator's dark block) --------------
 
-/// Right-to-left scrolling status strip above the ticket — exactly like the
-/// official app's anti-fraud ribbon: text actually moves, so a static
-/// screenshot can't replicate it at inspection.
-class _TicketMarquee extends StatefulWidget {
+/// Static status block above the ticket, mirroring the DB Navigator layout:
+/// dark-grey panel, top row carries the validity date and the Auftrags-Nr,
+/// the tariff line is large, route line small/secondary, and a coloured pill
+/// at the bottom (red ✕ "Ticket nicht mehr gültig" / green ✓ "Ticket gültig" /
+/// red ⓘ "Ticket storniert") gives the inspection-relevant state at a glance.
+class _TicketStatusBlock extends StatelessWidget {
   final DbTicket ticket;
-  const _TicketMarquee({required this.ticket});
+  const _TicketStatusBlock({required this.ticket});
 
   @override
-  State<_TicketMarquee> createState() => _TicketMarqueeState();
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final expired =
+        ticket.gueltigBis != null && now.isAfter(ticket.gueltigBis!);
+    final stornoed = ticket.status.toUpperCase() == 'STORNIERT';
+    final valid = !expired && !stornoed;
+
+    final pillColor = stornoed || expired
+        ? const Color(0xFFD32011)
+        : const Color(0xFF0E7A2C);
+    final pillIcon = stornoed
+        ? Icons.info
+        : (expired ? Icons.cancel : Icons.check_circle);
+    final pillText = stornoed
+        ? 'Ticket storniert'
+        : expired
+            ? 'Ticket nicht mehr gültig'
+            : 'Ticket gültig';
+
+    final date = ticket.gueltigAb != null
+        ? DateFormat('dd.MM.yyyy').format(ticket.gueltigAb!)
+        : '';
+    final tariff = ticket.angebotsname?.trim().isNotEmpty == true
+        ? '${ticket.angebotsname} ${ticket.firstClass ? '1.Kl' : '2.Kl'}'
+        : (ticket.firstClass ? 'Einzelkarte 1.Kl' : 'Einzelkarte 2.Kl');
+    final route = (ticket.vonName == null && ticket.nachName == null)
+        ? ''
+        : '${ticket.vonName ?? '—'} · ${ticket.nachName ?? '—'}';
+
+    return Container(
+      width: double.infinity,
+      color: const Color(0xFF1F1F22),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Date · Auftrags-Nr (small, two-up).
+          Row(
+            children: [
+              Text(date,
+                  style: const TextStyle(
+                      color: Colors.white, fontSize: 13,
+                      fontWeight: FontWeight.w600)),
+              const Spacer(),
+              Text(
+                ticket.auftragsnummer,
+                style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 13,
+                    fontFeatures: [FontFeature.tabularFigures()]),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          // Tariff (the headline).
+          Text(tariff,
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold)),
+          if (route.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Text(route,
+                style: const TextStyle(color: Colors.white60, fontSize: 12)),
+          ],
+          const SizedBox(height: 8),
+          // Status pill.
+          Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: pillColor,
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(pillIcon, color: Colors.white, size: 16),
+                const SizedBox(width: 6),
+                Text(pillText,
+                    style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
+          // Tiny "ticket valid" shimmer marker for the corner — purely visual
+          // anti-screenshot proof that this is the live app, not a still
+          // picture. Sits under the pill on the right so it doesn't compete
+          // with the pill text.
+          if (valid)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: const [_LiveDot()],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
-class _TicketMarqueeState extends State<_TicketMarquee>
+/// Pulsing dot — only animation in the new status block. Cheap proof of life
+/// (a screenshot can't pulse) without the noisy moving banner.
+class _LiveDot extends StatefulWidget {
+  const _LiveDot();
+
+  @override
+  State<_LiveDot> createState() => _LiveDotState();
+}
+
+class _LiveDotState extends State<_LiveDot>
     with SingleTickerProviderStateMixin {
   late final AnimationController _ctrl;
 
@@ -253,8 +366,8 @@ class _TicketMarqueeState extends State<_TicketMarquee>
     super.initState();
     _ctrl = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 18),
-    )..repeat();
+      duration: const Duration(milliseconds: 1400),
+    )..repeat(reverse: true);
   }
 
   @override
@@ -264,85 +377,17 @@ class _TicketMarqueeState extends State<_TicketMarquee>
   }
 
   @override
-  Widget build(BuildContext context) {
-    final ticket = widget.ticket;
-    final now = DateTime.now();
-    final expired = ticket.gueltigBis != null && now.isAfter(ticket.gueltigBis!);
-    final stornoed = ticket.status.toUpperCase() == 'STORNIERT';
-
-    final bg = stornoed
-        ? const Color(0xFFB00020)
-        : expired
-            ? const Color(0xFF616161)
-            : const Color(0xFF0E7A2C);
-    const fg = Colors.white;
-
-    final statusText = stornoed
-        ? 'Ticket storniert'
-        : expired
-            ? 'Ticket nicht mehr gültig'
-            : 'Ticket gültig';
-
-    final dateText = ticket.gueltigAb != null
-        ? DateFormat('dd.MM.yyyy').format(ticket.gueltigAb!)
-        : '';
-    final parts = <String>[
-      if (dateText.isNotEmpty) dateText,
-      'Auftrag ${ticket.auftragsnummer}',
-      if (ticket.angebotsname != null) ticket.angebotsname!,
-      ticket.firstClass ? '1. Klasse' : '2. Klasse',
-      if (ticket.vonName != null || ticket.nachName != null)
-        '${ticket.vonName ?? '—'} → ${ticket.nachName ?? '—'}',
-      statusText,
-    ];
-    final text = parts.join('   ·   ');
-    const style = TextStyle(
-        color: fg, fontSize: 13, fontWeight: FontWeight.w600);
-
-    return Container(
-      color: bg,
-      height: 32,
-      child: ClipRect(
-        child: LayoutBuilder(builder: (ctx, c) {
-          final tp = TextPainter(
-            text: TextSpan(text: text, style: style),
-            textDirection: TextDirection.ltr,
-            maxLines: 1,
-          )..layout();
-          final segmentWidth = tp.width + 80;
-          return AnimatedBuilder(
-            animation: _ctrl,
-            builder: (ctx, _) {
-              final dx = -_ctrl.value * segmentWidth;
-              return Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  Positioned(
-                    left: dx,
-                    top: 0,
-                    bottom: 0,
-                    child: Row(
-                      children: [
-                        SizedBox(
-                            width: segmentWidth,
-                            child: Center(child: Text(text, style: style))),
-                        SizedBox(
-                            width: segmentWidth,
-                            child: Center(child: Text(text, style: style))),
-                        SizedBox(
-                            width: segmentWidth,
-                            child: Center(child: Text(text, style: style))),
-                      ],
-                    ),
-                  ),
-                ],
-              );
-            },
-          );
-        }),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => FadeTransition(
+        opacity: Tween(begin: 0.35, end: 1.0).animate(_ctrl),
+        child: Container(
+          width: 8,
+          height: 8,
+          decoration: const BoxDecoration(
+            color: Color(0xFF6CE07A),
+            shape: BoxShape.circle,
+          ),
+        ),
+      );
 }
 
 // --- WebView ----------------------------------------------------------------
