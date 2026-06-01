@@ -298,10 +298,12 @@ class BahncardsController extends AsyncNotifier<List<DbBahnCard>> {
     }
     final entry = await _BahnCardCache.load();
     if (entry.cards.isNotEmpty) {
-      // Stale-while-revalidate, but only re-fetch once per calendar day —
-      // the user asked for "auto-refresh wenn die App am Tag geöffnet wird",
-      // not "spam every open". Same-day cache hit serves silently.
-      if (entry.fetchedAt == null || !_sameDay(entry.fetchedAt!, DateTime.now())) {
+      // The BahnCard's Kontrollansicht carries its own server-side expiry
+      // (kontrollSichtGueltigBis). Until then the cached PNG is valid for
+      // an inspection — no point re-fetching. Only refresh when any card's
+      // Kontrollsicht has actually expired (or the date is missing, which
+      // means we don't know and should err on the side of fresh data).
+      if (entry.cards.any(_kontrollSichtExpired)) {
         _refreshInBackground();
       }
       return entry.cards;
@@ -310,8 +312,13 @@ class BahncardsController extends AsyncNotifier<List<DbBahnCard>> {
     return _fetchAndPersist();
   }
 
-  bool _sameDay(DateTime a, DateTime b) =>
-      a.year == b.year && a.month == b.month && a.day == b.day;
+  static bool _kontrollSichtExpired(DbBahnCard c) {
+    final raw = c.kontrollSichtGueltigBis;
+    if (raw == null || raw.isEmpty) return true;
+    final until = DateTime.tryParse(raw);
+    if (until == null) return true;
+    return DateTime.now().isAfter(until);
+  }
 
   /// Foreground refresh — the Profile "Aktualisieren" button.
   Future<void> refresh() async {
