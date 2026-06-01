@@ -10,6 +10,7 @@ import '../screens/nearby/nearby_screen.dart';
 import '../screens/train_lookup/train_lookup_screen.dart';
 import '../screens/profile/profile_screen.dart';
 import '../screens/profile/ticket_detail_screen.dart';
+import '../screens/connection_search/connection_detail_screen.dart' show TicketRef;
 import '../screens/connection_search/connection_search_screen.dart';
 import '../screens/station_map/station_map_screen.dart';
 import '../screens/connection_search/connection_detail_screen.dart';
@@ -84,7 +85,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           ),
         ],
       ),
-      // A single booked ticket (barcode + facts), pushed from the Profile tab.
+      // A single booked ticket. Loads the order, parses its Reiseplan, and
+      // hands off to ConnectionDetailScreen — so a bought ticket reads the
+      // SAME route view as a search result, with a Ticket action top-right.
       GoRoute(
         path: '/ticket',
         parentNavigatorKey: _rootNavigatorKey,
@@ -95,6 +98,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             kundenwunschId: args['kundenwunschId'] as String? ?? '',
           );
         },
+      ),
+      // The official Handyticket WebView itself (white background, scrollable),
+      // opened from the Ticket icon on the Reiseplan.
+      GoRoute(
+        path: '/ticket-view',
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) =>
+            TicketViewScreen(ticketRef: state.extra as TicketRef),
       ),
       // Secondary destinations moved out of the bottom bar into the AppBar
       // overflow menu — pushed on the root navigator so they get a back button.

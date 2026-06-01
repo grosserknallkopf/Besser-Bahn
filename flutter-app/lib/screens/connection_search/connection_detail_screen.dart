@@ -39,10 +39,23 @@ final Map<String, CoachSequence> _coachCache = {};
 /// Full multi-leg connection as ONE screen: each train's complete detail
 /// (header, live map, coach sequence, stops) stacked vertically — scroll down
 /// to the next train. No intermediate "pick a leg" screen.
+/// Identifies the booked ticket whose Reiseplan this screen is showing.
+typedef TicketRef = ({String auftragsnummer, String kundenwunschId});
+
 class ConnectionDetailScreen extends ConsumerStatefulWidget {
   final Journey journey;
 
-  const ConnectionDetailScreen({super.key, required this.journey});
+  /// When this Reiseplan belongs to a *bought* ticket (opened from the Reisen
+  /// tab), this ref points at the order so the AppBar can offer a "Ticket"
+  /// action that opens the official Handyticket. Null for plain search-result
+  /// connections.
+  final TicketRef? ticketRef;
+
+  const ConnectionDetailScreen({
+    super.key,
+    required this.journey,
+    this.ticketRef,
+  });
 
   @override
   ConsumerState<ConnectionDetailScreen> createState() =>
@@ -113,11 +126,22 @@ class _ConnectionDetailScreenState
   @override
   Widget build(BuildContext context) {
     final legs = journey.legs;
+    final ticketRef = widget.ticketRef;
     return Scaffold(
       appBar: AppBar(
         // Full route is cut off on a phone here → moved into the summary block.
-        title: const Text('Verbindung'),
+        title: Text(ticketRef != null ? 'Reiseplan' : 'Verbindung'),
         actions: [
+          // For a booked ticket: prominent "Ticket" action top-right, opening
+          // the official Handyticket WebView. Search-result connections don't
+          // carry a ticket and skip this.
+          if (ticketRef != null)
+            IconButton(
+              icon: const Icon(Icons.qr_code_2),
+              tooltip: 'Ticket anzeigen',
+              onPressed: () =>
+                  context.push('/ticket-view', extra: ticketRef),
+            ),
           // Teilen + Öffnen folded into one button → a small menu asks which.
           PopupMenuButton<int>(
             icon: const Icon(Icons.ios_share),

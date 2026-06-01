@@ -170,6 +170,26 @@ class SettingsNotifier extends Notifier<AppSettings> {
     _save();
   }
 
+  /// Seed search defaults from the signed-in DB account. Called from the auth
+  /// notifier on successful profile load so the user doesn't have to re-enter
+  /// what DB already knows (age, BahnCard, Deutschland-Ticket). Manual changes
+  /// after this stick because the apply happens at most once per login.
+  void applyFromDbAccount({
+    int? age,
+    BahnCardType? card,
+    bool? hasDeutschlandTicket,
+  }) {
+    final newCard = card ?? state.bahnCard;
+    final newDTicket = hasDeutschlandTicket ?? state.hasDeutschlandTicket;
+    state = state.copyWith(
+      age: age ?? state.age,
+      bahnCard: newCard,
+      hasDeutschlandTicket: newDTicket,
+      searchParty: SearchParty.fromSettings(newCard, newDTicket),
+    );
+    _save();
+  }
+
   void setAge(int age) {
     state = state.copyWith(age: age);
     _save();

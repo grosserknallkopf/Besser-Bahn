@@ -2,8 +2,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/db_account.dart';
 import '../models/db_ticket.dart';
+import '../models/split_ticket.dart' show BahnCardType;
 import '../services/db_account_service.dart';
 import 'service_providers.dart';
+import 'settings_provider.dart';
 
 /// Auth state for the DB account login.
 class DbAuthState {
@@ -54,6 +56,7 @@ class DbAuthNotifier extends Notifier<DbAuthState> {
       if (await _service.hasSession()) {
         final profile = await _service.profile();
         state = state.copyWith(initialized: true, profile: profile);
+        _seedSearchDefaults(profile);
         return;
       }
     } on DbAccountException catch (e) {
@@ -77,10 +80,54 @@ class DbAuthNotifier extends Notifier<DbAuthState> {
       final profile = await _service.login();
       state = state.copyWith(isLoading: false, profile: profile);
       _invalidateData();
+      _seedSearchDefaults(profile);
     } catch (e) {
       state = state.copyWith(
           isLoading: false, error: _message(e), clearProfile: true);
     }
+  }
+
+  /// Seed the journey-search defaults (age, BahnCard) from what the DB account
+  /// already knows, so the user doesn't have to re-enter it. Best-effort and
+  /// runs at most once per login — manual changes after this stick.
+  Future<void> _seedSearchDefaults(DbProfile profile) async {
+    int? age;
+    final geb = profile.geburtsdatum;
+    if (geb != null) {
+      final dt = DateTime.tryParse(geb);
+      if (dt != null) {
+        final now = DateTime.now();
+        age = now.year - dt.year -
+            ((now.month < dt.month ||
+                    (now.month == dt.month && now.day < dt.day))
+                ? 1
+                : 0);
+      }
+    }
+    BahnCardType? card;
+    try {
+      final cards = await ref.read(dbAccountServiceProvider).bahncards();
+      if (cards.isNotEmpty) card = _toBahnCardType(cards.first);
+    } catch (_) {/* no cards / network — leave settings untouched */}
+    ref.read(settingsProvider.notifier).applyFromDbAccount(
+          age: age,
+          card: card,
+        );
+  }
+
+  /// Maps a DB-account BahnCard (BC25/BC50/BC100 × KLASSE_1/2) to the local
+  /// [BahnCardType] enum the search uses. BC100 isn't an enum value yet — it
+  /// behaves like BC50 for discount-bound searches, so map it there.
+  BahnCardType? _toBahnCardType(DbBahnCard c) {
+    final t = c.typ.toUpperCase();
+    final firstClass = c.firstClass;
+    if (t.contains('25')) {
+      return firstClass ? BahnCardType.bc25_1 : BahnCardType.bc25_2;
+    }
+    if (t.contains('50') || t.contains('100')) {
+      return firstClass ? BahnCardType.bc50_1 : BahnCardType.bc50_2;
+    }
+    return null;
   }
 
   Future<void> logout() async {
