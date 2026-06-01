@@ -12,6 +12,9 @@ import '../core/constants.dart';
 import '../models/db_account.dart';
 import '../models/db_ticket.dart';
 
+/// Result of a refresh-token call.
+enum _RefreshOutcome { success, transient, rejected }
+
 /// Raised when a DB account call fails. [status] carries the HTTP code so
 /// callers can special-case 401 (re-login).
 class DbAccountException implements Exception {
@@ -164,9 +167,17 @@ class DbAccountService {
     return json.decode(res.body) as Map<String, dynamic>;
   }
 
-  Future<bool> _refresh() async {
+  /// Outcome of a refresh attempt. `transient` means the request itself
+  /// didn't reach the server / answered 5xx — tokens stay on disk so the
+  /// next try (next launch / reconnect) can recover. `rejected` means
+  /// Keycloak explicitly refused (400/401, usually invalid_grant) — the
+  /// refresh token is dead and tokens should be cleared.
+  Future<_RefreshOutcome> _refresh() async {
     final refresh = await _read(_kRefresh);
-    if (refresh == null) return false;
+    if (refresh == null) {
+      AppLog.log('refresh: no refresh_token on disk', tag: 'db-account');
+      return _RefreshOutcome.rejected; // no token at all = nothing to retry
+    }
     final http.Response res;
     try {
       res = await _client.post(
@@ -179,11 +190,32 @@ class DbAccountService {
         },
       ).timeout(_timeout);
     } on TimeoutException {
-      return false;
+      AppLog.log('refresh: timeout (transient)', tag: 'db-account');
+      return _RefreshOutcome.transient;
+    } catch (e) {
+      AppLog.log('refresh: network error $e (transient)', tag: 'db-account');
+      return _RefreshOutcome.transient;
     }
-    if (res.statusCode != 200) return false;
+    AppLog.log(
+        'refresh HTTP ${res.statusCode} (refresh ttl=${refresh.length}B)',
+        tag: 'db-account');
+    if (res.statusCode == 200) {
+      // fall through to _storeTokens below
+    } else if (res.statusCode == 400 || res.statusCode == 401) {
+      // Keycloak explicitly rejected the refresh token — it's dead.
+      AppLog.log(
+          'refresh rejected · body: ${res.body.substring(0, res.body.length.clamp(0, 200))}',
+          tag: 'db-account');
+      return _RefreshOutcome.rejected;
+    } else {
+      // 5xx / unexpected — keep tokens, next try recovers.
+      AppLog.log(
+          'refresh non-200 (transient) · body: ${res.body.substring(0, res.body.length.clamp(0, 200))}',
+          tag: 'db-account');
+      return _RefreshOutcome.transient;
+    }
     await _storeTokens(json.decode(res.body) as Map<String, dynamic>);
-    return true;
+    return _RefreshOutcome.success;
   }
 
   Future<void> _storeTokens(Map<String, dynamic> token) async {
@@ -271,8 +303,16 @@ class DbAccountService {
     if (_accessToken == null) {
       await _loadTokens();
       // No access token but maybe a refresh token survived — mint one.
-      if (_accessToken == null && !await _refresh()) {
-        throw const DbAccountException('Nicht angemeldet', 401);
+      if (_accessToken == null) {
+        final r = await _refresh();
+        if (r == _RefreshOutcome.rejected) {
+          await logout();
+          throw const DbAccountException('Sitzung abgelaufen', 401);
+        }
+        if (r == _RefreshOutcome.transient) {
+          throw const DbAccountException(
+              'Anmeldung temporär nicht erreichbar', null);
+        }
       }
     }
     // Pre-emptive refresh: the access token only lives 5 minutes.
@@ -307,11 +347,20 @@ class DbAccountService {
     }
 
     if (res.statusCode == 401 && retryOn401) {
-      if (await _refresh()) {
+      final r = await _refresh();
+      if (r == _RefreshOutcome.success) {
         return _send(method, url, media: media, body: body, retryOn401: false);
       }
-      await logout();
-      throw const DbAccountException('Sitzung abgelaufen', 401);
+      // Only wipe the stored tokens when Keycloak EXPLICITLY rejected the
+      // refresh — the previous behaviour wiped them on any failure (incl. a
+      // transient timeout / 5xx) and forced the user to re-log on every cold
+      // start. Now transient errors keep the tokens for the next try.
+      if (r == _RefreshOutcome.rejected) {
+        await logout();
+        throw const DbAccountException('Sitzung abgelaufen', 401);
+      }
+      throw const DbAccountException(
+          'Sitzung temporär nicht erreichbar — bitte erneut versuchen', null);
     }
     return res;
   }
