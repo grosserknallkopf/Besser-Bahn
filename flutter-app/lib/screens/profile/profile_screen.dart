@@ -215,7 +215,7 @@ class _LoggedIn extends ConsumerWidget {
                           for (final c in list)
                             Padding(
                               padding: const EdgeInsets.only(bottom: 12),
-                              child: BahnCardView(card: c),
+                              child: _BahnCardTile(card: c),
                             ),
                         ],
                       ),
@@ -412,6 +412,56 @@ class _BahnBonusCard extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// One BahnCard tile in the Profil list: the official card art on top, with
+/// BC-Nr and "Gültig bis" rendered as muted text directly underneath. The
+/// metadata used to live inside the fullscreen Kontrollansicht; the user
+/// preferred it here so the card stays clean and the basic data is glanceable
+/// without opening anything.
+class _BahnCardTile extends StatelessWidget {
+  final DbBahnCard card;
+  const _BahnCardTile({required this.card});
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = Theme.of(context).colorScheme.outline;
+    final parts = <String>[
+      'Nr. ${_formatBcNumber(card.nummer)}',
+      if (card.gueltigBis != null) 'gültig bis ${_d(card.gueltigBis!)}',
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        BahnCardView(card: card),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 6, 4, 0),
+          child: Text(parts.join(' · '),
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: muted)),
+        ),
+      ],
+    );
+  }
+
+  /// "7081411251741233" → "7081 4112 5174 1233" so the long number breaks
+  /// visually like a credit card. No-op if already spaced.
+  static String _formatBcNumber(String raw) {
+    if (raw.contains(' ')) return raw;
+    final buf = StringBuffer();
+    for (var i = 0; i < raw.length; i++) {
+      if (i > 0 && i % 4 == 0) buf.write(' ');
+      buf.write(raw[i]);
+    }
+    return buf.toString();
+  }
+
+  static String _d(String iso) {
+    final dt = DateTime.tryParse(iso);
+    return dt != null ? DateFormat('dd.MM.yyyy').format(dt) : iso;
   }
 }
 

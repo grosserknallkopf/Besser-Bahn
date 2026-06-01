@@ -126,9 +126,11 @@ class BahnCardView extends StatelessWidget {
 /// card in Profil, exposed so the Ticket view can jump to it (a conductor
 /// usually checks both, so the user needs a fast switch).
 void openBahnCardControl(BuildContext context, DbBahnCard card) {
+  // Regular push (not fullscreenDialog) so the AppBar leading icon is a back
+  // arrow, not a close X — matches the navigation style of the rest of the
+  // app's secondary screens.
   Navigator.of(context, rootNavigator: true).push(
     MaterialPageRoute<void>(
-      fullscreenDialog: true,
       builder: (_) => _BahnCardControlScreen(card: card),
     ),
   );
@@ -190,55 +192,21 @@ class _BahnCardControlScreen extends StatelessWidget {
         : 'BahnCard · Kontrolle';
     return Scaffold(
       appBar: AppBar(title: Text(title)),
-      body: Column(
-        children: [
-          Expanded(
-            child: ColoredBox(
-              color: Colors.white,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
-                child: (_webViewSupported && html != null)
-                    ? _BahnCardHtml(html: html)
-                    : const Center(
-                        child: Text('Keine Kontrollansicht verfügbar.',
-                            style: TextStyle(color: Colors.black54))),
-              ),
-            ),
-          ),
-          SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
-              child: Column(
-                children: [
-                  Text('BahnCard-Nr ${card.nummer}',
-                      textAlign: TextAlign.center,
-                      style: Theme.of(context).textTheme.bodySmall),
-                  if (card.gueltigBis != null)
-                    Text('BahnCard gültig bis ${_fmt(card.gueltigBis!)}',
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context).textTheme.bodySmall),
-                  if (card.kontrollSichtGueltigBis != null)
-                    Text(
-                        'Kontrollansicht gültig bis '
-                        '${_fmt(card.kontrollSichtGueltigBis!)}',
-                        textAlign: TextAlign.center,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodySmall
-                            ?.copyWith(fontSize: 11)),
-                ],
-              ),
-            ),
-          ),
-        ],
+      body: ColoredBox(
+        color: Colors.white,
+        child: Padding(
+          // Generous top inset — the Kontrollsicht reads as a "ticket-like
+          // card" and benefits from breathing room above. Side / bottom
+          // insets match TicketViewScreen so both surfaces feel consistent.
+          padding: const EdgeInsets.fromLTRB(20, 32, 20, 20),
+          child: (_webViewSupported && html != null)
+              ? _BahnCardHtml(html: html)
+              : const Center(
+                  child: Text('Keine Kontrollansicht verfügbar.',
+                      style: TextStyle(color: Colors.black54))),
+        ),
       ),
     );
-  }
-
-  String _fmt(String iso) {
-    final dt = DateTime.tryParse(iso);
-    return dt != null ? DateFormat('dd.MM.yyyy').format(dt) : iso;
   }
 }
 
