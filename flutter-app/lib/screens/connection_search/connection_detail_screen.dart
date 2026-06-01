@@ -1138,8 +1138,21 @@ class _LegSectionState extends ConsumerState<_LegSection>
 
   Future<void> _fetchFresh(String id, {required bool silent}) async {
     final leg = widget.leg;
+    // Fire trip and coach sequence in parallel — they were sequential, ~doubling
+    // the wait before the live location renders. Each side handles its own
+    // failure so one slow call doesn't block the other.
+    final tripFuture = ref.read(hafasServiceProvider).getTrip(id);
+    final coachFuture = ref
+        .read(coachSequenceServiceProvider)
+        .getCoachSequenceForDeparture(
+          category: leg.line?.productName ?? '',
+          trainNumber: leg.line?.fahrtNr ?? '',
+          stationEva: leg.origin.id,
+          departureTime: leg.departure,
+        )
+        .catchError((_) => null);
     try {
-      var trip = await ref.read(hafasServiceProvider).getTrip(id);
+      var trip = await tripFuture;
       // The `fahrt` API drops the line label ("RE7"); the journey leg still has
       // it, so carry it in → header shows "RE 7 (11281)", not the bare number.
       final label = leg.line?.name.trim() ?? '';
@@ -1151,25 +1164,17 @@ class _LegSectionState extends ConsumerState<_LegSection>
       // Post-await (never during build) → safe to nudge the parent to recompute
       // transfer windows from the live arrival/departure this fetch just added.
       widget.onTripUpdated?.call();
-      try {
-        final cs = await ref
-            .read(coachSequenceServiceProvider)
-            .getCoachSequenceForDeparture(
-              category: leg.line?.productName ?? '',
-              trainNumber: leg.line?.fahrtNr ?? '',
-              stationEva: leg.origin.id,
-              departureTime: leg.departure,
-            );
-        if (cs != null) {
-          _coachCache[id] = cs;
-          if (mounted) setState(() => _coach = cs);
-        }
-      } catch (_) {/* optional */}
-    } catch (_) {/* keep cached/fallback */} finally {
-      if (mounted && !silent) setState(() => _loading = false);
-      // Re-arm the stop-aligned refresh from the freshest trip we hold.
-      if (mounted && _trip != null) _scheduleNextRefresh(_trip!);
-    }
+    } catch (_) {/* keep cached/fallback */}
+    try {
+      final cs = await coachFuture;
+      if (cs != null) {
+        _coachCache[id] = cs;
+        if (mounted) setState(() => _coach = cs);
+      }
+    } catch (_) {/* optional */}
+    if (mounted && !silent) setState(() => _loading = false);
+    // Re-arm the stop-aligned refresh from the freshest trip we hold.
+    if (mounted && _trip != null) _scheduleNextRefresh(_trip!);
   }
 
 

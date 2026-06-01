@@ -121,21 +121,29 @@ class TrainLookupNotifier extends Notifier<TrainLookupState> {
 
     if (needsCoords.isEmpty) return;
 
-    // Look up coordinates for stops that don't have them
+    // Look up coordinates for every missing stop in PARALLEL. Sequentially this
+    // was N × ~300ms of network — on a 15-stop ICE that's ~5s before the map
+    // could even draw stations, which is the "Zug lädt zu langsam" the rider
+    // sees. Future.wait fires them all at once so total = slowest single hit.
     final enriched = <String, Station>{};
-    for (final stop in needsCoords) {
-      try {
-        final results = await hafas.searchStations(stop.stop.name);
-        if (results.isNotEmpty) {
-          final match = results.firstWhere(
+    final results = await Future.wait(
+      needsCoords.map((stop) async {
+        try {
+          final hits = await hafas.searchStations(stop.stop.name);
+          if (hits.isEmpty) return null;
+          final match = hits.firstWhere(
             (s) => s.id == stop.stop.id || s.name == stop.stop.name,
-            orElse: () => results.first,
+            orElse: () => hits.first,
           );
-          if (match.hasLocation) {
-            enriched[stop.stop.id] = match;
-          }
+          return match.hasLocation ? MapEntry(stop.stop.id, match) : null;
+        } catch (_) {
+          return null;
         }
-      } catch (_) {}
+      }),
+      eagerError: false,
+    );
+    for (final entry in results) {
+      if (entry != null) enriched[entry.key] = entry.value;
     }
 
     if (enriched.isEmpty || state.trip?.id != trip.id) return;
