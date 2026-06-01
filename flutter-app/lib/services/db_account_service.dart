@@ -91,14 +91,16 @@ class DbAccountService {
     } catch (_) {}
   }
 
-  /// Whether a session token exists. Does not validate it.
+  /// Whether a session token exists. Does not validate it. Eagerly primes
+  /// all four token fields (access / refresh / expiry / kontoId) so the next
+  /// `_send` can decide pre-emptively whether to refresh — without this,
+  /// `_expiresAt` stayed null on cold start and every first request paid an
+  /// extra 401/403 round-trip before the refresh actually fired.
   Future<bool> hasSession() async {
-    _accessToken ??= await _read(_kAccess);
-    if (_accessToken == null) {
-      // A refresh token alone is enough to restore a session.
-      return (await _read(_kRefresh)) != null;
-    }
-    return true;
+    await _loadTokens();
+    if (_accessToken != null) return true;
+    // A refresh token alone is enough to restore a session.
+    return (await _read(_kRefresh)) != null;
   }
 
   // --- OAuth (PKCE) ---------------------------------------------------------

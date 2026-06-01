@@ -30,6 +30,20 @@
 # com.it_nomads.fluttersecurestorage in 10.x.
 -keep class com.it_nomads.fluttersecurestorage.** { *; }
 -keep class com.google.crypto.tink.** { *; }
+# Enums hold method-reference lambdas + a synthetic values() array R8 will
+# happily mangle in full mode; valueOf() then throws on the next cold-start
+# read of the previously-written cipher-algorithm marker.
+-keepclassmembers enum com.it_nomads.fluttersecurestorage.** { *; }
+-keepclassmembernames class com.it_nomads.fluttersecurestorage.ciphers.** { *; }
+# Tink's keyset (de)serialisation uses Class.forName-style reflection into
+# its proto + shaded-protobuf packages — already inside tink.**, but call out
+# explicitly so a future minor that changes the package layout doesn't break.
+-keep class com.google.crypto.tink.proto.** { *; }
+-keep class com.google.crypto.tink.shaded.protobuf.** { *; }
+# androidx.security.crypto (EncryptedSharedPreferences) is what the plugin's
+# fallback path uses; missing keeps here would also crash a read silently.
+-keep class androidx.security.crypto.** { *; }
+-dontwarn androidx.security.crypto.**
 -dontwarn com.it_nomads.fluttersecurestorage.**
 -dontwarn com.google.crypto.tink.**
 -dontwarn javax.annotation.**
