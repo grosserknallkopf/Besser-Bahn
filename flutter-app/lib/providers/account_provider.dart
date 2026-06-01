@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/app_log.dart';
 import '../models/db_account.dart';
 import '../models/db_ticket.dart';
 import '../models/split_ticket.dart' show BahnCardType;
@@ -53,10 +54,13 @@ class DbAuthNotifier extends Notifier<DbAuthState> {
   /// On startup: if a token exists, load the profile to validate the session.
   Future<void> _restore() async {
     try {
-      if (await _service.hasSession()) {
+      final has = await _service.hasSession();
+      AppLog.log('restore start · session=$has', tag: 'db-account');
+      if (has) {
         final profile = await _service.profile();
         state = state.copyWith(initialized: true, profile: profile);
         _seedSearchDefaults(profile);
+        AppLog.log('restore ok · ${profile.kundennummer}', tag: 'db-account');
         return;
       }
     } on DbAccountException catch (e) {
@@ -65,10 +69,14 @@ class DbAuthNotifier extends Notifier<DbAuthState> {
       // refresh, but be explicit. A transient error (offline, timeout, missing
       // platform keyring) must NOT wipe a valid refresh token, or the user is
       // forced to log in again on every cold start.
+      AppLog.log(
+          'restore DbAccountException status=${e.status} msg=${e.message}',
+          tag: 'db-account');
       if (e.status == 401) await _service.logout();
-    } catch (_) {
+    } catch (e) {
       // Network/platform hiccup — keep the tokens, just show logged-out for
       // now; the next launch (or a manual retry) re-validates the session.
+      AppLog.log('restore non-auth error: $e', tag: 'db-account');
     }
     state = state.copyWith(initialized: true, clearProfile: true);
   }

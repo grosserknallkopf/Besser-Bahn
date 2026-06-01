@@ -31,7 +31,13 @@ class CheckinCollisionException extends TraewellingException {
 /// secure store; a 401 triggers a single transparent refresh + retry.
 class TraewellingService {
   TraewellingService({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+      : _storage = storage ??
+            const FlutterSecureStorage(
+              // iOS: allow reads after first unlock since boot. Android 10.x
+              // uses its own ciphers by default; no extra options needed.
+              iOptions:
+                  IOSOptions(accessibility: KeychainAccessibility.first_unlock),
+            );
 
   final FlutterSecureStorage _storage;
   final http.Client _client = http.Client();

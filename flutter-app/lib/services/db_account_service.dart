@@ -34,7 +34,17 @@ class DbAccountException implements Exception {
 /// access token is refreshed transparently on a 401.
 class DbAccountService {
   DbAccountService({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+      : _storage = storage ??
+            const FlutterSecureStorage(
+              // On iOS, allow reads after the device has been unlocked once
+              // since boot — required so a token refresh fired by the app's
+              // resume path doesn't fail with "data is locked". On Android,
+              // flutter_secure_storage 10.x uses its own ciphers by default
+              // (the legacy EncryptedSharedPreferences flag is deprecated and
+              // ignored), so no aOptions needed.
+              iOptions:
+                  IOSOptions(accessibility: KeychainAccessibility.first_unlock),
+            );
 
   final FlutterSecureStorage _storage;
   final http.Client _client = http.Client();
@@ -64,7 +74,12 @@ class DbAccountService {
   Future<void> _writeKey(String key, String value) async {
     try {
       await _storage.write(key: key, value: value);
-    } catch (_) {/* not persisted on this platform */}
+    } catch (e) {
+      // Surface to the in-app debug log so a missing keystore (no EncryptedSP
+      // support, locked profile, broken libsecret on desktop) doesn't silently
+      // amount to "the user is forced to log in every time" without diagnosis.
+      AppLog.log('secure-storage write failed [$key]: $e', tag: 'db-account');
+    }
   }
 
   Future<void> _delete(String key) async {
@@ -190,6 +205,12 @@ class DbAccountService {
       await _writeKey(_kExpiry, _expiresAt!.toIso8601String());
     }
     if (_kundenkontoId != null) await _writeKey(_kKontoId, _kundenkontoId!);
+    // Confirm what actually landed in storage so we can diagnose any
+    // "logged out on relaunch" report from a real device.
+    final persisted = await _read(_kRefresh);
+    AppLog.log(
+        'storeTokens ok · refresh persisted: ${persisted != null}',
+        tag: 'db-account');
   }
 
   Future<void> logout() async {
@@ -300,6 +321,12 @@ class DbAccountService {
     final exp = await _read(_kExpiry);
     _expiresAt = exp != null ? DateTime.tryParse(exp) : null;
     _kundenkontoId = await _read(_kKontoId);
+    final hasRefresh = (await _read(_kRefresh)) != null;
+    AppLog.log(
+        'loadTokens access=${_accessToken != null} '
+        'refresh=$hasRefresh exp=${_expiresAt?.toIso8601String() ?? '?'} '
+        'konto=${_kundenkontoId != null}',
+        tag: 'db-account');
   }
 
   Map<String, dynamic> _decode(http.Response res, String what) {
