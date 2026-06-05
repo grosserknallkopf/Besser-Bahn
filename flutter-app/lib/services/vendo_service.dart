@@ -457,8 +457,19 @@ class VendoService {
     // The leg is unusable when the boarding (first) or alighting (last) stop of
     // this segment is dropped — you can't get on, or can't get off here. A
     // dropped intermediate stop alone is a Teilausfall, surfaced per-stopover.
-    final cancelled = stopovers.isNotEmpty &&
-        (stopovers.first.cancelled || stopovers.last.cancelled);
+    // DB also signals a fully-cancelled run with a high-priority realtime note
+    // whose text says the train "fällt aus" — catch that too (verified: a fully
+    // cancelled run comes back with every halt GECANCELT, the note is the
+    // belt-and-braces case). himNotizen are NOT used here: their construction
+    // texts mention generic "Zugausfälle" without this leg being cancelled.
+    final ezAusfall = (a['echtzeitNotizen'] as List<dynamic>? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .any((n) =>
+            (n['text'] as String?)?.toLowerCase().contains('fällt aus') ??
+            false);
+    final cancelled = (stopovers.isNotEmpty &&
+            (stopovers.first.cancelled || stopovers.last.cancelled)) ||
+        ezAusfall;
 
     // Disruption notes: HIM messages (construction, broken lifts, …) and
     // realtime notes ("Reparatur an der Strecke"), from the leg and its stops.

@@ -66,6 +66,29 @@ void main() {
     expect(j.hasCancelledLeg, isTrue);
   });
 
+  test('echtzeitNotiz "fällt aus" → leg cancelled even without GECANCELT halte',
+      () {
+    final leg = _leg([
+      _halt('Kiel Hbf'),
+      _halt('Hamburg Hbf'),
+    ]);
+    leg['echtzeitNotizen'] = [
+      {'text': 'Fahrt fällt aus', 'prio': 'HOCH'},
+    ];
+    final j = svc.parseConnection(_conn(leg));
+    expect(j.legs.single.cancelled, isTrue);
+    expect(j.hasCancelledLeg, isTrue);
+  });
+
+  test('high-prio note that is NOT a cancellation stays usable', () {
+    final leg = _leg([_halt('Kiel Hbf'), _halt('Hamburg Hbf')]);
+    leg['echtzeitNotizen'] = [
+      {'text': 'Ersatzfahrt für ICE 108', 'prio': 'HOCH'},
+    ];
+    final j = svc.parseConnection(_conn(leg));
+    expect(j.legs.single.cancelled, isFalse);
+  });
+
   test('intermediate stop GECANCELT → Teilausfall, leg still usable', () {
     final j = svc.parseConnection(_conn(_leg([
       _halt('Kiel Hbf'),
