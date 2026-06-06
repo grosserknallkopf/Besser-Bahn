@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../models/library_models.dart';
@@ -95,6 +96,15 @@ class _ConnectionSearchScreenState
                 },
               );
             }),
+          if (state.result != null && state.sortedJourneys.isNotEmpty)
+            IconButton(
+              icon: const Icon(Icons.price_check),
+              tooltip: 'Preise vergleichen (Split-Ticket für alle)',
+              onPressed: () => context.push(
+                '/split-compare',
+                extra: state.sortedJourneys,
+              ),
+            ),
           if (state.result != null)
             PopupMenuButton<JourneySortMode>(
               icon: const Icon(Icons.sort),
