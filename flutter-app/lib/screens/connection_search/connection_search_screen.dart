@@ -246,6 +246,10 @@ class _ConnectionSearchScreenState
                         ),
                         const SizedBox(width: 4),
                         SegmentedButton<bool>(
+                          // No leading check icon — in this narrow, compact
+                          // toggle it crammed the "Ab" label and looked like a
+                          // misaligned dip. Selection is clear from the fill.
+                          showSelectedIcon: false,
                           style: SegmentedButton.styleFrom(
                             visualDensity: VisualDensity.compact,
                             padding: const EdgeInsets.symmetric(horizontal: 6),
