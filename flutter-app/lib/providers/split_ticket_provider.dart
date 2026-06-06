@@ -223,14 +223,32 @@ class SplitTicketNotifier extends Notifier<SplitTicketState> {
       if (myGen != _gen) return; // superseded while computing
       _runningSig = null;
       stopwatch.stop();
-      final splitPrice = dp[n - 1];
+      var splitPrice = dp[n - 1];
+      var resultTickets = tickets;
+      // You can always just buy the through ticket, so a split must never cost
+      // more than — or merely tie — the direct fare. When the split has no real
+      // edge, fall back to a single direct ticket so the UI shows the direct
+      // price as the winner instead of a misleading, pricier breakdown.
+      if (directPrice > 0 && splitPrice >= directPrice - 0.01) {
+        splitPrice = directPrice;
+        resultTickets = [
+          SplitTicket(
+            from: stops.first['name'] as String,
+            to: stops.last['name'] as String,
+            price: directPrice,
+            fromId: stops.first['id'] as String,
+            toId: stops.last['id'] as String,
+            departureIso: stops.first['departure_iso'] as String? ?? date,
+          ),
+        ];
+      }
       _log(
           'Fertig! Direktpreis: ${directPrice.toStringAsFixed(2)}€, Split: ${splitPrice.toStringAsFixed(2)}€');
 
       final result = TicketAnalysisResult(
         directPrice: directPrice,
         splitPrice: splitPrice,
-        tickets: tickets,
+        tickets: resultTickets,
         combinationsChecked: totalCombinations,
         elapsed: stopwatch.elapsed,
       );

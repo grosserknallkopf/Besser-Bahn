@@ -1,22 +1,31 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../models/journey.dart';
 import '../../models/split_ticket.dart';
+import '../../providers/service_providers.dart';
 import '../../providers/split_ticket_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../services/db_api_service.dart';
 import '../../theme/app_colors.dart';
 
-/// Split-ticket analysis — purely a viewer of [splitTicketProvider]. The
-/// analysis is always launched from a connection (the Split button on the
-/// connection detail), which already carries the recon context for correct
-/// prices; there is no link to paste. The work runs on the app-scoped provider,
-/// so it keeps going in the background when this screen is popped, and a system
-/// notification fires when it finishes.
-class SplitTicketScreen extends ConsumerWidget {
+/// Split-ticket analysis viewer + entry point.
+///
+/// Two ways in:
+///  • From a connection (the Split button on the connection detail) — `journey`
+///    is set, the analysis is already running on [splitTicketProvider], and we
+///    just render its progress/result.
+///  • From the global "⋮ → Split-Ticket" menu — `journey` is null and we show a
+///    DB-link paste field (like the original app): the user pastes a "Reise
+///    teilen" link, we resolve it to a connection and kick off the analysis.
+///
+/// The work runs on the app-scoped provider, so it keeps going in the
+/// background when this screen is popped, and a system notification fires when
+/// it finishes.
+class SplitTicketScreen extends ConsumerStatefulWidget {
   /// The connection this analysis was launched from, if any. When set, the
   /// result offers a way back to the actual trains of that route.
   final Journey? journey;
@@ -24,7 +33,72 @@ class SplitTicketScreen extends ConsumerWidget {
   const SplitTicketScreen({super.key, this.journey});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SplitTicketScreen> createState() => _SplitTicketScreenState();
+}
+
+class _SplitTicketScreenState extends ConsumerState<SplitTicketScreen> {
+  final _linkController = TextEditingController();
+  bool _resolving = false;
+  String? _resolveError;
+
+  Journey? get journey => widget.journey;
+
+  @override
+  void dispose() {
+    _linkController.dispose();
+    super.dispose();
+  }
+
+  /// Resolve the pasted DB link to a concrete connection, then launch the
+  /// split analysis on the shared provider. Prices use the user's BahnCard /
+  /// Deutschland-Ticket from Einstellungen, so they match the app elsewhere.
+  Future<void> _resolveAndAnalyze() async {
+    final link = _linkController.text.trim();
+    if (link.isEmpty) {
+      setState(() => _resolveError = 'Bitte einen DB-Link einfügen.');
+      return;
+    }
+    setState(() {
+      _resolving = true;
+      _resolveError = null;
+    });
+    final settings = ref.read(settingsProvider);
+    final dbApi = ref.read(dbApiServiceProvider);
+    try {
+      final resolved = await dbApi.resolveShareLink(
+        link,
+        bahnCard: settings.bahnCard,
+        deutschlandTicket: settings.hasDeutschlandTicket,
+      );
+      if (!mounted) return;
+      if (resolved == null) {
+        setState(() {
+          _resolving = false;
+          _resolveError =
+              'Konnte keine Verbindung aus dem Link lesen. Prüfe den DB-Link '
+              '(z. B. bahn.de/buchung/start?vbid=…).';
+        });
+        return;
+      }
+      setState(() => _resolving = false);
+      ref.read(splitTicketProvider.notifier).analyze(
+            stops: resolved.stops,
+            date: resolved.date,
+            directPrice: resolved.directPrice,
+            routeLabel: resolved.routeLabel,
+            jobKey: 'link:$link',
+          );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _resolving = false;
+        _resolveError = 'Fehler beim Auflösen: $e';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final state = ref.watch(splitTicketProvider);
     final theme = Theme.of(context);
 
@@ -35,6 +109,9 @@ class SplitTicketScreen extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.only(bottom: 32),
         children: [
+          // Global entry (no journey): paste a DB share link to analyse.
+          if (journey == null) _buildLinkInput(context),
+
           // Whole-trip header: which route this analysis is for. Falls back to
           // the journey origin/destination when state hasn't carried a label
           // yet (first frame after navigation).
@@ -117,10 +194,92 @@ class SplitTicketScreen extends ConsumerWidget {
             if (journey != null) _buildShowRoute(context),
           ],
 
-          // Empty state: nothing running, no result yet.
-          if (!state.isLoading && state.result == null && state.error == null)
+          // Empty state: only for the connection flow. The global (link) entry
+          // shows the paste field above instead of pointing back to search.
+          if (journey != null &&
+              !state.isLoading &&
+              state.result == null &&
+              state.error == null)
             _buildEmptyState(context),
         ],
+      ),
+    );
+  }
+
+  /// DB-link paste field for the global entry: paste a "Reise teilen" link,
+  /// resolve it to a connection, and run the split analysis. Mirrors the
+  /// original app's link-based split-ticketing.
+  Widget _buildLinkInput(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.link, size: 18, color: theme.colorScheme.primary),
+                const SizedBox(width: 8),
+                Text('DB-Link analysieren', style: theme.textTheme.titleSmall),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Füge einen geteilten DB-Link ein (bahn.de/buchung/start?vbid=…), '
+              'um günstigere Split-Tickets für diese Verbindung zu finden.',
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _linkController,
+              maxLines: 2,
+              minLines: 1,
+              keyboardType: TextInputType.url,
+              decoration: InputDecoration(
+                isDense: true,
+                labelText: 'DB-Link einfügen',
+                hintText: 'https://www.bahn.de/buchung/start?vbid=…',
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.content_paste),
+                  tooltip: 'Aus Zwischenablage einfügen',
+                  onPressed: () async {
+                    final data = await Clipboard.getData(Clipboard.kTextPlain);
+                    final text = data?.text?.trim();
+                    if (text != null && text.isNotEmpty) {
+                      _linkController.text = text;
+                      setState(() => _resolveError = null);
+                    }
+                  },
+                ),
+              ),
+            ),
+            if (_resolveError != null) ...[
+              const SizedBox(height: 8),
+              Text(_resolveError!,
+                  style: TextStyle(color: theme.colorScheme.error)),
+            ],
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _resolving ? null : _resolveAndAnalyze,
+                icon: _resolving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Icon(Icons.call_split),
+                label: Text(_resolving ? 'Lese Link…' : 'Analysieren'),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
