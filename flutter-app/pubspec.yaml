@@ -5,8 +5,8 @@ publish_to: 'none'
 version: 2.0.0+1
 
 environment:
-  sdk: ^3.10.0
-  flutter: ^3.35.3
+  sdk: ^3.11.0
+  flutter: ^3.41.0   # Dart 3.11 (xml lang version) requires Flutter 3.41+; release built with 3.41.9
 
 dependencies:
   flutter:
