@@ -6,7 +6,7 @@ version: 2.0.0+1
 
 environment:
   sdk: ^3.11.0
-  flutter: ^3.41.0   # Dart 3.11 (xml lang version) requires Flutter 3.41+; release built with 3.41.9
+  flutter: 3.41.9   # exact: IzzyOnDroid RB parses this line and clones `flutter -b <version>`. Bump on every release to the Flutter version you actually build with.
 
 dependencies:
   flutter:
