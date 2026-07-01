@@ -93,12 +93,21 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
 
 // --- Logged-out CTA ---------------------------------------------------------
 
-class _LoggedOut extends ConsumerWidget {
+class _LoggedOut extends ConsumerStatefulWidget {
   final DbAuthState auth;
   const _LoggedOut({required this.auth});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_LoggedOut> createState() => _LoggedOutState();
+}
+
+class _LoggedOutState extends ConsumerState<_LoggedOut> {
+  // The user must explicitly acknowledge the ban risk before login is enabled.
+  bool _accepted = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final auth = widget.auth;
     final theme = Theme.of(context);
     return Center(
       child: SingleChildScrollView(
@@ -128,7 +137,50 @@ class _LoggedOut extends ConsumerWidget {
                   ?.copyWith(color: theme.colorScheme.outline),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 20),
+            // Ban-risk disclaimer: this app is unofficial and the login goes
+            // through an unofficial interface, which the DB could in theory
+            // penalise. Make the risk explicit and require acknowledgement.
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.errorContainer.withAlpha(90),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.warning_amber_rounded,
+                      size: 20, color: theme.colorScheme.error),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Diese App ist inoffiziell und nicht mit der Deutschen '
+                      'Bahn verbunden. Die Anmeldung nutzt eine inoffizielle '
+                      'Schnittstelle — theoretisch kann die Bahn dein Konto '
+                      'dafür einschränken oder sperren. Die Nutzung erfolgt auf '
+                      'eigenes Risiko; für Kontosperren oder daraus entstehende '
+                      'Schäden übernehmen wir keine Haftung.',
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 4),
+            CheckboxListTile(
+              value: _accepted,
+              onChanged: (v) => setState(() => _accepted = v ?? false),
+              controlAffinity: ListTileControlAffinity.leading,
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              title: Text(
+                'Ich habe das Risiko verstanden und melde mich auf eigene '
+                'Verantwortung an.',
+                style: theme.textTheme.bodySmall,
+              ),
+            ),
+            const SizedBox(height: 12),
             if (auth.error != null) ...[
               Text(auth.error!,
                   style: TextStyle(color: theme.colorScheme.error),
@@ -138,7 +190,7 @@ class _LoggedOut extends ConsumerWidget {
             SizedBox(
               width: double.infinity,
               child: FilledButton.icon(
-                onPressed: auth.isLoading
+                onPressed: (auth.isLoading || !_accepted)
                     ? null
                     : () => ref.read(dbAuthProvider.notifier).login(),
                 icon: auth.isLoading

@@ -23,6 +23,11 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
   final _controller = PageController();
   int _page = 0;
 
+  // The final step gates "Los geht's" behind an explicit acceptance checkbox
+  // (unofficial app / no DB affiliation / use at own risk). Skipping lands on
+  // that same final step, so the checkbox cannot be bypassed.
+  bool _accepted = false;
+
   // Intro slides + the two permission rationale steps + the final step.
   late final List<_Step> _steps = [
     const _Step.intro(
@@ -173,6 +178,25 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
               padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
               child: Column(
                 children: [
+                  // Final step: explicit acceptance checkbox, shown above the
+                  // enter button which stays disabled until it is ticked.
+                  if (_isLast)
+                    CheckboxListTile(
+                      value: _accepted,
+                      onChanged: (v) => setState(() => _accepted = v ?? false),
+                      controlAffinity: ListTileControlAffinity.leading,
+                      contentPadding: EdgeInsets.zero,
+                      dense: true,
+                      activeColor: AppColors.dbRed,
+                      title: Text(
+                        'Ich akzeptiere, dass Besser Bahn eine inoffizielle App '
+                        'ohne Verbindung zur Deutschen Bahn ist und die Nutzung '
+                        'auf eigenes Risiko erfolgt.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ),
                   // Permission steps get a request button; tapping it (granted
                   // or declined) advances. The label otherwise just moves on.
                   if (step.request != null)
@@ -207,7 +231,7 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                             borderRadius: BorderRadius.circular(12),
                           ),
                         ),
-                        onPressed: _next,
+                        onPressed: (_isLast && !_accepted) ? null : _next,
                         child: Text(
                           _isLast ? "Los geht's" : 'Weiter',
                           style: theme.textTheme.titleMedium?.copyWith(
@@ -221,21 +245,6 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                     TextButton(
                       onPressed: _next,
                       child: const Text('Nicht jetzt'),
-                    )
-                  // On the final step, the enter button doubles as acceptance of
-                  // the inofficial-use / no-liability terms shown earlier.
-                  else if (_isLast)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 12),
-                      child: Text(
-                        'Mit „Los geht\'s" bestätigst du, dass Besser Bahn eine '
-                        'inoffizielle App ohne Verbindung zur Deutschen Bahn ist '
-                        'und die Nutzung auf eigenes Risiko erfolgt.',
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
                     )
                   else
                     const SizedBox(height: 8),
