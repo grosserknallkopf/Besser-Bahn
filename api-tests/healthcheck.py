@@ -784,39 +784,51 @@ def check_vendo_seat_map() -> str:
                       headers=_vendo_headers(media), data=json.dumps(body),
                       timeout=TIMEOUT)
     r.raise_for_status()
-    # Find the first long-distance leg (ICE/IC/EC) — those carry a seat plan.
-    leg = None
+    # Collect ALL long-distance legs (ICE/IC/EC) across the results — those carry
+    # a seat plan. Not every train exposes a graphical plan though: some units
+    # answer gsd_v3 with 409 Conflict. So we try candidates in turn and accept the
+    # first that returns a usable plan; only if none do is the endpoint suspect.
+    candidates = []
     for c in r.json().get("verbindungen", []):
         for a in c["verbindung"]["verbindungsAbschnitte"]:
             if (a.get("produktGattung") or "").upper() in ("ICE", "IC", "EC", "ECE"):
-                leg = a
-                break
-        if leg:
-            break
-    if leg is None:
+                candidates.append(a)
+    if not candidates:
         raise CheckError("no long-distance leg to derive a seat-map request")
 
-    fahrt_nr = str(leg.get("zugNummer") or leg.get("verkehrsmittelNummer") or "")
-    ab_eva = str(leg["abgangsOrt"].get("evaNr") or "")
-    an_eva = str(leg["ankunftsOrt"].get("evaNr") or "")
-    # gsd wants naive local time (no offset suffix).
-    ab_t = (leg.get("abgangsDatum") or "").split("+")[0]
-    an_t = (leg.get("ankunftsDatum") or "").split("+")[0]
-    if not (fahrt_nr and ab_eva and an_eva and ab_t and an_t):
-        raise CheckError("leg missing zugNummer/evaNr/times for gsd request")
-
-    data = {"buchungskontext": {"quellSystem": "SIMA", "buchungsKontextId": str(uuid.uuid4()),
-            "buchungsKontextDaten": {"zugnummer": fahrt_nr, "zugfahrtKey": "",
-                "abfahrtHalt": {"locationId": ab_eva, "abfahrtZeit": ab_t},
-                "ankunftHalt": {"locationId": an_eva, "ankunftZeit": an_t},
-                "inventarsystem": "RIFF",
-                "platzbedarfe": [{"platzprofilCode": "StandardEinzelperson",
-                                  "anzahl": 1.0, "klasse": "KLASSE_2"}]}},
-            "correlationID": _corr_id(), "lang": "de", "theme": "app"}
-    url = ("https://app.services-bahn.de/mob/gsd/gsd_v3?data="
-           + urllib.parse.quote(json.dumps(data, separators=(",", ":"))))
-    g = requests.get(url, headers={"User-Agent": DBNAV_UA}, timeout=TIMEOUT)
-    g.raise_for_status()
+    g = None
+    fahrt_nr = ab_eva = an_eva = ab_t = an_t = ""
+    tried = 0
+    skipped = []
+    for leg in candidates:
+        fahrt_nr = str(leg.get("zugNummer") or leg.get("verkehrsmittelNummer") or "")
+        ab_eva = str(leg["abgangsOrt"].get("evaNr") or "")
+        an_eva = str(leg["ankunftsOrt"].get("evaNr") or "")
+        # gsd wants naive local time (no offset suffix).
+        ab_t = (leg.get("abgangsDatum") or "").split("+")[0]
+        an_t = (leg.get("ankunftsDatum") or "").split("+")[0]
+        if not (fahrt_nr and ab_eva and an_eva and ab_t and an_t):
+            continue
+        tried += 1
+        data = {"buchungskontext": {"quellSystem": "SIMA", "buchungsKontextId": str(uuid.uuid4()),
+                "buchungsKontextDaten": {"zugnummer": fahrt_nr, "zugfahrtKey": "",
+                    "abfahrtHalt": {"locationId": ab_eva, "abfahrtZeit": ab_t},
+                    "ankunftHalt": {"locationId": an_eva, "ankunftZeit": an_t},
+                    "inventarsystem": "RIFF",
+                    "platzbedarfe": [{"platzprofilCode": "StandardEinzelperson",
+                                      "anzahl": 1.0, "klasse": "KLASSE_2"}]}},
+                "correlationID": _corr_id(), "lang": "de", "theme": "app"}
+        url = ("https://app.services-bahn.de/mob/gsd/gsd_v3?data="
+               + urllib.parse.quote(json.dumps(data, separators=(",", ":"))))
+        resp = requests.get(url, headers={"User-Agent": DBNAV_UA}, timeout=TIMEOUT)
+        if resp.status_code == 200 and "id='ssr_data'" in resp.text:
+            g = resp
+            break
+        skipped.append(f"{fahrt_nr}:{resp.status_code}")
+    if g is None:
+        raise CheckError(
+            f"no train exposed a gsd plan across {tried} tried "
+            f"(e.g. {', '.join(skipped[:5])})")
     m = re.search(r"id='ssr_data'\s*>(.*?)</script>", g.text, re.S)
     if not m:
         raise CheckError("gsd_v3 page has no ssr_data blob")
