@@ -46,6 +46,13 @@ dependency_overrides:
   latlong2: ^0.10.1
   xml: ^7.0.1
   image: ^4.9.1
+  # FLOSS geolocator_android (no Google Play Services / GMS): uses the plain
+  # Android LocationManager instead of the fused-location provider. Keeps the
+  # geolocator API unchanged. Vendored into third_party/ (see its VENDORED.md)
+  # so the build never depends on an external GitHub repo staying online.
+  # Issue #10 + https://izzyondroid.org/docs/devpractices/ProprietaryLibraries/#flutter-and-geolocation
+  geolocator_android:
+    path: third_party/geolocator_android
 
 dev_dependencies:
   flutter_test:
