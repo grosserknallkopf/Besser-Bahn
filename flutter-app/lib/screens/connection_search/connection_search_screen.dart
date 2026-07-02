@@ -255,30 +255,16 @@ class _ConnectionSearchScreenState
                           ),
                         ),
                         const SizedBox(width: 4),
-                        SegmentedButton<bool>(
-                          // No leading check icon — in this narrow, compact
-                          // toggle it crammed the "Ab" label and looked like a
-                          // misaligned dip. Selection is clear from the fill.
-                          showSelectedIcon: false,
-                          style: SegmentedButton.styleFrom(
-                            visualDensity: VisualDensity.compact,
-                            padding: const EdgeInsets.symmetric(horizontal: 6),
-                            tapTargetSize:
-                                MaterialTapTargetSize.shrinkWrap,
-                          ),
-                          segments: [
-                            const ButtonSegment(
-                                value: false, label: Text('Ab')),
-                            // "An" (arrival) needs a fixed time — disabled on
-                            // "Jetzt", where only a departure search applies.
-                            ButtonSegment(
-                                value: true,
-                                label: const Text('An'),
-                                enabled: state.dateTime != null),
-                          ],
-                          selected: {state.useArrival},
-                          onSelectionChanged: (v) =>
-                              notifier.setIsArrival(v.first),
+                        // Custom Ab/An toggle instead of SegmentedButton: the
+                        // latter paints the selected segment's fill as a
+                        // top-anchored rectangle shorter than the outline,
+                        // leaving an unfilled strip at the bottom in this row.
+                        // Here the selected segment is a Container that stretches
+                        // to the full pill height, so the fill can never gap.
+                        _AbAnToggle(
+                          useArrival: state.useArrival,
+                          arrivalEnabled: state.dateTime != null,
+                          onChanged: notifier.setIsArrival,
                         ),
                         const SizedBox(width: 4),
                         FilledButton(
@@ -504,5 +490,72 @@ class _ConnectionSearchScreenState
     final dt =
         DateTime(date.year, date.month, date.day, time.hour, time.minute);
     ref.read(journeySearchProvider.notifier).setDateTime(dt);
+  }
+}
+
+/// Compact "Ab"/"An" (departure/arrival) toggle. Rolled by hand instead of
+/// [SegmentedButton], whose selected fill renders a hair shorter than the
+/// outline here and leaves an unfilled strip at the bottom. The selected
+/// segment is a Container that fills the full pill height, so no gap is
+/// possible. Sits in an IntrinsicHeight + stretch row, so it matches the
+/// height of the time field and search button next to it.
+class _AbAnToggle extends StatelessWidget {
+  const _AbAnToggle({
+    required this.useArrival,
+    required this.arrivalEnabled,
+    required this.onChanged,
+  });
+
+  final bool useArrival;
+  final bool arrivalEnabled;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    Widget segment(String label, bool value, bool enabled) {
+      final selected = useArrival == value;
+      return InkWell(
+        onTap: enabled && !selected ? () => onChanged(value) : null,
+        borderRadius: BorderRadius.circular(9),
+        child: Container(
+          alignment: Alignment.center,
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+          decoration: BoxDecoration(
+            color: selected ? cs.secondaryContainer : Colors.transparent,
+            borderRadius: BorderRadius.circular(9),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+              color: !enabled
+                  ? cs.onSurface.withValues(alpha: 0.38)
+                  : selected
+                      ? cs.onSecondaryContainer
+                      : cs.onSurfaceVariant,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(3),
+      decoration: BoxDecoration(
+        border: Border.all(color: cs.outline),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          segment('Ab', false, true),
+          const SizedBox(width: 2),
+          segment('An', true, arrivalEnabled),
+        ],
+      ),
+    );
   }
 }
