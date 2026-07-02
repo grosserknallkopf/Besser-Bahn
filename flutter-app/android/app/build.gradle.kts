@@ -56,7 +56,15 @@ android {
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
-        versionCode = flutter.versionCode
+        // Monotonic versionCode derived from the semantic version name, NOT the
+        // pubspec build number (+N). The +N was reset 7 -> 1 at 2.0.0, which
+        // pushed versionCode below 1.0.3's and made Android/updaters treat the
+        // 2.x releases as older (issue #9). major*10000 + minor*100 + patch is
+        // strictly increasing across semver and always exceeds the old codes.
+        val semver = flutter.versionName.substringBefore("+").split(".")
+        versionCode = (semver.getOrNull(0)?.toIntOrNull() ?: 0) * 10000 +
+            (semver.getOrNull(1)?.toIntOrNull() ?: 0) * 100 +
+            (semver.getOrNull(2)?.toIntOrNull() ?: 0)
         versionName = flutter.versionName
     }
 
@@ -77,6 +85,14 @@ android {
         includeInApk = false
         // Disables dependency metadata when building Android App Bundles (for Google Play)
         includeInBundle = false
+    }
+
+    packaging {
+        // Compress dex + native libs in the APK (legacy packaging). Shrinks the
+        // download by ~12 MB back into the original size range (issue #9). Libs
+        // are extracted to disk on install (extractNativeLibs=true).
+        dex.useLegacyPackaging = true
+        jniLibs.useLegacyPackaging = true
     }
 }
 
