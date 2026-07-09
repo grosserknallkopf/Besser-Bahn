@@ -1,11 +1,15 @@
+import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
+import 'dart:ui' as ui;
 
+import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_map/flutter_map.dart';
-import 'package:flutter_map_tile_caching/flutter_map_tile_caching.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:vector_map_tiles/vector_map_tiles.dart';
 
 import 'app_log.dart';
@@ -22,42 +26,39 @@ final Uint8List _transparentTile = Uint8List.fromList(const [
   0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
 ]);
 
-/// Persistent on-disk cache for map tiles (FMTC / ObjectBox backend).
+/// Persistent on-disk cache for raster map tiles — a pure-Dart filesystem LRU,
+/// no native backend (previously FMTC's ObjectBox store, dropped so the app
+/// carries no non-free native lib).
 ///
 /// Goal (user-chosen): keep ~50 MB of tiles on disk, evicting the oldest when
 /// full, so re-opening the map — even after an app restart — paints instantly
-/// from disk instead of re-downloading every tile.
+/// from disk instead of re-downloading every tile. Only the two RASTER layers
+/// use this (the last-resort raster basemap fallback + bahnhof.de indoor
+/// tiles); the main VECTOR basemap has its own cache in [vector_map_tiles].
 ///
-/// FMTC has two independent limits:
-///  * the per-store `maxLength` counts **tiles** and removes the OLDEST when
-///    exceeded → this is our LRU eviction. ~50 MB ≈ 1500 tiles at ~30 KB each.
-///  * `maxDatabaseSize` is a hard **KB** ceiling that *throws* (no eviction)
-///    on write when hit → we set it well above the LRU target purely as a
-///    safety net so we never actually hit it.
+/// Eviction: [_DiskTileStore] counts **files** and deletes the OLDEST (by
+/// mtime, touched on every cache hit) past [_maxTiles] → LRU. ~50 MB ≈ 1500
+/// tiles at ~30 KB each. Freshness: a cached tile older than [_validDuration]
+/// is re-fetched.
 ///
-/// Init is best-effort: on platforms without the ObjectBox native library
-/// (e.g. a plain Linux desktop build) or any failure, we silently fall back to
-/// a normal [NetworkTileProvider] — the map still works, tiles just aren't
-/// persisted.
+/// Init is best-effort: on any failure (or a platform with no writable cache
+/// dir) we silently fall back to a network-only [_CachingTileProvider] that
+/// still shares the connection-capped client — the map works, tiles just
+/// aren't persisted.
 class TileCache {
   TileCache._();
 
-  static const _store = 'mapTiles';
   static const _maxTiles = 1500; // ≈ 50 MB; oldest evicted past this (LRU)
+  static const _validDuration = Duration(days: 30);
 
   static bool _ready = false;
   static bool get isReady => _ready;
 
   static Future<void> init() async {
     try {
-      await FMTCObjectBoxBackend().initialise(
-        // KB. Generous ceiling; the per-store maxLength keeps us near ~50 MB.
-        maxDatabaseSize: 200000, // 200 MB hard cap (never expected to hit)
-      );
-      await FMTCStore(_store).manage.create(maxLength: _maxTiles);
+      await _DiskTileStore.init(maxTiles: _maxTiles);
       _ready = true;
-      AppLog.log('tile cache ready (store "$_store", maxLength $_maxTiles)',
-          tag: 'map');
+      AppLog.log('tile cache ready (disk LRU, maxTiles $_maxTiles)', tag: 'map');
     } catch (e) {
       _ready = false;
       AppLog.log('tile cache unavailable → network only ($e)', tag: 'map');
@@ -66,7 +67,7 @@ class TileCache {
 
   /// Shared HTTP client for ALL tile fetches, with a HARD cap on concurrent
   /// connections per host. This is the core fix for "the map chokes the whole
-  /// app": flutter_map/FMTC otherwise open UNLIMITED parallel connections, and
+  /// app": flutter_map otherwise open UNLIMITED parallel connections, and
   /// NetworkTileProvider's default wraps a RetryClient that retries every
   /// failure — so a wide map fires hundreds-to-thousands of tile requests at
   /// once, saturating the app's connection pool until unrelated calls
@@ -80,28 +81,23 @@ class TileCache {
       ..connectionTimeout = const Duration(seconds: 12),
   );
 
-  /// A caching tile provider when the cache is up, else a plain network one,
-  /// wrapped in a circuit breaker (see [_BreakerTileProvider]). Both use the
-  /// shared connection-capped [_tileHttp].
+  /// A disk-caching (cache-first) tile provider, wrapped in a circuit breaker
+  /// (see [_BreakerTileProvider]). When the disk store is down it degrades to
+  /// network-only but still shares the connection-capped [_tileHttp].
   /// [headers] is forwarded (e.g. the `Referer` the indoor tiles require).
   static TileProvider provider({Map<String, String>? headers}) {
-    final TileProvider inner = _ready
-        ? FMTCTileProvider(
-            stores: const {_store: BrowseStoreStrategy.readUpdateCreate},
-            loadingStrategy: BrowseLoadingStrategy.cacheFirst,
-            cachedValidDuration: const Duration(days: 30),
-            headers: headers,
-            httpClient: _tileHttp,
-          )
-        : NetworkTileProvider(
-            headers: headers ?? const {},
-            httpClient: _tileHttp,
-          );
-    return _BreakerTileProvider(inner);
+    return _BreakerTileProvider(
+      _CachingTileProvider(
+        client: _tileHttp,
+        headers: headers,
+        persist: _ready,
+        validDuration: _validDuration,
+      ),
+    );
   }
 
   // --- Circuit breaker -------------------------------------------------------
-  // When a tile host goes unreachable, flutter_map/FMTC re-request the missing
+  // When a tile host goes unreachable, flutter_map re-request the missing
   // tiles relentlessly (thousands/sec was observed), saturating the connection
   // and janking the whole app — even starving unrelated API calls. The breaker
   // trips after a short burst of failures and then serves a transparent tile
@@ -222,4 +218,206 @@ class _BreakerTileProvider extends TileProvider {
 
   @override
   void dispose() => _inner.dispose();
+}
+
+/// A [TileProvider] that serves each tile from the on-disk [_DiskTileStore]
+/// when a fresh copy exists, else fetches it over the shared connection-capped
+/// client and writes it back (cache-first). Falls back to network-only when
+/// [persist] is false (disk store failed to init).
+class _CachingTileProvider extends TileProvider {
+  _CachingTileProvider({
+    required http.Client client,
+    required this.persist,
+    required this.validDuration,
+    Map<String, String>? headers,
+  })  : _client = client,
+        _headers = headers;
+
+  final http.Client _client;
+  final Map<String, String>? _headers;
+  final bool persist;
+  final Duration validDuration;
+
+  @override
+  ImageProvider getImage(TileCoordinates coordinates, TileLayer options) {
+    return _DiskTileImage(
+      url: getTileUrl(coordinates, options),
+      headers: _headers,
+      client: _client,
+      persist: persist,
+      validDuration: validDuration,
+    );
+  }
+}
+
+/// [ImageProvider] that resolves one raster tile: fresh disk hit → bytes from
+/// disk; otherwise download → decode → (optionally) persist. Keyed purely by
+/// URL so flutter's image cache dedupes identical tiles.
+@immutable
+class _DiskTileImage extends ImageProvider<_DiskTileImage> {
+  const _DiskTileImage({
+    required this.url,
+    required this.headers,
+    required this.client,
+    required this.persist,
+    required this.validDuration,
+  });
+
+  final String url;
+  final Map<String, String>? headers;
+  final http.Client client;
+  final bool persist;
+  final Duration validDuration;
+
+  @override
+  Future<_DiskTileImage> obtainKey(ImageConfiguration configuration) =>
+      SynchronousFuture<_DiskTileImage>(this);
+
+  @override
+  ImageStreamCompleter loadImage(
+      _DiskTileImage key, ImageDecoderCallback decode) {
+    return MultiFrameImageStreamCompleter(
+      codec: _loadBytes(decode),
+      scale: 1.0,
+      debugLabel: url,
+    );
+  }
+
+  Future<ui.Codec> _loadBytes(ImageDecoderCallback decode) async {
+    final bytes = await _fetch();
+    final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
+    return decode(buffer);
+  }
+
+  Future<Uint8List> _fetch() async {
+    // 1) fresh disk hit
+    if (persist) {
+      final cached = _DiskTileStore.readFresh(url, validDuration);
+      if (cached != null) return cached;
+    }
+    // 2) network
+    try {
+      final resp = await client.get(Uri.parse(url), headers: headers);
+      if (resp.statusCode == 200 && resp.bodyBytes.isNotEmpty) {
+        if (persist) _DiskTileStore.write(url, resp.bodyBytes);
+        return resp.bodyBytes;
+      }
+      // 3) serve a stale copy rather than fail, if we have one
+      if (persist) {
+        final stale = _DiskTileStore.readAny(url);
+        if (stale != null) return stale;
+      }
+      throw NetworkImageLoadException(
+          statusCode: resp.statusCode, uri: Uri.parse(url));
+    } catch (_) {
+      if (persist) {
+        final stale = _DiskTileStore.readAny(url);
+        if (stale != null) return stale;
+      }
+      rethrow;
+    }
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is _DiskTileImage && other.url == url;
+
+  @override
+  int get hashCode => url.hashCode;
+}
+
+/// Pure-Dart filesystem tile store with count-based LRU eviction. One file per
+/// tile (name = SHA-1 of the URL); the file mtime is the LRU timestamp,
+/// bumped on every cache hit. All I/O is synchronous — tiles are tiny (~30 KB)
+/// and this runs off the platform channel, so a sync read/write is cheaper
+/// than the async plumbing it would otherwise need. Eviction runs opportunis-
+/// tically every [_trimEvery] writes (and once at startup).
+class _DiskTileStore {
+  _DiskTileStore._();
+
+  static Directory? _dir;
+  static int _maxTiles = 1500;
+  static int _writesSinceTrim = 0;
+  static const _trimEvery = 64;
+
+  static bool get _ready => _dir != null;
+
+  static Future<void> init({required int maxTiles}) async {
+    _maxTiles = maxTiles;
+    final base = await getApplicationCacheDirectory();
+    final dir = Directory('${base.path}/map_tiles');
+    if (!dir.existsSync()) dir.createSync(recursive: true);
+    _dir = dir;
+    unawaited(Future(_trim)); // startup sweep, off the init critical path
+  }
+
+  static File? _fileFor(String url) {
+    final dir = _dir;
+    if (dir == null) return null;
+    final name = sha1.convert(utf8.encode(url)).toString();
+    return File('${dir.path}/$name');
+  }
+
+  /// Bytes if a cached tile exists and is younger than [maxAge]; else null.
+  /// Touches the file mtime on a hit so it survives LRU eviction longest.
+  static Uint8List? readFresh(String url, Duration maxAge) {
+    if (!_ready) return null;
+    final f = _fileFor(url);
+    if (f == null || !f.existsSync()) return null;
+    try {
+      if (DateTime.now().difference(f.lastModifiedSync()) > maxAge) return null;
+      final bytes = f.readAsBytesSync();
+      try {
+        f.setLastModifiedSync(DateTime.now()); // LRU touch
+      } catch (_) {/* best-effort */}
+      return bytes;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Bytes if any cached tile exists (ignoring age) — for serving stale on a
+  /// network failure. Does NOT touch mtime.
+  static Uint8List? readAny(String url) {
+    if (!_ready) return null;
+    final f = _fileFor(url);
+    if (f == null || !f.existsSync()) return null;
+    try {
+      return f.readAsBytesSync();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static void write(String url, Uint8List bytes) {
+    if (!_ready) return;
+    final f = _fileFor(url);
+    if (f == null) return;
+    try {
+      f.writeAsBytesSync(bytes);
+    } catch (_) {
+      return;
+    }
+    if (++_writesSinceTrim >= _trimEvery) {
+      _writesSinceTrim = 0;
+      unawaited(Future(_trim));
+    }
+  }
+
+  /// Delete the oldest files (by mtime) until at most [_maxTiles] remain.
+  static void _trim() {
+    final dir = _dir;
+    if (dir == null) return;
+    try {
+      final files = dir.listSync().whereType<File>().toList();
+      if (files.length <= _maxTiles) return;
+      files.sort((a, b) =>
+          a.statSync().modified.compareTo(b.statSync().modified));
+      for (final f in files.take(files.length - _maxTiles)) {
+        try {
+          f.deleteSync();
+        } catch (_) {/* raced with another delete; ignore */}
+      }
+    } catch (_) {/* best-effort housekeeping */}
+  }
 }

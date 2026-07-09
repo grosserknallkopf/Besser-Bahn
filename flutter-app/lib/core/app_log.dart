@@ -45,14 +45,14 @@ class AppLog {
   }
 
   /// Install a [FlutterError.onError] filter that collapses the noisy map-tile /
-  /// image-load errors (FMTC `noConnectionDuringFetch` et al.) into a single
-  /// counted [logCollapsed] line and swallows their multi-line stack dump, while
-  /// passing every OTHER framework error through untouched. Call once in main().
+  /// image-load errors (failed raster tile fetches et al.) into a single counted
+  /// [logCollapsed] line and swallows their multi-line stack dump, while passing
+  /// every OTHER framework error through untouched. Call once in main().
   ///
   /// These dumps come straight from Flutter's image-resource error reporter (not
   /// our per-layer `errorTileCallback`), so the only place to catch them all is
   /// here. Without this a flaky/offline connection floods the console with the
-  /// identical FMTCBrowsingError, drowning out everything useful.
+  /// identical tile-load exception, drowning out everything useful.
   // --- Tile-health timeline ------------------------------------------------
   static int _tileTotal = 0;
   static int _tileWindow = 0;
@@ -115,17 +115,18 @@ class AppLog {
     }
   }
 
-  /// Pull the host out of a socket/FMTC error string for the timeline label.
+  /// Pull the host out of a socket/tile error string for the timeline label.
   static String _hostOf(String s) {
     final m = RegExp(r'(?:address = |uri=https?://)([^,:/\s]+)').firstMatch(s);
     return m?.group(1) ?? '';
   }
 
-  /// True for the noisy map-tile / tile-network errors we collapse (FMTC misses
-  /// plus the raw socket/host-lookup failures vector_map_tiles throws when a
-  /// tile host is unreachable). Kept narrow so real errors still surface.
+  /// True for the noisy map-tile / tile-network errors we collapse (raster tile
+  /// fetch misses plus the raw socket/host-lookup failures vector_map_tiles
+  /// throws when a tile host is unreachable). Kept narrow so real errors still
+  /// surface.
   static bool _isTileNoise(String s) =>
-      s.contains('FMTCBrowsingError') ||
+      s.contains('HTTP request failed, statusCode') || // NetworkImageLoadException
       s.contains('Failed to load the tile') ||
       s.contains('openfreemap') ||
       s.contains('cartocdn') ||
