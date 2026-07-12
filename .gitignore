@@ -18,3 +18,8 @@ screenshot-*.png
 
 # Throwaway API probes (ad-hoc, not part of the suite)
 api-tests/probe_*.py
+
+# Reverse-eng APK artefacts (use the apkurl skill; snapshots live in the apk-url-extractor repo)
+*.xapk
+*.apkm
+*.apks
