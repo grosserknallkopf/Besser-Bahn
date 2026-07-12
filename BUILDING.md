@@ -51,6 +51,13 @@ The equivalent IzzyOnDroid recipe step is:
 
 ## Per-release checklist
 
+- Bump `version:` in `flutter-app/pubspec.yaml` (e.g. `2.0.5+6`).
+- **Git tag + GitHub release use the PLAIN semver only — `2.0.5`, never
+  `2.0.5+6`.** The `+N` is Flutter's internal build number; Gradle derives the
+  `versionCode` from the semver alone (`major*10000+minor*100+patch`, +ABI
+  offset) and strips the `+N`, so it never reaches users. A `+N` in the release
+  tag is just noise and breaks the clean semver convention F-Droid/Obtainium
+  expect. (Older tags `2.0.0+1 … 2.0.4+5` predate this rule; don't copy them.)
 - Bump the exact `flutter:` version in `flutter-app/pubspec.yaml` to the Flutter
   version you actually build with (IzzyOnDroid's RB script parses that line).
 - Update the table above and the GitHub release notes with the Flutter **and**
