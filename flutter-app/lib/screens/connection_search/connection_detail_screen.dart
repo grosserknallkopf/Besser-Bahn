@@ -16,6 +16,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../providers/library_provider.dart';
 import '../../providers/account_provider.dart';
+import '../../providers/journey_search_provider.dart';
 import '../../providers/service_providers.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/split_ticket_provider.dart';
@@ -182,6 +183,11 @@ class _ConnectionDetailScreenState
                 ),
               ),
             ],
+          ),
+          IconButton(
+            icon: const Icon(Icons.alt_route),
+            tooltip: 'Alternative Verbindungen',
+            onPressed: () => _showAlternatives(context, ref),
           ),
           IconButton(
             icon: const Icon(Icons.call_split),
@@ -436,6 +442,29 @@ class _ConnectionDetailScreenState
   /// kick off a split-ticket analysis, then jump to the Split tab — so the user
   /// goes from "found a connection" to "is it cheaper split?" in one tap, no
   /// copy-pasting a bahn.de link.
+  /// "Alternative Verbindungen": re-run a normal journey search for the same
+  /// origin → destination around this connection's departure, then jump to the
+  /// Suche tab where the results render. No login / no booked-trip needed — the
+  /// account-bound `mob/reisen/{id}/alternativen` endpoint isn't required; a
+  /// fresh Vendo search from the same stops IS the alternatives list.
+  void _showAlternatives(BuildContext context, WidgetRef ref) {
+    final from = journey.origin;
+    final to = journey.destination;
+    if (from == null || to == null || from.id.isEmpty || to.id.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Keine Alternativen — Start/Ziel unbekannt.'),
+      ));
+      return;
+    }
+    final n = ref.read(journeySearchProvider.notifier);
+    n.setFrom(from);
+    n.setTo(to);
+    n.setDateTime(journey.plannedDeparture ?? journey.departure);
+    n.setIsArrival(false);
+    context.go('/search');
+    n.search();
+  }
+
   void _openSplitTicket(BuildContext context, WidgetRef ref) {
     final stops = <Map<String, dynamic>>[];
     // `boundary` = a leg endpoint (start, terminus or transfer) — always kept
