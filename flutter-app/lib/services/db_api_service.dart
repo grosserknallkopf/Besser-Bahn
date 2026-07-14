@@ -100,9 +100,19 @@ class DbApiService {
       // regional first leg (#13). Coverage is now decided by the caller from
       // the selected connection's trains (isSegmentDTicketCovered), which is
       // both exact and free. `deutschlandTicket` still shapes the request.
+      // This is the blind `connections[0]` the issue called out: no matching
+      // against the selected connection happens here at all, so the fare may
+      // well belong to another train. The vendo path can at least try to match
+      // and flags itself when it can't — this one can never vouch for a price,
+      // so it always flags. Claiming otherwise would make the fallback look
+      // MORE trustworthy than the primary (#13).
       final priceObj = first['angebotsPreis'] as Map<String, dynamic>?;
       final price = (priceObj?['betrag'] as num?)?.toDouble() ?? double.infinity;
-      return SegmentPrice(price: price, isDTicketCovered: false);
+      return SegmentPrice(
+        price: price,
+        isDTicketCovered: false,
+        priceMayBeTrainBound: true,
+      );
     } catch (_) {
       return const SegmentPrice(price: double.infinity, isDTicketCovered: false);
     }
