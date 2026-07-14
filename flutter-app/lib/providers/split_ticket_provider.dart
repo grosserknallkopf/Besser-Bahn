@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/split_ticket.dart';
 import '../services/db_api_service.dart';
 import '../services/notification_service.dart';
+import '../utils/split_engine.dart';
 import 'service_providers.dart';
 import 'settings_provider.dart';
 
@@ -106,10 +107,8 @@ class SplitTicketNotifier extends Notifier<SplitTicketState> {
     // the root cause of split prices coming out higher than the real fare.
     final partyReisende = settings.searchParty.toReisendeJson();
 
-    final stopwatch = Stopwatch()..start();
     final n = stops.length;
     final totalCombinations = (n * (n - 1)) ~/ 2;
-    var processed = 0;
 
     final initialRouteLabel = routeLabel ??
         (stops.isNotEmpty
@@ -126,137 +125,45 @@ class SplitTicketNotifier extends Notifier<SplitTicketState> {
     );
     _log('Starte Split-Ticket-Analyse...');
 
-    // Collect segment prices
-    final prices = <String, SegmentPrice>{};
-
     try {
-      for (int i = 0; i < n; i++) {
-        for (int j = i + 1; j < n; j++) {
-          if (myGen != _gen) return; // superseded by a newer analyze()/cancel()
-          if (state.isCancelled) {
-            _log('Analyse abgebrochen.');
-            state = state.copyWith(isLoading: false);
-            return;
-          }
-
-          final fromName = stops[i]['name'] as String;
-          final toName = stops[j]['name'] as String;
-          final key = '$i-$j';
-
-          _log('Prüfe: $fromName → $toName');
-
-          final dtIso = stops[i]['departure_iso'] as String? ?? date;
-
-          // Primary: DB Vendo (has prices, not Akamai-blocked). Rate-limit a
-          // little, then fall back to the legacy website price endpoint.
-          await Future.delayed(Duration(milliseconds: settings.apiDelayMs));
-          var price = await vendo.getSegmentPrice(
-            from: stops[i]['id'] as String,
-            to: stops[j]['id'] as String,
-            dateTime: DateTime.tryParse(dtIso),
-            deutschlandTicket: settings.hasDeutschlandTicket,
-            firstClass: settings.bahnCard.isFirstClass,
-            ermaessigung: settings.bahnCard.vendoErmaessigung,
-            reisende: partyReisende,
-          );
-          if (price.price == double.infinity && !price.isDTicketCovered) {
-            price = await dbApi.getSegmentPrice(
-              fromId: stops[i]['id'] as String,
-              toId: stops[j]['id'] as String,
-              dateTime: dtIso,
-              travellers: travellers,
-              deutschlandTicket: settings.hasDeutschlandTicket,
-              delayMs: settings.apiDelayMs,
-            );
-          }
-          prices[key] = price;
-
-          // Re-check after the awaits above: a newer run may have superseded us
-          // while the price request was in flight — don't write stale progress.
+      // Delegates to the shared engine rather than keeping a second copy of
+      // the pricing loop + DP: the two had already drifted, and #13's fix has
+      // to hold for the bulk comparison as much as for one connection.
+      final result = await SplitEngine(vendo, dbApi).analyze(
+        stops: stops,
+        date: date,
+        directPrice: directPrice,
+        reisende: partyReisende,
+        travellers: travellers,
+        deutschlandTicket: settings.hasDeutschlandTicket,
+        firstClass: settings.bahnCard.isFirstClass,
+        apiDelayMs: settings.apiDelayMs,
+        // A newer analyze() (or cancel()) supersedes this run.
+        isCancelled: () => myGen != _gen || state.isCancelled,
+        onProgress: (processed, total, segment) {
           if (myGen != _gen) return;
-          processed++;
+          _log('Prüfe: $segment');
           state = state.copyWith(
             progress: SplitTicketProgress(
-              totalCombinations: totalCombinations,
+              totalCombinations: total,
               processedCombinations: processed,
-              currentSegment: '$fromName → $toName',
+              currentSegment: segment,
             ),
           );
-        }
-      }
-
-      // Dynamic programming: find cheapest split
-      _log('Berechne optimale Aufteilung...');
-      final dp = List<double>.filled(n, double.infinity);
-      final parent = List<int>.filled(n, -1);
-      dp[0] = 0;
-
-      for (int j = 1; j < n; j++) {
-        for (int i = 0; i < j; i++) {
-          final key = '$i-$j';
-          final segPrice = prices[key]?.price ?? double.infinity;
-          if (dp[i] + segPrice < dp[j]) {
-            dp[j] = dp[i] + segPrice;
-            parent[j] = i;
-          }
-        }
-      }
-
-      // Reconstruct path
-      final tickets = <SplitTicket>[];
-      int current = n - 1;
-      while (current > 0) {
-        final prev = parent[current];
-        if (prev < 0) break;
-        final key = '$prev-$current';
-        final segPrice = prices[key];
-        tickets.insert(
-          0,
-          SplitTicket(
-            from: stops[prev]['name'] as String,
-            to: stops[current]['name'] as String,
-            price: segPrice?.price ?? 0,
-            fromId: stops[prev]['id'] as String,
-            toId: stops[current]['id'] as String,
-            departureIso: stops[prev]['departure_iso'] as String? ?? date,
-            coveredByDeutschlandTicket: segPrice?.isDTicketCovered ?? false,
-          ),
-        );
-        current = prev;
-      }
+        },
+      );
 
       if (myGen != _gen) return; // superseded while computing
-      _runningSig = null;
-      stopwatch.stop();
-      var splitPrice = dp[n - 1];
-      var resultTickets = tickets;
-      // You can always just buy the through ticket, so a split must never cost
-      // more than — or merely tie — the direct fare. When the split has no real
-      // edge, fall back to a single direct ticket so the UI shows the direct
-      // price as the winner instead of a misleading, pricier breakdown.
-      if (directPrice > 0 && splitPrice >= directPrice - 0.01) {
-        splitPrice = directPrice;
-        resultTickets = [
-          SplitTicket(
-            from: stops.first['name'] as String,
-            to: stops.last['name'] as String,
-            price: directPrice,
-            fromId: stops.first['id'] as String,
-            toId: stops.last['id'] as String,
-            departureIso: stops.first['departure_iso'] as String? ?? date,
-          ),
-        ];
+      if (result == null) {
+        // Cancelled mid-run, or fewer than two stops to split on.
+        _log('Analyse abgebrochen.');
+        _runningSig = null;
+        state = state.copyWith(isLoading: false);
+        return;
       }
-      _log(
-          'Fertig! Direktpreis: ${directPrice.toStringAsFixed(2)}€, Split: ${splitPrice.toStringAsFixed(2)}€');
-
-      final result = TicketAnalysisResult(
-        directPrice: directPrice,
-        splitPrice: splitPrice,
-        tickets: resultTickets,
-        combinationsChecked: totalCombinations,
-        elapsed: stopwatch.elapsed,
-      );
+      _runningSig = null;
+      _log('Fertig! Direktpreis: ${directPrice.toStringAsFixed(2)}€, '
+          'Split: ${result.splitPrice.toStringAsFixed(2)}€');
       state = state.copyWith(isLoading: false, result: result);
 
       // Notify the user the background analysis is done — they may have left

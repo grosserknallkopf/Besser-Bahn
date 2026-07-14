@@ -1,6 +1,7 @@
 import '../models/split_ticket.dart';
 import '../services/db_api_service.dart';
 import '../services/vendo_service.dart';
+import 'split_stops.dart';
 
 /// Result of pricing the segments of one route. `null` segments stay infinite.
 typedef SplitProgress = void Function(
@@ -45,22 +46,34 @@ class SplitEngine {
         if (isCancelled?.call() ?? false) return null;
         final dtIso = stops[i]['departure_iso'] as String? ?? date;
 
+        // Decide D-Ticket coverage from the trains THIS connection actually
+        // uses, before spending a request. Free and exact — the backends can
+        // only answer "some train between these stations is regional", which
+        // is a different question and the source of #13's false "0,00 €" on
+        // ICE segments.
+        if (deutschlandTicket && isSegmentDTicketCovered(stops, i, j)) {
+          prices['$i-$j'] =
+              const SegmentPrice(price: 0.0, isDTicketCovered: true);
+          processed++;
+          onProgress?.call(processed, total,
+              '${stops[i]['name']} → ${stops[j]['name']}');
+          continue;
+        }
+
         await Future.delayed(Duration(milliseconds: apiDelayMs));
         var price = await vendo.getSegmentPrice(
           from: stops[i]['id'] as String,
           to: stops[j]['id'] as String,
           dateTime: DateTime.tryParse(dtIso),
-          deutschlandTicket: deutschlandTicket,
           firstClass: firstClass,
           reisende: reisende,
         );
-        if (price.price == double.infinity && !price.isDTicketCovered) {
+        if (price.price == double.infinity) {
           price = await dbApi.getSegmentPrice(
             fromId: stops[i]['id'] as String,
             toId: stops[j]['id'] as String,
             dateTime: dtIso,
             travellers: travellers,
-            deutschlandTicket: deutschlandTicket,
             delayMs: apiDelayMs,
           );
         }
@@ -109,9 +122,20 @@ class SplitEngine {
 
     var splitPrice = dp[n - 1];
     var resultTickets = tickets;
+    // A single ticket spanning the whole route is not a split — it's the
+    // through ticket, and the DP is free to "choose" it. It looked like a
+    // saving only because directPrice is the selected connection's fare while
+    // the 0→n-1 candidate was priced as the cheapest train on that route, so
+    // it undercut it and got presented as "1 Ticket, 44 % gespart" over
+    // identical endpoints (#13).
+    // …unless it's a D-Ticket-covered route: "you need no ticket at all" is a
+    // real, useful answer, not a degenerate split.
+    final isWholeRoute = resultTickets.length <= 1 &&
+        !(resultTickets.length == 1 &&
+            resultTickets.first.coveredByDeutschlandTicket);
     // Never present a split that costs more than — or merely ties — the direct
     // fare: fall back to a single through ticket.
-    if (directPrice > 0 && splitPrice >= directPrice - 0.01) {
+    if (isWholeRoute || (directPrice > 0 && splitPrice >= directPrice - 0.01)) {
       splitPrice = directPrice;
       resultTickets = [
         SplitTicket(

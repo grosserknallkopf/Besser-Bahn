@@ -657,16 +657,14 @@ class VendoService {
         return const SegmentPrice(price: double.infinity, isDTicketCovered: false);
       }
 
-      // D-Ticket covers a segment if some connection is purely local/regional.
-      if (deutschlandTicket) {
-        final covered = result.journeys.any((j) => j.legs
-            .where((l) => !l.isWalking)
-            .every((l) => _isLocal(l.line?.product)));
-        if (covered) {
-          return const SegmentPrice(price: 0.0, isDTicketCovered: true);
-        }
-      }
-
+      // NOTE: no D-Ticket coverage inference here. It used to return 0,00 € if
+      // *any* returned journey was purely regional — but the price below comes
+      // from a different journey, and the rider travels on a third: their own.
+      // A regional alternative existing between two stations says nothing about
+      // whether their ICE is covered, which is how ICE segments came out free
+      // (#13). The caller decides coverage from the selected connection's own
+      // trains (isSegmentDTicketCovered); `deutschlandTicket` now only shapes
+      // the request, so DB quotes the right supplementary fare.
       final prices = result.journeys
           .map((j) => j.price?.amount)
           .whereType<double>()
@@ -683,11 +681,6 @@ class VendoService {
       return const SegmentPrice(price: double.infinity, isDTicketCovered: false);
     }
   }
-
-  bool _isLocal(String? product) =>
-      product == null ||
-      const {'regional', 'suburban', 'subway', 'tram', 'bus', 'ferry'}
-          .contains(product);
 
   String _loc(String id) => id.contains('@') ? id : 'A=1@L=$id@';
 

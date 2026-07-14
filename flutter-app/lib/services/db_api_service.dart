@@ -94,29 +94,12 @@ class DbApiService {
 
       final first = connections[0] as Map<String, dynamic>;
 
-      // Check Deutschland-Ticket coverage
-      bool isDTicketCovered = false;
-      if (deutschlandTicket) {
-        final verbindungsAbschnitte =
-            first['verbindungsAbschnitte'] as List<dynamic>? ?? [];
-        for (final abschnitt in verbindungsAbschnitte) {
-          if (abschnitt is Map<String, dynamic>) {
-            final attrs =
-                abschnitt['abpiAbfahrtAttributes'] as List<dynamic>? ?? [];
-            for (final attr in attrs) {
-              if (attr is Map<String, dynamic> && attr['key'] == '9G') {
-                isDTicketCovered = true;
-                break;
-              }
-            }
-          }
-        }
-      }
-
-      if (isDTicketCovered) {
-        return const SegmentPrice(price: 0.0, isDTicketCovered: true);
-      }
-
+      // NOTE: no D-Ticket coverage inference here either. This used to set the
+      // whole segment to 0,00 € as soon as ANY section carried the 9G
+      // attribute — so a Regional+ICE connection came out free because of its
+      // regional first leg (#13). Coverage is now decided by the caller from
+      // the selected connection's trains (isSegmentDTicketCovered), which is
+      // both exact and free. `deutschlandTicket` still shapes the request.
       final priceObj = first['angebotsPreis'] as Map<String, dynamic>?;
       final price = (priceObj?['betrag'] as num?)?.toDouble() ?? double.infinity;
       return SegmentPrice(price: price, isDTicketCovered: false);
