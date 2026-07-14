@@ -37,6 +37,58 @@ import requests
 TIMEOUT = 20
 DBNAV_UA = "DBNavigator/Android/26.9.0"
 
+# The /mob backend rate-limits per client, answering with 429 +
+# {"domain":"MOB","code":"RETRY"} and a Retry-After (~18s). This script fires
+# dozens of requests back to back, so it reliably trips that limit on itself:
+# every check after roughly the eighth failed with 429 and the run reported
+# "6 hard checks FAILED — an API likely changed" while nothing had changed.
+# A health check that cries wolf is worse than none, so honour Retry-After and
+# back off, exactly as the app now does (#14).
+# Retrying alone is NOT enough: once tripped, the limit stays on for minutes
+# (measured: ~4 min of solid 429s, while `Retry-After` claims 5s — the header
+# lies about a sustained block). Firing ~10 requests in ~6s is enough to
+# trigger it, so the fix is to not trip it: pace requests to the /mob host.
+MOB_HOST = "app.services-bahn.de"
+MOB_MIN_INTERVAL = 2.0  # seconds between consecutive /mob requests
+MAX_RETRIES = 3
+_last_mob_call = 0.0
+_raw_get, _raw_post = requests.get, requests.post
+
+
+def _pace(url: str) -> None:
+    """Keep consecutive /mob requests MOB_MIN_INTERVAL apart. Other hosts
+    (bahnhof.de, Overpass, …) are untouched."""
+    global _last_mob_call
+    if MOB_HOST not in str(url):
+        return
+    gap = time.monotonic() - _last_mob_call
+    if gap < MOB_MIN_INTERVAL:
+        time.sleep(MOB_MIN_INTERVAL - gap)
+    _last_mob_call = time.monotonic()
+
+
+def _with_retry(fn):
+    def wrapped(url, *args, **kwargs):
+        for attempt in range(MAX_RETRIES + 1):
+            _pace(url)
+            r = fn(url, *args, **kwargs)
+            if r.status_code != 429 or attempt == MAX_RETRIES:
+                return r
+            # Retry-After is unreliable here (says 5s during a minutes-long
+            # block), so back off geometrically and take whichever is longer.
+            wait = max(int(r.headers.get("Retry-After") or 0), 15 * (attempt + 1))
+            time.sleep(min(wait, 60))
+        return r
+    return wrapped
+
+
+def _get(*args, **kwargs):
+    return _with_retry(_raw_get)(*args, **kwargs)
+
+
+def _post(*args, **kwargs):
+    return _with_retry(_raw_post)(*args, **kwargs)
+
 # Known stations used as fixtures.
 KIEL = "8000199"
 BERLIN_HBF = "8011160"
@@ -80,7 +132,7 @@ def _vendo_board(eva: str, arrivals: bool = False) -> list:
         "verkehrsmittel": ["ALL"],
     }
     path = "ankunft" if arrivals else "abfahrt"
-    r = requests.post(
+    r = _post(
         f"https://app.services-bahn.de/mob/bahnhofstafel/{path}",
         headers=_vendo_headers(BAHNHOFSTAFEL_MEDIA),
         data=json.dumps(body), timeout=TIMEOUT,
@@ -117,7 +169,7 @@ def check_bahn_web_api_blocked() -> str:
     notice (and could simplify) if DB ever reopens it. Soft: a transient 200
     shouldn't fail CI."""
     now = datetime.now()
-    r = requests.get(
+    r = _get(
         "https://www.bahn.de/web/api/reiseloesung/abfahrten",
         params={"datum": now.strftime("%Y-%m-%d"),
                 "zeit": now.strftime("%H:%M:00"),
@@ -174,7 +226,7 @@ def check_vendo_zuglauf_detail() -> str:
     zid = next((p["zuglaufId"] for p in pos
                 if p.get("produktGattung") in ("ICE", "IC", "EC")),
                pos[0]["zuglaufId"])
-    r = requests.get(
+    r = _get(
         f"https://app.services-bahn.de/mob/zuglauf/{urllib.parse.quote(zid, safe='')}",
         headers=_vendo_headers(ZUGLAUF_MEDIA), timeout=TIMEOUT,
     )
@@ -221,7 +273,7 @@ def check_vendo_zuglauf_notes() -> str:
     zid = next((p["zuglaufId"] for p in pos
                 if p.get("produktGattung") in ("ICE", "IC", "EC")),
                pos[0]["zuglaufId"])
-    r = requests.get(
+    r = _get(
         f"https://app.services-bahn.de/mob/zuglauf/{urllib.parse.quote(zid, safe='')}",
         headers=_vendo_headers(ZUGLAUF_MEDIA), timeout=TIMEOUT,
     )
@@ -281,7 +333,7 @@ def check_vendo_platform_change() -> str:
 
 def check_vendo_location() -> str:
     media = "application/x.db.vendo.mob.location.v3+json"
-    r = requests.post(
+    r = _post(
         "https://app.services-bahn.de/mob/location/search",
         headers=_vendo_headers(media),
         data=json.dumps({"locationTypes": ["ALL"], "searchTerm": "Köln Hbf"}),
@@ -389,7 +441,7 @@ def check_vendo_nearby() -> str:
         "maxResults": 5, "operatingSystem": "ANDROID",
         "products": ["ALL"], "types": ["ST"],
     }
-    r = requests.post(
+    r = _post(
         "https://app.services-bahn.de/mob/location/nearby/bytypes",
         headers=_vendo_headers(media), data=json.dumps(body), timeout=TIMEOUT,
     )
@@ -431,7 +483,7 @@ def check_vendo_journey() -> str:
         }]},
         "reservierungsKontingenteVorhanden": False,
     }
-    r = requests.post(
+    r = _post(
         "https://app.services-bahn.de/mob/angebote/fahrplan",
         headers=_vendo_headers(media), data=json.dumps(body), timeout=TIMEOUT,
     )
@@ -522,7 +574,7 @@ def check_vendo_journey_party() -> str:
         ]},
         "reservierungsKontingenteVorhanden": False,
     }
-    r = requests.post(
+    r = _post(
         "https://app.services-bahn.de/mob/angebote/fahrplan",
         headers=_vendo_headers(media), data=json.dumps(body), timeout=TIMEOUT,
     )
@@ -567,7 +619,7 @@ def check_vendo_share() -> str:
         }]},
         "reservierungsKontingenteVorhanden": False,
     }
-    sr = requests.post(
+    sr = _post(
         "https://app.services-bahn.de/mob/angebote/fahrplan",
         headers=_vendo_headers(search_media), data=json.dumps(search_body),
         timeout=TIMEOUT,
@@ -590,7 +642,7 @@ def check_vendo_share() -> str:
         "SO": "Kiel Hbf",
         "ZO": "Berlin Hbf",
     }
-    r = requests.post(
+    r = _post(
         "https://app.services-bahn.de/mob/angebote/verbindung/teilen",
         headers=_vendo_headers(share_media), data=json.dumps(share_body),
         timeout=TIMEOUT,
@@ -643,14 +695,14 @@ def check_vendo_journey_pagination() -> str:
         return c[0]["verbindung"]["verbindungsAbschnitte"][0].get("abgangsDatum")
 
     url = "https://app.services-bahn.de/mob/angebote/fahrplan"
-    base = requests.post(url, headers=_vendo_headers(media),
+    base = _post(url, headers=_vendo_headers(media),
                          data=json.dumps(body()), timeout=TIMEOUT)
     base.raise_for_status()
     bd = base.json()
     tok = bd.get("frueherContext")
     if not tok:
         raise CheckError("no frueherContext token in journey response")
-    earlier = requests.post(url, headers=_vendo_headers(media),
+    earlier = _post(url, headers=_vendo_headers(media),
                             data=json.dumps(body(tok)), timeout=TIMEOUT)
     earlier.raise_for_status()
     ed = earlier.json()
@@ -679,7 +731,7 @@ def check_vendo_weitere_abfahrten() -> str:
         "zeitWunsch": {"reiseDatum": ankunft, "zeitPunktArt": "ANKUNFT"},
         "zielLocationId": HAMBURG_LOC,
     }}
-    r = requests.post(
+    r = _post(
         "https://app.services-bahn.de/mob/trip/weitereabfahrten",
         headers=_vendo_headers(media), data=json.dumps(body), timeout=TIMEOUT,
     )
@@ -712,7 +764,7 @@ def check_vendo_train_polyline() -> str:
         raise CheckError("no departures to derive a zuglaufId")
     jid = pos[0]["zuglaufId"]
 
-    r = requests.get(
+    r = _get(
         f"https://app.services-bahn.de/mob/zuglauf/{urllib.parse.quote(jid, safe='')}",
         headers=_vendo_headers(ZUGLAUF_MEDIA), timeout=TIMEOUT,
     )
@@ -741,7 +793,7 @@ def check_bahnhof_map() -> str:
     The HTML document remains the app's fallback; we also confirm it still works.
     """
     rsc_headers = {**_browser_headers(), "Accept": "*/*", "RSC": "1"}
-    r = requests.get("https://www.bahnhof.de/hamburg-hbf/karte",
+    r = _get("https://www.bahnhof.de/hamburg-hbf/karte",
                      headers=rsc_headers, timeout=TIMEOUT)
     r.raise_for_status()
     ct = r.headers.get("content-type", "")
@@ -763,7 +815,7 @@ def check_bahnhof_map() -> str:
         raise CheckError("RSC stream missing levelInit")
 
     # HTML fallback must still embed the poi data too.
-    h = requests.get("https://www.bahnhof.de/hamburg-hbf/karte",
+    h = _get("https://www.bahnhof.de/hamburg-hbf/karte",
                      headers=_browser_headers(), timeout=TIMEOUT)
     h.raise_for_status()
     if '"poi\\":{\\"' not in h.text and '"poi":{"' not in h.text:
@@ -782,7 +834,7 @@ def check_bay_departure_link() -> str:
     pos = _vendo_board(KIEL, arrivals=False)
     gleise = {e.get("gleis") for e in pos if e.get("gleis")}
 
-    karte = requests.get("https://www.bahnhof.de/kiel-hbf/karte",
+    karte = _get("https://www.bahnhof.de/kiel-hbf/karte",
                          headers=_browser_headers(), timeout=TIMEOUT)
     karte.raise_for_status()
     import re as _re
@@ -816,7 +868,7 @@ def check_gleis_departure_link() -> str:
     pos = _vendo_board("8002549", arrivals=False)  # Hamburg Hbf
     dep_g = {_norm_gleis(e["gleis"]) for e in pos if e.get("gleis")}
 
-    karte = requests.get("https://www.bahnhof.de/hamburg-hbf/karte",
+    karte = _get("https://www.bahnhof.de/hamburg-hbf/karte",
                          headers=_browser_headers(), timeout=TIMEOUT)
     karte.raise_for_status()
     import re as _re
@@ -838,7 +890,7 @@ def check_gleis_departure_link() -> str:
 
 
 def check_bahnhof_sitemap() -> str:
-    r = requests.get("https://www.bahnhof.de/sitemap.xml",
+    r = _get("https://www.bahnhof.de/sitemap.xml",
                      headers=_browser_headers(), timeout=TIMEOUT)
     r.raise_for_status()
     count = r.text.count("<loc>https://www.bahnhof.de/")
@@ -849,7 +901,7 @@ def check_bahnhof_sitemap() -> str:
 
 def check_hafas_rest() -> str:
     """Community HAFAS mirror — flaky, treated as a soft/degraded check."""
-    r = requests.get("https://v6.db.transport.rest/locations",
+    r = _get("https://v6.db.transport.rest/locations",
                      params={"query": "Koeln", "results": "1"},
                      headers=_browser_headers(), timeout=TIMEOUT)
     if r.status_code != 200:
@@ -876,7 +928,7 @@ def check_website_journey_still_blocked() -> str:
             "alter": [], "anzahl": 1}],
         "schnelleVerbindungen": True,
     }
-    r = requests.post("https://www.bahn.de/web/api/angebote/fahrplan",
+    r = _post("https://www.bahn.de/web/api/angebote/fahrplan",
                       headers={**_browser_headers(),
                                "Content-Type": "application/json"},
                       data=json.dumps(body), timeout=TIMEOUT)
@@ -914,7 +966,7 @@ def check_vendo_seat_map() -> str:
             "reisendenTyp": "ERWACHSENER"}]},
         "reservierungsKontingenteVorhanden": False,
     }
-    r = requests.post("https://app.services-bahn.de/mob/angebote/fahrplan",
+    r = _post("https://app.services-bahn.de/mob/angebote/fahrplan",
                       headers=_vendo_headers(media), data=json.dumps(body),
                       timeout=TIMEOUT)
     r.raise_for_status()
@@ -954,7 +1006,7 @@ def check_vendo_seat_map() -> str:
                 "correlationID": _corr_id(), "lang": "de", "theme": "app"}
         url = ("https://app.services-bahn.de/mob/gsd/gsd_v3?data="
                + urllib.parse.quote(json.dumps(data, separators=(",", ":"))))
-        resp = requests.get(url, headers={"User-Agent": DBNAV_UA}, timeout=TIMEOUT)
+        resp = _get(url, headers={"User-Agent": DBNAV_UA}, timeout=TIMEOUT)
         if resp.status_code == 200 and "id='ssr_data'" in resp.text:
             g = resp
             break
@@ -983,7 +1035,7 @@ def check_vendo_seat_map() -> str:
     wtyp = coaches[0].get("wagentyp", "")
     if not wtyp:
         raise CheckError("coach missing wagentyp for geometry lookup")
-    w = requests.get(
+    w = _get(
         f"https://app.services-bahn.de/mob/gsd/api/wagentypen/{urllib.parse.quote(wtyp)}",
         headers={"User-Agent": DBNAV_UA}, timeout=TIMEOUT)
     w.raise_for_status()
@@ -1028,7 +1080,7 @@ def check_wagenreihung_split() -> str:
             "reisendenTyp": "ERWACHSENER"}]},
         "reservierungsKontingenteVorhanden": False,
     }
-    r = requests.post(
+    r = _post(
         "https://app.services-bahn.de/mob/angebote/fahrplan",
         headers=_vendo_headers(media), data=json.dumps(body), timeout=TIMEOUT)
     r.raise_for_status()
@@ -1047,7 +1099,7 @@ def check_wagenreihung_split() -> str:
 
     dep = datetime.fromisoformat(leg["abgangsDatum"])
     eva = leg["halte"][0]["ort"].get("evaNr", "8002549")
-    rr = requests.get(
+    rr = _get(
         "https://www.bahn.de/web/api/reisebegleitung/wagenreihung/vehicle-sequence",
         params={
             "administrationId": "80", "category": leg["kurztext"],
@@ -1125,7 +1177,7 @@ def check_osm_platform_geometry() -> str:
     last = None
     for endpoint in endpoints:
         try:
-            r = requests.post(endpoint, data={"data": ql},
+            r = _post(endpoint, data={"data": ql},
                               headers={"User-Agent": "BesserBahn/1.0 (+https://bahn.chuk.dev)",
                                        "Accept": "*/*"}, timeout=TIMEOUT)
             if r.status_code == 200:
@@ -1173,7 +1225,7 @@ def check_basemap_tiles() -> str:
     serves. Soft: on loss the app falls back to the CARTO raster, data still works.
     """
     hdr = {"User-Agent": DBNAV_UA}
-    style = requests.get("https://tiles.openfreemap.org/styles/positron",
+    style = _get("https://tiles.openfreemap.org/styles/positron",
                          headers=hdr, timeout=TIMEOUT)
     style.raise_for_status()
     src = style.json().get("sources", {}).get("openmaptiles", {})
@@ -1181,7 +1233,7 @@ def check_basemap_tiles() -> str:
     if not src_url and not src.get("tiles"):
         raise CheckError("positron style lost its openmaptiles vector source")
     # Resolve the source TileJSON → it must advertise pbf tile URLs.
-    tj = requests.get(src_url, headers=hdr, timeout=TIMEOUT)
+    tj = _get(src_url, headers=hdr, timeout=TIMEOUT)
     tj.raise_for_status()
     tiles = tj.json().get("tiles") or []
     if not tiles or ".pbf" not in tiles[0]:
@@ -1197,7 +1249,7 @@ def check_traewelling_api() -> str:
     which confirms the path shape the app builds. Soft: optional social feature,
     and we can't exercise the authenticated body from CI."""
     url = "https://traewelling.de/api/v1/trains/station/autocomplete/Berlin"
-    r = requests.get(url, headers={"Accept": "application/json"}, timeout=TIMEOUT)
+    r = _get(url, headers={"Accept": "application/json"}, timeout=TIMEOUT)
     if r.status_code in (404, 410):
         raise CheckError(f"autocomplete path gone (status={r.status_code})")
     if r.status_code not in (200, 401, 403):
@@ -1215,7 +1267,7 @@ def check_db_account_token_endpoint() -> str:
     Soft: auth-only feature, no credentials in CI."""
     url = ("https://accounts.bahn.de/auth/realms/db/protocol/"
            "openid-connect/token")
-    r = requests.post(
+    r = _post(
         url,
         headers={"Accept": "application/json"},
         data={
@@ -1249,7 +1301,7 @@ def check_db_account_endpoints_require_auth() -> str:
     type still exist. Soft: can't carry a real token in CI."""
     url = "https://app.services-bahn.de/mob/emobilebahncards"
     media = "application/x.db.vendo.mob.emobilebahncards.v2+json"
-    r = requests.get(url, headers=_vendo_headers(media), timeout=TIMEOUT)
+    r = _get(url, headers=_vendo_headers(media), timeout=TIMEOUT)
     if r.status_code in (404, 410):
         raise CheckError(f"emobilebahncards path gone (status={r.status_code})")
     if r.status_code not in (401, 403):
@@ -1259,7 +1311,7 @@ def check_db_account_endpoints_require_auth() -> str:
     # Saved-trips (POST/DELETE /mob/reisen) — the "merken" path the app pushes
     # local saves to when logged in. Unauthenticated it must answer 401/403.
     reisen_media = "application/x.db.vendo.mob.freiereisen.v5+json"
-    r2 = requests.post(
+    r2 = _post(
         "https://app.services-bahn.de/mob/reisen",
         headers=_vendo_headers(reisen_media),
         data=b"{}",
