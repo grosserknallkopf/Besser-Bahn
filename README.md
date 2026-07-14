@@ -7,6 +7,9 @@ Zugläufe auf der Karte, Verspätungs- und Anschluss-Vorhersage, Träwelling-Che
 und das Finden günstigerer Split-Tickets — alles ohne Tracking, ohne Werbung,
 ohne Konto-Zwang.
 
+Optional lässt sich das **eigene DB-Konto verbinden** — dann liegen **Tickets
+(inkl. Barcode zum Vorzeigen), BahnCard und BahnBonus** direkt in der App.
+
 <p align="center">
   <img src="assets/app_icon.png" width="100" />
 </p>
@@ -38,6 +41,17 @@ Ein kombinierter Tab mit interner Umschaltung zwischen:
 - Berücksichtigt **BahnCard** (25/50, 1./2. Klasse) und **Deutschland-Ticket**
 - Direkte Buchungslinks für jedes Teil-Ticket (oberstes Angebot = das richtige)
 - OS-Benachrichtigung, sobald die Analyse fertig ist
+
+### 👤 DB-Konto (optional)
+Das eigene DB-Konto lässt sich verbinden — die App spricht dann dasselbe
+Backend wie der DB Navigator:
+- **Meine Tickets** – gebuchte Fahrkarten inklusive **Barcode zum Vorzeigen**
+  bei der Kontrolle
+- **BahnCard** – Kartenansicht und Kontrollansicht, offline verfügbar
+- **BahnBonus** – Punkte- und Statusstand
+- **Gemerkte Reisen** synchronisieren mit „Meine Reisen" im DB-Konto
+- Login per OAuth2 (PKCE, kein Passwort in der App); komplett optional — ohne
+  Konto funktioniert alles andere unverändert
 
 ### 🤝 Träwelling
 - Login per OAuth2 (PKCE, kein Passwort in der App)
