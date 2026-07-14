@@ -118,7 +118,27 @@ class SavedJourney {
   final Journey journey;
   final int savedAtMs;
 
-  const SavedJourney({required this.journey, required this.savedAtMs});
+  /// Whether the live companion may track THIS trip — poll its run and push
+  /// delay/platform/cancellation/transfer alerts (#11, point 2).
+  ///
+  /// Requested as an explicitly-activated, per-trip mode on privacy grounds.
+  /// Defaults to true, deliberately: tracking used to apply to every saved
+  /// trip, so defaulting to false would silently take alerts away from people
+  /// who already rely on them. Opt-in for the *feature* stays the global
+  /// reminders switch; this is per-trip opt-OUT below it.
+  final bool watched;
+
+  const SavedJourney({
+    required this.journey,
+    required this.savedAtMs,
+    this.watched = true,
+  });
+
+  SavedJourney copyWith({bool? watched}) => SavedJourney(
+        journey: journey,
+        savedAtMs: savedAtMs,
+        watched: watched ?? this.watched,
+      );
 
   /// Stable identity: origin→destination at the planned departure minute.
   /// Same train on the same day dedupes; tomorrow's run is its own entry.
@@ -140,11 +160,15 @@ class SavedJourney {
   Map<String, dynamic> toJson() => {
         'journey': journey.toJson(),
         'savedAtMs': savedAtMs,
+        'watched': watched,
       };
 
   factory SavedJourney.fromJson(Map<String, dynamic> json) => SavedJourney(
         journey:
             Journey.fromJson(json['journey'] as Map<String, dynamic>? ?? {}),
         savedAtMs: json['savedAtMs'] as int? ?? 0,
+        // Absent = saved before this existed → keep tracking it, so the update
+        // doesn't quietly switch off alerts people already depend on.
+        watched: json['watched'] as bool? ?? true,
       );
 }

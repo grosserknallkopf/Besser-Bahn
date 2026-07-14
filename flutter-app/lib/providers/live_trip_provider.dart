@@ -111,6 +111,8 @@ class LiveTripTracker extends Notifier<LiveTripState>
   SavedJourney? _pickActive(List<SavedJourney> upcoming) {
     final now = DateTime.now();
     for (final j in upcoming) {
+      // Per-trip opt-out: this trip's live tracking was switched off (#11.2).
+      if (!j.watched) continue;
       final dep = j.journey.plannedDeparture ?? j.journey.departure;
       final arr = j.journey.arrival ?? j.journey.plannedArrival;
       if (dep == null) continue;

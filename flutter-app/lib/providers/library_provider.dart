@@ -340,6 +340,22 @@ class LibraryNotifier extends Notifier<LibraryState> {
         journeys: state.journeys.where((j) => j.key != key).toList());
     _saveJourneys();
   }
+
+  /// Turn the live companion on/off for one saved trip (#11, point 2).
+  void setJourneyWatched(String key, bool watched) {
+    state = state.copyWith(
+      journeys: [
+        for (final j in state.journeys)
+          j.key == key ? j.copyWith(watched: watched) : j,
+      ],
+    );
+    _saveJourneys();
+  }
+
+  /// Whether the live companion tracks this trip. Unknown trip → false: it
+  /// isn't saved, so there's nothing to track.
+  bool isJourneyWatched(String key) =>
+      state.journeys.where((j) => j.key == key).firstOrNull?.watched ?? false;
 }
 
 final libraryProvider =

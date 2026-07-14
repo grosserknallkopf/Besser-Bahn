@@ -23,6 +23,7 @@ import '../../providers/settings_provider.dart';
 import '../../providers/split_ticket_provider.dart';
 import '../../providers/station_map_provider.dart';
 import '../../services/db_api_service.dart';
+import '../../services/notification_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/departure_card.dart';
 import '../../widgets/fahrgastrechte_card.dart';
@@ -195,6 +196,40 @@ class _ConnectionDetailScreenState
             tooltip: 'Split-Ticket suchen',
             onPressed: () => _openSplitTicket(context, ref),
           ),
+          // "Reise überwachen" — per-trip live tracking, only offered once the
+          // trip is saved locally (there's nothing to track otherwise, and the
+          // tracker reads the local library). Explicit and trip-scoped, per
+          // the privacy ask in #11.
+          Builder(builder: (context) {
+            final key = SavedJourney(journey: journey, savedAtMs: 0).key;
+            final lib = ref.watch(libraryProvider);
+            if (!lib.hasJourney(key)) return const SizedBox.shrink();
+            final watched =
+                ref.read(libraryProvider.notifier).isJourneyWatched(key);
+            return IconButton(
+              icon: Icon(watched
+                  ? Icons.notifications_active
+                  : Icons.notifications_off_outlined),
+              tooltip: watched
+                  ? 'Live-Begleitung aktiv — antippen zum Ausschalten'
+                  : 'Diese Reise überwachen',
+              onPressed: () {
+                ref
+                    .read(libraryProvider.notifier)
+                    .setJourneyWatched(key, !watched);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    duration: const Duration(seconds: 3),
+                    content: Text(watched
+                        ? 'Live-Begleitung für diese Reise aus.'
+                        : 'Live-Begleitung an: Verspätung, Gleiswechsel, '
+                            'Ausfall & Anschluss.'),
+                  ),
+                );
+                if (!watched) NotificationService.requestPermissions();
+              },
+            );
+          }),
           Builder(builder: (context) {
             final key =
                 SavedJourney(journey: journey, savedAtMs: 0).key;
