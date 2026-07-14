@@ -308,7 +308,19 @@ class DbApiService {
 class SegmentPrice {
   final double price;
   final bool isDTicketCovered;
-  const SegmentPrice({required this.price, required this.isDTicketCovered});
+
+  /// The quoted fare could not be tied to the trains the rider actually
+  /// selected — it's the cheapest offer between these two stops, which may be
+  /// a Sparpreis bound to a different train. Surfaced as a hint on the ticket
+  /// rather than dropping the price, so the analysis keeps its results while
+  /// staying honest about what it knows (#13).
+  final bool priceMayBeTrainBound;
+
+  const SegmentPrice({
+    required this.price,
+    required this.isDTicketCovered,
+    this.priceMayBeTrainBound = false,
+  });
 }
 
 /// A connection resolved from a pasted DB share link, shaped for

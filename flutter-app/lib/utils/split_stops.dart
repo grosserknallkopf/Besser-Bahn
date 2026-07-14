@@ -32,6 +32,26 @@ bool isSegmentDTicketCovered(
   return true;
 }
 
+/// The train numbers the SELECTED connection uses from stop [i] to stop [j],
+/// in order and de-duplicated (one train spans many hops).
+///
+/// Lets a segment price be checked against the trains the rider is actually
+/// on: the backends return every connection between two stops, and the
+/// cheapest offer may be a Sparpreis bound to a different train (#13).
+/// Returns empty when any hop's train is unknown — then there's nothing to
+/// match on and the price can't be vouched for.
+List<String> segmentTrainNumbers(
+    List<Map<String, dynamic>> stops, int i, int j) {
+  final trains = <String>[];
+  for (var k = i; k < j; k++) {
+    if (stops[k]['_product'] == '') continue; // transfer gap, no train
+    final nr = stops[k]['_fahrtNr'];
+    if (nr is! String || nr.isEmpty) return const [];
+    if (trains.isEmpty || trains.last != nr) trains.add(nr);
+  }
+  return trains;
+}
+
 /// Build the ordered, de-duplicated station list (split candidates) for a
 /// journey straight from its legs — the Vendo search already carries every
 /// `halt` in `leg.stopovers`, so no extra trip fetch is needed. Mirrors the
@@ -59,16 +79,17 @@ List<Map<String, dynamic>> splitStopsFromJourney(Journey journey,
     {int cap = 12}) {
   final stops = <Map<String, dynamic>>[];
 
-  void add(String id, String name, DateTime? dep, bool boundary,
-      String? product) {
+  void add(String id, String name, DateTime? dep, bool boundary, String? product,
+      String? fahrtNr) {
     if (id.isEmpty) return;
     if (stops.isNotEmpty && stops.last['id'] == id) {
       if (dep != null) stops.last['departure_iso'] = dep.toIso8601String();
       if (boundary) stops.last['_boundary'] = true;
       // A transfer stop is arrived at on one train and left on the next — the
-      // onward product is the one that matters, so it overwrites the ''
+      // onward train is the one that matters, so it overwrites the ''
       // the arriving leg left here.
       stops.last['_product'] = product;
+      stops.last['_fahrtNr'] = fahrtNr;
       return;
     }
     stops.add({
@@ -77,6 +98,7 @@ List<Map<String, dynamic>> splitStopsFromJourney(Journey journey,
       'departure_iso': dep?.toIso8601String() ?? '',
       '_boundary': boundary,
       '_product': product,
+      '_fahrtNr': fahrtNr,
     });
   }
 
@@ -85,17 +107,19 @@ List<Map<String, dynamic>> splitStopsFromJourney(Journey journey,
     // Every stop of this leg except its last is left aboard THIS train. A leg
     // with no line data yields null → unknown, which blocks coverage.
     final product = leg.line != null ? (leg.line!.product) : null;
+    final fahrtNr = leg.line?.fahrtNr;
     if (leg.stopovers.isNotEmpty) {
       final n = leg.stopovers.length;
       for (var i = 0; i < n; i++) {
         final so = leg.stopovers[i];
+        final last = i == n - 1;
         add(so.stop.id, so.stop.name, so.departure ?? so.arrival,
-            i == 0 || i == n - 1, i == n - 1 ? '' : product);
+            i == 0 || last, last ? '' : product, last ? null : fahrtNr);
       }
     } else {
       add(leg.origin.id, leg.origin.name,
-          leg.plannedDeparture ?? leg.departure, true, product);
-      add(leg.destination.id, leg.destination.name, leg.arrival, true, '');
+          leg.plannedDeparture ?? leg.departure, true, product, fahrtNr);
+      add(leg.destination.id, leg.destination.name, leg.arrival, true, '', null);
     }
   }
 

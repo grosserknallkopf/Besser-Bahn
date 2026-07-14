@@ -637,6 +637,10 @@ class VendoService {
     // user sees in the DB app — instead of always pricing an adult. Falls back
     // to a single adult with [ermaessigung] when omitted.
     List<Map<String, dynamic>>? reisende,
+    // Train numbers the selected connection uses on this segment, in order.
+    // When given, an offer for exactly these trains wins over a cheaper one
+    // for some other train (#13).
+    List<String>? expectedTrains,
   }) async {
     try {
       final result = await searchJourneys(
@@ -665,6 +669,26 @@ class VendoService {
       // (#13). The caller decides coverage from the selected connection's own
       // trains (isSegmentDTicketCovered); `deutschlandTicket` now only shapes
       // the request, so DB quotes the right supplementary fare.
+
+      // Prefer the offer for the trains the rider actually selected. The
+      // search returns every connection between these two stops, so the
+      // cheapest fare can be a Sparpreis bound to a different train — valid
+      // on that train, useless on theirs.
+      if (expectedTrains != null && expectedTrains.isNotEmpty) {
+        for (final j in result.journeys) {
+          final trains = <String>[];
+          for (final l in j.legs.where((l) => !l.isWalking)) {
+            final nr = l.line?.fahrtNr;
+            if (nr == null || nr.isEmpty) continue;
+            if (trains.isEmpty || trains.last != nr) trains.add(nr);
+          }
+          final amount = j.price?.amount;
+          if (amount != null && _sameTrains(trains, expectedTrains)) {
+            return SegmentPrice(price: amount, isDTicketCovered: false);
+          }
+        }
+      }
+
       final prices = result.journeys
           .map((j) => j.price?.amount)
           .whereType<double>()
@@ -672,15 +696,23 @@ class VendoService {
       if (prices.isEmpty) {
         return const SegmentPrice(price: double.infinity, isDTicketCovered: false);
       }
+      // No offer matched the selected trains — fall back to the cheapest, but
+      // say so, so the ticket can carry a "may be train-bound" hint instead of
+      // quietly implying the fare is valid on their train.
       return SegmentPrice(
         price: prices.reduce((a, b) => a < b ? a : b),
         isDTicketCovered: false,
+        priceMayBeTrainBound: true,
       );
     } catch (e) {
       AppLog.log('segment price failed ($e)', tag: 'vendo');
       return const SegmentPrice(price: double.infinity, isDTicketCovered: false);
     }
   }
+
+  static bool _sameTrains(List<String> a, List<String> b) =>
+      a.length == b.length &&
+      Iterable<int>.generate(a.length).every((i) => a[i] == b[i]);
 
   String _loc(String id) => id.contains('@') ? id : 'A=1@L=$id@';
 

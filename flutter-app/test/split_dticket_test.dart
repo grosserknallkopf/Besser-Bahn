@@ -10,7 +10,8 @@ LegStopover _so(String name) =>
     LegStopover(stop: _st(name), departure: DateTime(2026, 7, 14, 10));
 
 /// `product` mirrors what VendoService._mapProduct emits.
-JourneyLeg _leg(String product, List<String> stops, {bool walking = false}) =>
+JourneyLeg _leg(String product, List<String> stops,
+        {bool walking = false, String fahrtNr = '1'}) =>
     JourneyLeg(
       tripId: 't-$product',
       origin: _st(stops.first),
@@ -22,7 +23,7 @@ JourneyLeg _leg(String product, List<String> stops, {bool walking = false}) =>
           ? null
           : TransitLine(
               name: product,
-              fahrtNr: '1',
+              fahrtNr: fahrtNr,
               productName: product,
               product: product),
       stopovers: [for (final s in stops) _so(s)],
@@ -109,6 +110,62 @@ void main() {
         expect(isSegmentDTicketCovered(stops, 0, stops.length - 1), isTrue,
             reason: '$p is covered by the Deutschlandticket');
       }
+    });
+  });
+
+  group("segmentTrainNumbers — tying a price to the rider's trains (#13)", () {
+    test('one train over many hops is listed once', () {
+      final stops = splitStopsFromJourney(
+          Journey(legs: [_leg('nationalExpress', ['A', 'B', 'C'], fahrtNr: '844')]));
+
+      expect(segmentTrainNumbers(stops, 0, stops.length - 1), ['844']);
+    });
+
+    test('a transfer lists both trains in travel order', () {
+      final stops = splitStopsFromJourney(Journey(legs: [
+        _leg('regional', ['A', 'B'], fahrtNr: '11281'),
+        _leg('nationalExpress', ['B', 'C'], fahrtNr: '844'),
+      ]));
+
+      expect(segmentTrainNumbers(stops, 0, stops.length - 1), ['11281', '844']);
+    });
+
+    test('a sub-segment lists only the trains it actually uses', () {
+      final stops = splitStopsFromJourney(Journey(legs: [
+        _leg('regional', ['A', 'B'], fahrtNr: '11281'),
+        _leg('nationalExpress', ['B', 'C'], fahrtNr: '844'),
+      ]));
+      final b = stops.indexWhere((s) => s['name'] == 'B');
+
+      expect(segmentTrainNumbers(stops, 0, b), ['11281']);
+      expect(segmentTrainNumbers(stops, b, stops.length - 1), ['844']);
+    });
+
+    test('a walking gap is skipped, not treated as an unknown train', () {
+      final stops = splitStopsFromJourney(Journey(legs: [
+        _leg('regional', ['A', 'B'], fahrtNr: '1'),
+        _leg('', ['B', 'C'], walking: true),
+        _leg('suburban', ['C', 'D'], fahrtNr: '2'),
+      ]));
+
+      expect(segmentTrainNumbers(stops, 0, stops.length - 1), ['1', '2']);
+    });
+
+    test('an unknown train yields no match target rather than a partial one',
+        () {
+      final stops = splitStopsFromJourney(Journey(legs: [
+        JourneyLeg(
+          tripId: 'x',
+          origin: _st('A'),
+          destination: _st('B'),
+          line: null,
+          stopovers: [_so('A'), _so('B')],
+        ),
+      ]));
+
+      expect(segmentTrainNumbers(stops, 0, stops.length - 1), isEmpty,
+          reason: 'without a full train list we cannot vouch for a price; '
+              'the ticket gets the "may be train-bound" hint instead');
     });
   });
 }

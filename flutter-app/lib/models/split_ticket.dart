@@ -8,6 +8,12 @@ class SplitTicket {
   final String departureIso;
   final bool coveredByDeutschlandTicket;
 
+  /// This fare couldn't be matched to the trains of the selected connection —
+  /// it's the cheapest offer between these stops and may be a Sparpreis tied
+  /// to a different train. Shown as a hint rather than suppressing the
+  /// result (#13).
+  final bool priceMayBeTrainBound;
+
   const SplitTicket({
     required this.from,
     required this.to,
@@ -16,6 +22,7 @@ class SplitTicket {
     required this.toId,
     required this.departureIso,
     this.coveredByDeutschlandTicket = false,
+    this.priceMayBeTrainBound = false,
   });
 
   String get priceFormatted => '${price.toStringAsFixed(2)} €';

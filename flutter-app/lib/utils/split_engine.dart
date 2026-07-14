@@ -67,6 +67,7 @@ class SplitEngine {
           dateTime: DateTime.tryParse(dtIso),
           firstClass: firstClass,
           reisende: reisende,
+          expectedTrains: segmentTrainNumbers(stops, i, j),
         );
         if (price.price == double.infinity) {
           price = await dbApi.getSegmentPrice(
@@ -115,6 +116,7 @@ class SplitEngine {
           toId: stops[current]['id'] as String,
           departureIso: stops[prev]['departure_iso'] as String? ?? date,
           coveredByDeutschlandTicket: seg?.isDTicketCovered ?? false,
+          priceMayBeTrainBound: seg?.priceMayBeTrainBound ?? false,
         ),
       );
       current = prev;

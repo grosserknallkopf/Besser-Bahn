@@ -607,6 +607,31 @@ class _SplitTicketScreenState extends ConsumerState<SplitTicketScreen> {
                                 fontSize: 12, color: AppColors.onTime)),
                       ],
                     ),
+                  // The fare couldn't be tied to this connection's trains, so
+                  // it may be a Sparpreis for a different one. Flagged rather
+                  // than dropped: the price is still the best information we
+                  // have, it just isn't a promise (#13).
+                  if (ticket.priceMayBeTrainBound)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Row(
+                        children: [
+                          Icon(Icons.info_outline,
+                              size: 13,
+                              color: Theme.of(context).colorScheme.outline),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              'Preis ggf. zuggebunden — beim Buchen prüfen',
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color:
+                                      Theme.of(context).colorScheme.outline),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                 ],
               ),
             ),
