@@ -18,9 +18,26 @@ Optional lässt sich das **eigene DB-Konto verbinden** — dann liegen **Tickets
 
 ### 🔎 Suche
 - Verbindungssuche zwischen zwei Stationen mit Stationsautovervollständigung
+- Auch **Koordinaten oder Kartenlinks** als Start/Ziel (`53.43, 14.53`, `geo:`,
+  OpenStreetMap-, Organic-Maps-, Google-Maps-Links) → Haltestellen in der Nähe
 - Mehrteilige Verbindungsdetails: alle Umstiege, Gleise, Halte und Echtzeit-Verspätungen
 - **Anschluss- und Pünktlichkeits-Badges** je Umstieg, berechnet von einem
   selbst gehosteten Vorhersage-Modell
+- Sortierung nach **Zuverlässigkeit** — nicht nur nach Dauer, sondern danach,
+  wie wahrscheinlich die Reise wirklich aufgeht
+
+### 🔔 Live-Reisebegleitung
+Während einer gemerkten Reise (App im Vordergrund, Erinnerungen aktiviert):
+- Push bei **Verspätungssprung, Gleiswechsel am eigenen Halt, Zugausfall** und
+  **gefährdetem Anschluss**
+- **Anschlussrettung**: Bei knappem Umstieg erscheint automatisch der nächste
+  *erreichbare* Zug (gerechnet ab der Live-Ankunft des einfahrenden Zuges) samt
+  „Wechseln" auf einen Tipp — inklusive der Folge, falls der Anschluss platzt
+  („1:05 Std später am Ziel")
+- **Ankunfts-Wecker** und optionaler GPS-Ausstiegsalarm
+- **Umleitung / geänderter Zuglauf** wird als solche gekennzeichnet, inklusive
+  Zusatzhalten und entfallenen Halten
+- Läuft ausschließlich auf dem Gerät: kein Server, der die Reise mitliest
 
 ### 🚉 Bahnhof
 Ein kombinierter Tab mit interner Umschaltung zwischen:
