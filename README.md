@@ -25,9 +25,12 @@ Optional lässt sich das **eigene DB-Konto verbinden** — dann liegen **Tickets
   selbst gehosteten Vorhersage-Modell
 - Sortierung nach **Zuverlässigkeit** — nicht nur nach Dauer, sondern danach,
   wie wahrscheinlich die Reise wirklich aufgeht
+- **⚡ Schnellste · 💶 Günstigste · 🛡️ Sicherste · ⭐ Bester Kompromiss** werden
+  in der Trefferliste markiert (nur wenn sie sich wirklich unterscheiden)
 
 ### 🔔 Live-Reisebegleitung
-Während einer gemerkten Reise (App im Vordergrund, Erinnerungen aktiviert):
+Pro Reise ein-/ausschaltbar („Reise überwachen" in der Verbindungsansicht),
+App im Vordergrund, Erinnerungen aktiviert:
 - Push bei **Verspätungssprung, Gleiswechsel am eigenen Halt, Zugausfall** und
   **gefährdetem Anschluss**
 - **Anschlussrettung**: Bei knappem Umstieg erscheint automatisch der nächste
@@ -35,6 +38,9 @@ Während einer gemerkten Reise (App im Vordergrund, Erinnerungen aktiviert):
   „Wechseln" auf einen Tipp — inklusive der Folge, falls der Anschluss platzt
   („1:05 Std später am Ziel")
 - **Ankunfts-Wecker** und optionaler GPS-Ausstiegsalarm
+- **Umsteigeprofil** (Schnell · Normal · Gepäck · Kind · Fahrrad · Barrierearm ·
+  Mehr Zeit): „8 Minuten Umstieg" wird nicht für alle gleich bewertet — ändert
+  nur die Warnschwelle, nicht die Fahrplanzeiten. Bleibt auf dem Gerät.
 - **Umleitung / geänderter Zuglauf** wird als solche gekennzeichnet, inklusive
   Zusatzhalten und entfallenen Halten
 - Läuft ausschließlich auf dem Gerät: kein Server, der die Reise mitliest
