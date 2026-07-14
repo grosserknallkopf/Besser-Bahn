@@ -190,6 +190,16 @@ class DbBahnBonus {
         subscription: j['bbSubscription'] as bool? ?? false,
         loyaltyNumber: j['loyaltyNumber'] as String?,
       );
+
+  /// Mirrors the API's key names so the on-disk cache round-trips back
+  /// through [fromJson].
+  Map<String, dynamic> toJson() => {
+        'activeBonusPoints': activeBonusPoints,
+        'activeStatusPoints': activeStatusPoints,
+        'statusLevel': statusLevel,
+        'bbSubscription': subscription,
+        if (loyaltyNumber != null) 'loyaltyNumber': loyaltyNumber,
+      };
 }
 
 /// A BahnCard — from `GET /mob/emobilebahncards`. `bildSichtHtml` /

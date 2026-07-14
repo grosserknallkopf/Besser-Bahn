@@ -306,6 +306,7 @@ class DbAuthNotifier extends Notifier<DbAuthState> {
     await _ReisenCache.clear();
     await _DbTicketCache.clearAll();
     await _ProfileCache.clear();
+    await _BahnBonusCache.clear();
   }
 
   /// Re-pull the profile (e.g. pull-to-refresh on the Profile tab).
@@ -340,12 +341,94 @@ class DbAuthNotifier extends Notifier<DbAuthState> {
 final dbAuthProvider =
     NotifierProvider<DbAuthNotifier, DbAuthState>(DbAuthNotifier.new);
 
-/// BahnBonus status — only fetched while logged in.
-final bahnbonusProvider = FutureProvider<DbBahnBonus?>((ref) async {
-  final auth = ref.watch(dbAuthProvider);
-  if (!auth.isLoggedIn) return null;
-  return ref.read(dbAccountServiceProvider).bahnbonus();
-});
+/// On-disk BahnBonus cache. Points don't change while you're standing on a
+/// platform, so the last good value stays true enough to show — and showing
+/// it beats blanking the card because a resume-triggered refresh is in
+/// flight or got rate-limited. Wiped on logout with the other personal data.
+class _BahnBonusCache {
+  static const _kKey = 'db_bahnbonus_v1';
+
+  static Future<DbBahnBonus?> load() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_kKey);
+      if (raw == null || raw.isEmpty) return null;
+      final data = json.decode(raw);
+      if (data is Map<String, dynamic>) return DbBahnBonus.fromJson(data);
+    } catch (_) {}
+    return null;
+  }
+
+  static Future<void> save(DbBahnBonus b) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_kKey, json.encode(b.toJson()));
+    } catch (_) {/* best effort */}
+  }
+
+  static Future<void> clear() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove(_kKey);
+    } catch (_) {}
+  }
+}
+
+/// BahnBonus status — only fetched while logged in, stale-while-revalidate
+/// like [bahncardsProvider]. The cache is what keeps the card on screen
+/// across an app resume: the plain FutureProvider this replaced went to
+/// AsyncLoading on every invalidate and to AsyncError on any hiccup, and the
+/// UI rendered both as nothing, so the card silently vanished (#12).
+class BahnbonusController extends AsyncNotifier<DbBahnBonus?> {
+  @override
+  Future<DbBahnBonus?> build() async {
+    final auth = ref.watch(dbAuthProvider);
+    if (!auth.isLoggedIn) return null;
+    final cached = await _BahnBonusCache.load();
+    if (cached != null) {
+      _refreshInBackground();
+      return cached;
+    }
+    return _fetchAndPersist();
+  }
+
+  /// Foreground refresh (pull-to-refresh). Falls back to the cache rather
+  /// than erroring out, so a transient failure can't empty the card.
+  Future<void> refresh() async {
+    try {
+      final fresh = await _fetchAndPersist();
+      if (fresh != null) state = AsyncData(fresh);
+    } catch (e, st) {
+      final cached = await _BahnBonusCache.load();
+      state = cached != null ? AsyncData(cached) : AsyncError(e, st);
+    }
+  }
+
+  Future<DbBahnBonus?> _fetchAndPersist() async {
+    final fresh = await ref.read(dbAccountServiceProvider).bahnbonus();
+    // A 404 means "no BahnBonus programme on this account" — the service
+    // maps it to null. Don't overwrite a good cache with that; it's also
+    // what a rate-limited or half-broken response looks like.
+    if (fresh == null) return _BahnBonusCache.load();
+    await _BahnBonusCache.save(fresh);
+    return fresh;
+  }
+
+  void _refreshInBackground() {
+    Future.microtask(() async {
+      try {
+        final fresh = await _fetchAndPersist();
+        if (fresh != null) state = AsyncData(fresh);
+      } catch (e) {
+        AppLog.log('bahnbonus background refresh failed: $e', tag: 'db-account');
+      }
+    });
+  }
+}
+
+final bahnbonusProvider =
+    AsyncNotifierProvider<BahnbonusController, DbBahnBonus?>(
+        BahnbonusController.new);
 
 /// The user's BahnCards — stale-while-revalidate. On startup the on-disk
 /// cache returns instantly so the BahnCard / Kontrollansicht works offline;

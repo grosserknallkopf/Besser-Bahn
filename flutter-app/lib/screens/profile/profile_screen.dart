@@ -37,10 +37,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
     // Coming back to the app — e.g. after completing a purchase on bahn.de —
     // re-pull the account data so a freshly bought ticket appears without a
     // manual refresh.
+    //
+    // Refresh the *source*: ticketIndicesProvider is derived from
+    // reisenuebersichtProvider, so invalidating it only re-reads the overview
+    // already in memory and never hits the network — the freshly bought
+    // ticket wouldn't have shown up at all.
     if (state == AppLifecycleState.resumed &&
         ref.read(dbAuthProvider).isLoggedIn) {
-      ref.invalidate(ticketIndicesProvider);
-      ref.invalidate(bahnbonusProvider);
+      ref.read(reisenuebersichtProvider.notifier).refresh();
+      ref.read(bahnbonusProvider.notifier).refresh();
       ref.invalidate(bahncardsProvider);
     }
   }
@@ -227,22 +232,24 @@ class _LoggedIn extends ConsumerWidget {
     return RefreshIndicator(
       onRefresh: () async {
         await ref.read(dbAuthProvider.notifier).reload();
-        ref.invalidate(bahnbonusProvider);
+        // Refresh the sources, not the derived views — see the resume handler.
+        await Future.wait([
+          ref.read(bahnbonusProvider.notifier).refresh(),
+          ref.read(reisenuebersichtProvider.notifier).refresh(),
+        ]);
         ref.invalidate(bahncardsProvider);
-        ref.invalidate(ticketIndicesProvider);
       },
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
         children: [
           _header(context),
           const SizedBox(height: 16),
-          bahnbonus.when(
-            data: (bb) => bb == null
-                ? const SizedBox.shrink()
-                : _BahnBonusCard(bonus: bb),
-            loading: () => const SizedBox.shrink(),
-            error: (_, _) => const SizedBox.shrink(),
-          ),
+          // BahnBonus — same rule as BahnCard below: never blank the card just
+          // because a refresh is in flight or failed. `.value` (unlike
+          // `asData`, which nulls out on loading/error) retains the last good
+          // value across a refresh, so the card stays put (#12). Only a
+          // genuinely BahnBonus-less account renders nothing.
+          if (bahnbonus.value case final bb?) _BahnBonusCard(bonus: bb),
           _detailsCard(context),
           const SizedBox(height: 20),
           // BahnCards — section always renders so the user can see *why*
