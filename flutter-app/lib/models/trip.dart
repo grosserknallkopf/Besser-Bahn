@@ -1,7 +1,7 @@
 import 'dart:math' as math;
 
 import 'departure.dart';
-import 'journey.dart' show OccupancyLevel;
+import 'journey.dart' show JourneyLeg, OccupancyLevel;
 import 'station.dart';
 
 /// A train-wide attribute from the bahn.de `fahrt` `zugattribute` list, e.g.
@@ -51,6 +51,42 @@ class Trip {
     this.polyline,
     this.attributes = const [],
   });
+
+  /// Build a Trip from the data the journey search already returned for a leg.
+  ///
+  /// The stand-in for when `GET /mob/zuglauf/{id}` is unavailable (rate-limit,
+  /// non-DB operator, offline). The journey response already carries this
+  /// leg's stop list, so falling back to a train-number-only card threw away
+  /// stops we were holding in memory (#14).
+  ///
+  /// Degraded on purpose: LegStopover has no planned-vs-actual split, no
+  /// platform and no occupancy, and there's no polyline — so the timeline
+  /// renders without platforms, load, or a map. Returns null when the leg
+  /// carries no stops (nothing to show) or isn't a train.
+  static Trip? fromLeg(JourneyLeg leg) {
+    if (leg.isWalking || leg.stopovers.isEmpty || leg.line == null) return null;
+    return Trip(
+      id: leg.tripId ?? '',
+      line: leg.line!,
+      direction: leg.direction ?? leg.destination.name,
+      origin: leg.origin,
+      destination: leg.destination,
+      stopovers: [
+        for (final s in leg.stopovers)
+          Stopover(
+            stop: s.stop,
+            // The leg's times are already realtime-resolved; without a planned
+            // counterpart the timeline shows them as-is rather than inventing
+            // a delay of zero.
+            arrival: s.arrival,
+            departure: s.departure,
+            arrivalDelay: s.arrivalDelay,
+            departureDelay: s.departureDelay,
+            cancelled: s.cancelled,
+          ),
+      ],
+    );
+  }
 
   Trip copyWith({List<Map<String, double>>? polyline, TransitLine? line}) {
     return Trip(

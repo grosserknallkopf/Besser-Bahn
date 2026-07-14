@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/app_log.dart';
 import '../../core/extensions.dart';
 import '../../core/share_text.dart';
 import '../../models/coach_sequence.dart';
@@ -1078,6 +1079,10 @@ class _LegSectionState extends ConsumerState<_LegSection>
   CoachSequence? _coach;
   bool _loading = true;
 
+  /// Why the last getTrip failed. Kept so the fallback can say *something*
+  /// happened and offer a retry, instead of silently degrading (#14).
+  Object? _tripError;
+
   /// Lets the whole-block swipe hand its fling to the switcher's step logic,
   /// so grabbing the Fahrtblock anywhere cycles departures the same way the
   /// little switcher bar does.
@@ -1201,11 +1206,19 @@ class _LegSectionState extends ConsumerState<_LegSection>
         trip = trip.copyWith(line: trip.line.withName(label));
       }
       _tripCache[id] = trip;
-      if (mounted) setState(() => _trip = trip);
+      if (mounted) setState(() {
+        _trip = trip;
+        _tripError = null;
+      });
       // Post-await (never during build) → safe to nudge the parent to recompute
       // transfer windows from the live arrival/departure this fetch just added.
       widget.onTripUpdated?.call();
-    } catch (_) {/* keep cached/fallback */}
+    } catch (e) {
+      // Log it: swallowing this silently is what made the rate-limit cause of
+      // the fallback card invisible for so long.
+      AppLog.log('getTrip failed for $id: $e', tag: 'trip-detail');
+      if (mounted) setState(() => _tripError = e);
+    }
     try {
       final cs = await coachFuture;
       if (cs != null) {
@@ -1342,12 +1355,38 @@ class _LegSectionState extends ConsumerState<_LegSection>
         ),
       );
     }
-    // Loading / fallback: getTrip can fail for non-DB-operated trains (ÖBB
-    // Railjet, Flixtrain, a Fernbus) — still show the leg with the SAME circled
-    // product badge as the live header, built from the leg's own line data, so
-    // every product gets its "[RJX] 69"-style badge, not just RE/ICE.
+    // getTrip failed or hasn't landed. Before falling back to the bare card,
+    // use the stops the journey search already gave us for this leg — a
+    // timeline without platforms/occupancy beats a train number alone (#14).
     final leg = widget.leg;
     final line = leg.line;
+    if (!_loading && _tripError != null) {
+      final degraded = Trip.fromLeg(leg);
+      if (degraded != null) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _TripDetailsUnavailable(onRetry: _retryTrip),
+            TrainDetailView(
+              trip: degraded,
+              coach: _coach,
+              onStopTap: _openStopMap,
+              boardingId:
+                  leg.origin.id.isNotEmpty ? leg.origin.id : leg.origin.name,
+              alightingId: leg.destination.id.isNotEmpty
+                  ? leg.destination.id
+                  : leg.destination.name,
+              legDestinationName:
+                  leg.destination.name.isNotEmpty ? leg.destination.name : null,
+            ),
+          ],
+        );
+      }
+    }
+    // Nothing to build a timeline from (walk, no stops, unknown line): show the
+    // leg with the SAME circled product badge as the live header, built from
+    // the leg's own line data, so every product gets its "[RJX] 69"-style
+    // badge, not just RE/ICE.
     return Card(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       child: ListTile(
@@ -1362,6 +1401,57 @@ class _LegSectionState extends ConsumerState<_LegSection>
         subtitle: Text(
             '${leg.origin.name} → ${leg.destination.name}'
             '${leg.direction != null ? '  ·  Richtung ${leg.direction}' : ''}'),
+        trailing: (!_loading && _tripError != null)
+            ? IconButton(
+                icon: const Icon(Icons.refresh),
+                tooltip: 'Details erneut laden',
+                onPressed: _retryTrip,
+              )
+            : null,
+      ),
+    );
+  }
+
+  Future<void> _retryTrip() async {
+    setState(() {
+      _loading = true;
+      _tripError = null;
+    });
+    await _load();
+    if (mounted) setState(() => _loading = false);
+  }
+}
+
+/// Shown above a timeline rebuilt from the journey search's own stop list,
+/// because the live train-run fetch failed. Says what's missing (platforms,
+/// occupancy) so a rider doesn't read the absence of a Gleis as "no platform
+/// assigned yet", and offers a retry (#14).
+class _TripDetailsUnavailable extends StatelessWidget {
+  final VoidCallback onRetry;
+  const _TripDetailsUnavailable({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Card(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      color: scheme.surfaceContainerHighest,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
+        child: Row(
+          children: [
+            Icon(Icons.cloud_off, size: 18, color: scheme.outline),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Live-Zugdetails nicht geladen — Halte aus der Verbindung, '
+                'ohne Gleise und Auslastung.',
+                style: TextStyle(fontSize: 12, color: scheme.outline),
+              ),
+            ),
+            TextButton(onPressed: onRetry, child: const Text('Erneut')),
+          ],
+        ),
       ),
     );
   }

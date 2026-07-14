@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:http/http.dart' as http;
@@ -14,8 +15,45 @@ import '../models/trip.dart';
 /// bahn.de website journey endpoint (`angebote/fahrplan`), it is NOT behind
 /// Akamai bot management, so journey search *with prices* works from a plain
 /// HTTP client. We use it as the primary journey path.
+/// Caps how many requests may be in flight at once, queueing the rest.
+///
+/// The vendo backend rate-limits per client, so a burst of parallel calls
+/// doesn't just queue — it gets everything after the limit rejected with 429.
+/// Spending a little latency to stay under the limit beats failing fast (#14).
+class _RequestGate {
+  _RequestGate(this.maxConcurrent);
+
+  final int maxConcurrent;
+  int _active = 0;
+  final _queue = <Completer<void>>[];
+
+  Future<T> run<T>(Future<T> Function() task) async {
+    if (_active >= maxConcurrent) {
+      final waiter = Completer<void>();
+      _queue.add(waiter);
+      await waiter.future;
+    }
+    _active++;
+    try {
+      return await task();
+    } finally {
+      _active--;
+      if (_queue.isNotEmpty) _queue.removeAt(0).complete();
+    }
+  }
+}
+
 class VendoService {
-  final http.Client _client = http.Client();
+  /// [client] is injectable so tests can drive the 429/retry path without a
+  /// network; production uses a plain client.
+  VendoService({http.Client? client}) : _client = client ?? http.Client();
+
+  final http.Client _client;
+
+  /// Static: one gate for the whole app, since the limit is per client, not
+  /// per service instance.
+  static final _zuglaufGate = _RequestGate(3);
+  static const _maxRetries = 2;
 
   static const _base = 'https://app.services-bahn.de/mob';
   static const _journeyMedia =
@@ -415,14 +453,50 @@ class VendoService {
 
   Future<Trip> getTrip(String zuglaufId) async {
     final url = '$_base/zuglauf/${Uri.encodeComponent(zuglaufId)}';
-    final res = await _client
-        .get(Uri.parse(url), headers: _headers(_zuglaufMedia))
-        .timeout(const Duration(seconds: 10));
-    if (res.statusCode != 200) {
-      throw VendoException('Vendo zuglauf HTTP ${res.statusCode}');
-    }
+    // Serialised + rate-limit aware: a connection detail screen fires one of
+    // these per leg at once, and again on every resume/refresh. Unthrottled,
+    // that reliably trips the backend's per-client limit and every leg fails
+    // together — which is what made the detail view collapse to the minimal
+    // card for *all* connections at once, then recover minutes later (#14).
+    final res = await _zuglaufGate.run(
+      () => _getWithRetry(url, _zuglaufMedia, tag: 'zuglauf'),
+    );
     final data = json.decode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
     return _parseTripFromZuglauf(data, zuglaufId);
+  }
+
+  /// GET honouring 429 + `Retry-After`. The backend answers a tripped limit
+  /// with `{"domain":"MOB","code":"RETRY","status":"ERROR"}` and a
+  /// `Retry-After` (~18s observed), i.e. it tells us exactly when to come
+  /// back — treating that as a hard failure throws away a request that would
+  /// have succeeded. Mirrors DbAccountService's existing 429 backoff.
+  Future<http.Response> _getWithRetry(
+    String url,
+    String media, {
+    required String tag,
+    int attempt = 0,
+  }) async {
+    final res = await _client
+        .get(Uri.parse(url), headers: _headers(media))
+        .timeout(const Duration(seconds: 10));
+    if (res.statusCode == 429 && attempt < _maxRetries) {
+      final retryAfter = int.tryParse(res.headers['retry-after'] ?? '');
+      // No Retry-After → exponential backoff (2s, 4s). Cap the honoured wait:
+      // a rider staring at a spinner won't sit through a 60s hint.
+      final delay = Duration(
+        seconds: (retryAfter ?? (2 << attempt)).clamp(1, 20),
+      );
+      AppLog.log(
+          '429 on $tag → backoff ${delay.inSeconds}s '
+          '(attempt ${attempt + 1}/$_maxRetries)',
+          tag: 'vendo');
+      await Future.delayed(delay);
+      return _getWithRetry(url, media, tag: tag, attempt: attempt + 1);
+    }
+    if (res.statusCode != 200) {
+      throw VendoException('Vendo $tag HTTP ${res.statusCode}');
+    }
+    return res;
   }
 
   Trip _parseTripFromZuglauf(Map<String, dynamic> data, String zuglaufId) {
