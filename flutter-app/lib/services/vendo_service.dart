@@ -449,9 +449,23 @@ class VendoService {
         productName: p['kurztext'] as String? ?? gattung,
         product: _mapProduct(gattung),
       ),
-      cancelled: false,
+      cancelled: _boardCancelled(notes),
       remarks: notes,
     );
+  }
+
+  /// Whether a board row is a cancellation.
+  ///
+  /// The board carries no flag for this — unlike a Zuglauf halt, which has
+  /// `ersatzhaltNotiz.typ == GECANCELT`. The only signal is the realtime note
+  /// ("Halt entfällt" on 69 of 1367 rows probed), so this matches on text.
+  /// Deliberately loose about the wording, since that is DB's to change.
+  static bool _boardCancelled(List<String> notes) {
+    for (final n in notes) {
+      final t = n.toLowerCase();
+      if (t.contains('entfällt') || t.contains('fällt aus')) return true;
+    }
+    return false;
   }
 
   // ==========================================================================
@@ -1007,6 +1021,10 @@ class VendoService {
     switch (gattung) {
       case 'ICE':
         return 'nationalExpress';
+      // Live data says `IC_EC` — the `EC_IC` spelling below never appears and
+      // is kept only defensively. Getting this wrong sent every IC into the
+      // `default: regional` arm.
+      case 'IC_EC':
       case 'IC':
       case 'EC':
       case 'EC_IC':

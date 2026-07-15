@@ -23,6 +23,7 @@ Endpoint map (see app code in flutter-app/lib/services/):
 """
 from __future__ import annotations
 
+import collections
 import json
 import math
 import re
@@ -201,6 +202,47 @@ def check_vendo_departures() -> str:
         raise CheckError("departure position has no line text")
     return (f"{len(pos)} departures, first '{e.get('mitteltext', '?')}' → "
             f"{e.get('richtung', '?')}, zuglaufId len={len(e['zuglaufId'])}")
+
+
+def check_vendo_board_semantics() -> str:
+    """The two board fields the app derives meaning from, rather than shows.
+
+    `produktGattung` decides the IC/EC filter and the drawn train geometry —
+    live it reads `IC_EC` (the app long had only the never-sent `EC_IC`, so
+    every IC was categorised as regional). And a cancelled row is signalled
+    *only* by the realtime note "Halt entfällt"; the board carries no flag, so
+    the app matches on text. Both are DB's to change, hence a check.
+
+    Soft on the cancellation note: a board with nothing cancelled is a good
+    day, not a broken API.
+    """
+    gattungen = collections.Counter()
+    notes = collections.Counter()
+    for eva in (KOELN_HBF, "8011160"):  # Köln, Berlin Hbf
+        for p in _vendo_board(eva, arrivals=False):
+            g = p.get("produktGattung")
+            if g:
+                gattungen[g] += 1
+            for n in p.get("echtzeitNotizen") or []:
+                if isinstance(n, dict) and n.get("text"):
+                    notes[n["text"]] += 1
+
+    if not gattungen:
+        raise CheckError("no produktGattung on any board row")
+    # The app maps these explicitly; anything else silently becomes 'regional'.
+    known = {"ICE", "IC_EC", "IR", "RB", "RE", "REGIONAL", "SBAHN", "S",
+             "BUS", "SONSTIGE", "UBAHN", "U", "STR", "TRAM", "SCHIFF",
+             "IC", "EC", "EC_IC"}
+    unknown = {g: c for g, c in gattungen.items() if g not in known}
+    if unknown:
+        raise CheckError(
+            f"unmapped produktGattung {unknown} — _mapProduct would call these "
+            "'regional'; add them to the switch")
+
+    cancels = sum(c for t, c in notes.items()
+                  if "entfällt" in t.lower() or "fällt aus" in t.lower())
+    return (f"{sum(gattungen.values())} rows, gattungen "
+            f"{dict(gattungen.most_common(4))}, {cancels} cancelled notes")
 
 
 def check_vendo_arrivals() -> str:
@@ -1411,6 +1453,7 @@ CHECKS = [
     ("bahn.de web API blocked (reiseloesung)", check_bahn_web_api_blocked, True),
     ("vendo departures (bahnhofstafel)", check_vendo_departures, False),
     ("vendo arrivals (bahnhofstafel)", check_vendo_arrivals, False),
+    ("vendo board semantics (gattung/cancel)", check_vendo_board_semantics, False),
     ("vendo train run (zuglauf halte)", check_vendo_zuglauf_detail, False),
     ("vendo platform change (gleis vs ezGleis)", check_vendo_platform_change, True),
     ("vendo zuglauf notes (Umleitung/Zusatzhalt)", check_vendo_zuglauf_notes, False),
