@@ -101,6 +101,10 @@ BERLIN_LOC = ("A=1@O=Berlin Hbf@X=13369549@Y=52525589@U=80@L=8011160@"
               "p=1779908603@i=U×008065969@")
 HAMBURG_LOC = ("A=1@O=Hamburg Hbf@X=10006909@Y=53552733@U=80@L=8002549@"
                "i=U×008001071@")
+# An ICE trunk route that also carries a dense RE/RB service — the case where
+# an ["ALL"] search returns nothing but ICEs (see check_vendo_verkehrsmittel).
+MUNICH_LOC = "A=1@O=München Hbf@X=11558339@Y=48140229@U=80@L=8000261@"
+AUGSBURG_LOC = "A=1@O=Augsburg Hbf@X=10885802@Y=48365456@U=80@L=8000013@"
 
 
 def _corr_id() -> str:
@@ -520,6 +524,83 @@ def check_vendo_journey() -> str:
                     raise CheckError("ersatzhaltNotiz lacks a 'typ' field")
     ez_txt = ", ersatzhaltNotiz shape ok" if ersatz_seen else ""
     return f"{len(conns)} journeys, first has {len(legs)} legs{price_txt}{ez_txt}"
+
+
+def check_vendo_verkehrsmittel() -> str:
+    """The `verkehrsmittel` filter must be honoured server-side.
+
+    Vendo returns a small window of the *best* connections, so on an ICE trunk
+    route like München–Augsburg an ["ALL"] search is 100% ICE even though REs
+    run every few minutes. Filtering client-side therefore yields an empty
+    list (issue #18) — the modes have to travel with the request.
+
+    Asserts the enum values (from the DB Navigator's `VerkehrsmittelModel`)
+    are still accepted and actually change the result set.
+    """
+    media = "application/x.db.vendo.mob.verbindungssuche.v9+json"
+    nah = ["NAHVERKEHRSONSTIGEZUEGE", "SBAHNEN", "BUSSE", "UBAHN",
+           "STRASSENBAHN", "SCHIFFE", "ANRUFPFLICHTIGEVERKEHRE"]
+    fern = ["HOCHGESCHWINDIGKEITSZUEGE", "INTERCITYUNDEUROCITYZUEGE",
+            "INTERREGIOUNDSCHNELLZUEGE"]
+
+    def gattungen(vm: list) -> list:
+        body = {
+            "autonomeReservierung": False,
+            "einstiegsTypList": ["STANDARD"],
+            "fahrverguenstigungen": {
+                "deutschlandTicketVorhanden": False,
+                "nurDeutschlandTicketVerbindungen": False,
+            },
+            "klasse": "KLASSE_2",
+            "reiseHin": {"wunsch": {
+                "abgangsLocationId": MUNICH_LOC,
+                "alternativeHalteBerechnung": True,
+                "verkehrsmittel": vm,
+                "zeitWunsch": {
+                    "reiseDatum": (datetime.now().astimezone()
+                                   + timedelta(days=1)).replace(
+                                       hour=9, minute=0).isoformat(),
+                    "zeitPunktArt": "ABFAHRT",
+                },
+                "zielLocationId": AUGSBURG_LOC,
+            }},
+            "reisendenProfil": {"reisende": [{
+                "ermaessigungen": ["KEINE_ERMAESSIGUNG KLASSENLOS"],
+                "reisendenTyp": "ERWACHSENER",
+            }]},
+            "reservierungsKontingenteVorhanden": False,
+        }
+        r = _post(
+            "https://app.services-bahn.de/mob/angebote/fahrplan",
+            headers=_vendo_headers(media), data=json.dumps(body),
+            timeout=TIMEOUT,
+        )
+        if r.status_code == 400:
+            raise CheckError(
+                f"verkehrsmittel {vm} rejected (400) — enum changed, "
+                "re-extract VerkehrsmittelModel from the Navigator APK")
+        r.raise_for_status()
+        out = []
+        for c in r.json().get("verbindungen", []):
+            for ab in c["verbindung"]["verbindungsAbschnitte"]:
+                if ab.get("typ") == "FAHRZEUG":
+                    out.append(ab.get("kurztext") or "?")
+        return out
+
+    nah_g = gattungen(nah)
+    if not nah_g:
+        raise CheckError("Nahverkehr-only search returned no legs")
+    if any(g.startswith("ICE") for g in nah_g):
+        raise CheckError(f"Nahverkehr-only search leaked Fernverkehr: {nah_g}")
+
+    fern_g = gattungen(fern)
+    if not fern_g:
+        raise CheckError("Fernverkehr-only search returned no legs")
+    if not any(g.startswith("IC") for g in fern_g):
+        raise CheckError(f"Fernverkehr-only search has no IC*/ICE: {fern_g}")
+
+    return (f"filter honoured — Nah={sorted(set(nah_g))} "
+            f"Fern={sorted(set(fern_g))}")
 
 
 def check_vendo_journey_party() -> str:
@@ -1337,6 +1418,7 @@ CHECKS = [
     ("vendo nearby stations (bytypes)", check_vendo_nearby, False),
     ("mob endpoint surface reachable (67)", check_mob_surface, True),
     ("vendo journey + prices (v9)", check_vendo_journey, False),
+    ("vendo verkehrsmittel filter (#18)", check_vendo_verkehrsmittel, False),
     ("vendo party search (pax/bike/dog/SBA)", check_vendo_journey_party, False),
     ("vendo journey pagination (context)", check_vendo_journey_pagination, False),
     ("vendo weitere abfahrten (segment)", check_vendo_weitere_abfahrten, False),

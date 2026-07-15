@@ -9,40 +9,37 @@ import 'settings_provider.dart';
 
 enum JourneySortMode { departure, arrival, duration, transfers, reliability }
 
-/// Coarse transport categories for the multimodal filter. The journey search
-/// already returns every mode (bus, tram, U-/S-Bahn, regional, long-distance);
-/// this lets the user hide modes client-side without re-querying.
+/// Coarse transport categories for the multimodal filter. Each maps to the
+/// Vendo `VerkehrsmittelModel` values sent with the search, so the backend
+/// only ever computes the modes the user wants. The Fern/Regio split mirrors
+/// the DB Navigator's own `verkehrsmittelListFern` (ICE + IC/EC + IR).
 enum ProductCategory {
-  fern('Fernverkehr'),
-  regional('Regional'),
-  sbahn('S-Bahn'),
-  ubahn('U-Bahn'),
-  tram('Tram'),
-  bus('Bus & Fähre');
+  fern('Fernverkehr', [
+    'HOCHGESCHWINDIGKEITSZUEGE',
+    'INTERCITYUNDEUROCITYZUEGE',
+    'INTERREGIOUNDSCHNELLZUEGE',
+  ]),
+  regional('Regional', ['NAHVERKEHRSONSTIGEZUEGE', 'ANRUFPFLICHTIGEVERKEHRE']),
+  sbahn('S-Bahn', ['SBAHNEN']),
+  ubahn('U-Bahn', ['UBAHN']),
+  tram('Tram', ['STRASSENBAHN']),
+  bus('Bus & Fähre', ['BUSSE', 'SCHIFFE']);
 
   final String label;
-  const ProductCategory(this.label);
 
-  /// Map a HAFAS/Vendo product string to its category.
-  static ProductCategory of(String? product) {
-    switch (product) {
-      case 'nationalExpress':
-      case 'national':
-        return ProductCategory.fern;
-      case 'suburban':
-        return ProductCategory.sbahn;
-      case 'subway':
-        return ProductCategory.ubahn;
-      case 'tram':
-        return ProductCategory.tram;
-      case 'bus':
-      case 'ferry':
-        return ProductCategory.bus;
-      case 'regional':
-      default:
-        return ProductCategory.regional;
+  /// Vendo `verkehrsmittel` codes this category selects.
+  final List<String> vendoCodes;
+  const ProductCategory(this.label, this.vendoCodes);
+
+  /// The `verkehrsmittel` array for a set of categories. All categories
+  /// selected → `['ALL']`, matching the Navigator's own default request.
+  static List<String> codesFor(Set<ProductCategory> cats) {
+    if (cats.isEmpty || cats.length == ProductCategory.values.length) {
+      return const ['ALL'];
     }
+    return [for (final c in cats) ...c.vendoCodes];
   }
+
 }
 
 class JourneySearchState {
@@ -101,19 +98,12 @@ class JourneySearchState {
     );
   }
 
-  /// True when [journey] uses only currently-enabled transport categories
-  /// (walking legs ignored).
-  bool _passesProductFilter(Journey journey) {
-    if (products.length == ProductCategory.values.length) return true;
-    return journey.legs
-        .where((l) => !l.isWalking)
-        .every((l) => products.contains(ProductCategory.of(l.line?.product)));
-  }
-
   List<Journey> get sortedJourneys {
     if (result == null) return [];
-    final journeys =
-        result!.journeys.where(_passesProductFilter).toList();
+    // No client-side product filter: the backend already searched for exactly
+    // the selected modes. Re-filtering here would drop connections it
+    // deliberately returned (e.g. a feeder bus on an otherwise regional trip).
+    final journeys = result!.journeys.toList();
     switch (sortMode) {
       case JourneySortMode.departure:
         journeys.sort((a, b) =>
@@ -155,16 +145,19 @@ class JourneySearchNotifier extends Notifier<JourneySearchState> {
 
   /// Toggle a transport category in the multimodal filter. Never lets the user
   /// deselect the last category (that would hide everything) — re-enabling all
-  /// instead.
+  /// instead. The filter is part of the query, so this re-runs the search.
   void toggleProduct(ProductCategory cat) {
     final next = Set<ProductCategory>.from(state.products);
     if (!next.remove(cat)) next.add(cat);
     if (next.isEmpty) next.addAll(ProductCategory.values);
     state = state.copyWith(products: next);
+    if (state.result != null) search();
   }
 
-  void setAllProducts() =>
-      state = state.copyWith(products: ProductCategory.values.toSet());
+  void setAllProducts() {
+    state = state.copyWith(products: ProductCategory.values.toSet());
+    if (state.result != null) search();
+  }
 
   void swapStations() {
     state = state.copyWith(from: state.to, to: state.from);
@@ -228,6 +221,7 @@ class JourneySearchNotifier extends Notifier<JourneySearchState> {
         firstClass: party.firstClass,
         reisende: party.toReisendeJson(),
         deutschlandTicket: party.deutschlandTicket,
+        verkehrsmittel: ProductCategory.codesFor(state.products),
       );
       AppLog.log('vendo result: ${result.journeys.length} journeys',
           tag: 'journey');
@@ -263,6 +257,7 @@ class JourneySearchNotifier extends Notifier<JourneySearchState> {
         firstClass: party.firstClass,
         reisende: party.toReisendeJson(),
         deutschlandTicket: party.deutschlandTicket,
+        verkehrsmittel: ProductCategory.codesFor(state.products),
       );
 
       // Dedupe against what we already show (paged windows can overlap).

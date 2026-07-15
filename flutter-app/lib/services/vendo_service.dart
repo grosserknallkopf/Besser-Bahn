@@ -91,6 +91,14 @@ class VendoService {
     // exactly what the user pays. Defaults to a single adult, no discount.
     List<Map<String, dynamic>>? reisende,
     bool deutschlandTicket = false,
+    // Vendo `VerkehrsmittelModel` values (see [ProductCategory.vendoCodes]).
+    // The filter MUST travel with the request: the backend returns a small
+    // window of the *best* connections, so on a route like München–Augsburg
+    // every result is an ICE. Filtering those out client-side leaves an empty
+    // list while the REs the user asked for were never fetched. Null/empty →
+    // ['ALL'].
+    List<String>? verkehrsmittel,
+    bool nurDeutschlandTicketVerbindungen = false,
   }) async {
     final reisendeJson = (reisende == null || reisende.isEmpty)
         ? [
@@ -105,14 +113,16 @@ class VendoService {
       'einstiegsTypList': ['STANDARD'],
       'fahrverguenstigungen': {
         'deutschlandTicketVorhanden': deutschlandTicket,
-        'nurDeutschlandTicketVerbindungen': false,
+        'nurDeutschlandTicketVerbindungen': nurDeutschlandTicketVerbindungen,
       },
       'klasse': firstClass ? 'KLASSE_1' : 'KLASSE_2',
       'reiseHin': {
         'wunsch': {
           'abgangsLocationId': fromLocationId,
           'alternativeHalteBerechnung': true,
-          'verkehrsmittel': ['ALL'],
+          'verkehrsmittel': (verkehrsmittel == null || verkehrsmittel.isEmpty)
+              ? const ['ALL']
+              : verkehrsmittel,
           'zeitWunsch': {
             'reiseDatum': _isoWithOffset(dateTime ?? DateTime.now()),
             'zeitPunktArt': isArrival ? 'ANKUNFT' : 'ABFAHRT',
