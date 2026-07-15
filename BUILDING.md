@@ -58,6 +58,12 @@ The equivalent IzzyOnDroid recipe step is:
   offset) and strips the `+N`, so it never reaches users. A `+N` in the release
   tag is just noise and breaks the clean semver convention F-Droid/Obtainium
   expect. (Older tags `2.0.0+1 … 2.0.4+5` predate this rule; don't copy them.)
+- **Pre-releases are `X.Y.Z-rc.N`** (`2.1.0-rc.1`), tagged as such and flagged
+  as a pre-release on GitHub. Gradle maps `-rc.N` to `final-10+N`, so the RC
+  ranks below its own final release but above the previous one — a tester on
+  `2.1.0-rc.1` (20091) is still offered `2.1.0` (20100). Only `rc.1 … rc.9`;
+  the build fails loudly on anything else rather than compute a silly code.
+  Don't hand-write a `versionCode`, and don't ship an RC as a plain patch bump.
 - Bump the exact `flutter:` version in `flutter-app/pubspec.yaml` to the Flutter
   version you actually build with (IzzyOnDroid's RB script parses that line).
 - Update the table above and the GitHub release notes with the Flutter **and**

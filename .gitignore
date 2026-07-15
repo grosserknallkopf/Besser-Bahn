@@ -23,3 +23,6 @@ api-tests/probe_*.py
 *.xapk
 *.apkm
 *.apks
+
+# Local agent session pointers — dev artefact, never useful to anyone else
+session.txt
