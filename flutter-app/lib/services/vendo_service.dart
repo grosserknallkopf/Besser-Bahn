@@ -857,7 +857,29 @@ class VendoService {
       legs: legs,
       refreshToken: vb['kontext'] as String? ?? vb['checksum'] as String?,
       price: price,
+      disruptions: _connectionNotes(vb),
     );
+  }
+
+  /// Notes about the connection as a whole ("Der Zielhalt Berlin Hbf entfällt.
+  /// Ausstieg in Berlin-Spandau möglich.", "Verbindung fällt aus", platform
+  /// changes). Occasionally the only place that says what happened — the legs
+  /// can carry nothing.
+  ///
+  /// Reads `echtzeitNotizen`/`himNotizen` rather than `topNotiz`: the latter
+  /// holds the same text but is the literal placeholder "textDefault" in 11 of
+  /// 15 connections probed, which must never reach the UI.
+  static List<String> _connectionNotes(Map<String, dynamic> vb) {
+    final out = <String>[];
+    for (final key in const ['himNotizen', 'echtzeitNotizen']) {
+      for (final n in (vb[key] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()) {
+        final t = (n['text'] as String?)?.trim();
+        if (t == null || t.isEmpty || t == 'textDefault') continue;
+        if (!out.contains(t)) out.add(t);
+      }
+    }
+    return out;
   }
 
   JourneyLeg _parseLeg(Map<String, dynamic> a) {

@@ -287,6 +287,11 @@ class _ConnectionDetailScreenState
             const _JourneyCancelBanner(partial: false)
           else if (journey.hasPartialCancellation)
             const _JourneyCancelBanner(partial: true),
+          // Notes about the connection as a whole, above the legs because they
+          // can be the only place saying what changed ("Der Zielhalt Berlin
+          // Hbf entfällt. Ausstieg in Berlin-Spandau möglich.") — the legs
+          // themselves sometimes carry nothing.
+          _LegNotes(notes: _visibleNotes(journey.disruptions)),
           _buyButton(context, ref),
           // Live companion cards (each self-hides when not applicable):
           // Fahrgastrechte claim on a 60+ min late arrival, and one combined

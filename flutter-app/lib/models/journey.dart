@@ -28,10 +28,16 @@ class Journey {
   final String? refreshToken;
   final JourneyPrice? price;
 
+  /// Notes about the connection as a whole, e.g. "Der Zielhalt Berlin Hbf
+  /// entfällt. Ausstieg in Berlin-Spandau möglich." Sometimes the only place
+  /// that spells out what changed — the legs can carry nothing at all.
+  final List<String> disruptions;
+
   const Journey({
     required this.legs,
     this.refreshToken,
     this.price,
+    this.disruptions = const [],
   });
 
   factory Journey.fromHafas(Map<String, dynamic> json) {
@@ -51,6 +57,7 @@ class Journey {
         'legs': legs.map((l) => l.toJson()).toList(),
         'refreshToken': refreshToken,
         'price': price?.toJson(),
+        'disruptions': disruptions,
       };
 
   factory Journey.fromJson(Map<String, dynamic> json) => Journey(
@@ -59,6 +66,9 @@ class Journey {
             .map(JourneyLeg.fromJson)
             .toList(),
         refreshToken: json['refreshToken'] as String?,
+        disruptions: (json['disruptions'] as List<dynamic>? ?? const [])
+            .whereType<String>()
+            .toList(),
         price: json['price'] is Map<String, dynamic>
             ? JourneyPrice.fromJson(json['price'] as Map<String, dynamic>)
             : null,
