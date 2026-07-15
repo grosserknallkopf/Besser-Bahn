@@ -81,6 +81,18 @@ void main() {
     });
   });
 
+  group('onlyDeutschlandTicket', () {
+    test('defaults off and survives an unrelated copyWith', () {
+      expect(JourneySearchState().onlyDeutschlandTicket, isFalse);
+      expect(
+          JourneySearchState(onlyDeutschlandTicket: true)
+              .copyWith(sortMode: JourneySortMode.duration)
+              .onlyDeutschlandTicket,
+          isTrue,
+          reason: 'copyWith must carry the flag, or the re-search drops it');
+    });
+  });
+
   group('JourneySearchState.sortedJourneys', () {
     test('regression #18: does not re-filter what the backend returned', () {
       // The backend already searched for the selected modes only. Re-checking

@@ -56,6 +56,10 @@ class JourneySearchState {
   /// multimodal); the user can hide modes (e.g. only Fernverkehr).
   final Set<ProductCategory> products;
 
+  /// Only show connections the Deutschlandticket already covers. Asked for in
+  /// #18 ("existiert auf der bahn.de Website"); the backend does the work.
+  final bool onlyDeutschlandTicket;
+
   JourneySearchState({
     this.from,
     this.to,
@@ -65,6 +69,7 @@ class JourneySearchState {
     this.isLoading = false,
     this.error,
     this.sortMode = JourneySortMode.departure,
+    this.onlyDeutschlandTicket = false,
     Set<ProductCategory>? products,
   }) : products = products ?? ProductCategory.values.toSet();
 
@@ -83,6 +88,7 @@ class JourneySearchState {
     String? error,
     JourneySortMode? sortMode,
     Set<ProductCategory>? products,
+    bool? onlyDeutschlandTicket,
     bool clearDateTime = false,
   }) {
     return JourneySearchState(
@@ -95,6 +101,8 @@ class JourneySearchState {
       error: error,
       sortMode: sortMode ?? this.sortMode,
       products: products ?? this.products,
+      onlyDeutschlandTicket:
+          onlyDeutschlandTicket ?? this.onlyDeutschlandTicket,
     );
   }
 
@@ -156,6 +164,14 @@ class JourneySearchNotifier extends Notifier<JourneySearchState> {
 
   void setAllProducts() {
     state = state.copyWith(products: ProductCategory.values.toSet());
+    if (state.result != null) search();
+  }
+
+  /// Restrict the search to Deutschlandticket-covered connections. Like the
+  /// product filter this is part of the query, so it re-runs the search.
+  void toggleOnlyDeutschlandTicket() {
+    state = state.copyWith(
+        onlyDeutschlandTicket: !state.onlyDeutschlandTicket);
     if (state.result != null) search();
   }
 
@@ -222,6 +238,7 @@ class JourneySearchNotifier extends Notifier<JourneySearchState> {
         reisende: party.toReisendeJson(),
         deutschlandTicket: party.deutschlandTicket,
         verkehrsmittel: ProductCategory.codesFor(state.products),
+        nurDeutschlandTicketVerbindungen: state.onlyDeutschlandTicket,
       );
       AppLog.log('vendo result: ${result.journeys.length} journeys',
           tag: 'journey');
@@ -258,6 +275,7 @@ class JourneySearchNotifier extends Notifier<JourneySearchState> {
         reisende: party.toReisendeJson(),
         deutschlandTicket: party.deutschlandTicket,
         verkehrsmittel: ProductCategory.codesFor(state.products),
+        nurDeutschlandTicketVerbindungen: state.onlyDeutschlandTicket,
       );
 
       // Dedupe against what we already show (paged windows can overlap).

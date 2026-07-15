@@ -451,6 +451,19 @@ class _ConnectionSearchScreenState
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 12),
         children: [
+          // Only meaningful for someone who holds the ticket, so it follows
+          // the Deutschlandticket setting rather than sitting there dead.
+          if (ref.watch(settingsProvider).hasDeutschlandTicket)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 3),
+              child: FilterChip(
+                label: const Text('Nur D-Ticket'),
+                selected: state.onlyDeutschlandTicket,
+                visualDensity: VisualDensity.compact,
+                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                onSelected: (_) => notifier.toggleOnlyDeutschlandTicket(),
+              ),
+            ),
           for (final cat in ProductCategory.values)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 3),
