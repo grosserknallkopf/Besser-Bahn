@@ -350,6 +350,16 @@ class Stopover {
   /// `istZusatzhalt`). Usually the visible symptom of a diversion (#17).
   final bool additional;
 
+  /// The train stops but won't let you on ("Hält nur zum Aussteigen") or off
+  /// ("Hält nur zum Einsteigen") — vendo `serviceNotiz`, meaning taken from
+  /// its `key`. Such a stop otherwise looks like any other, and someone
+  /// planning to board or change there simply can't.
+  final bool noBoarding;
+  final bool noAlighting;
+
+  /// DB's own wording for the above, ready to show.
+  final String? serviceNote;
+
   /// 2nd-class occupancy expected at this stop (DB `auslastungsmeldungen`).
   final OccupancyLevel occupancy;
 
@@ -367,6 +377,9 @@ class Stopover {
     this.plannedDeparturePlatform,
     this.cancelled = false,
     this.additional = false,
+    this.noBoarding = false,
+    this.noAlighting = false,
+    this.serviceNote,
     this.occupancy = OccupancyLevel.unknown,
   });
 

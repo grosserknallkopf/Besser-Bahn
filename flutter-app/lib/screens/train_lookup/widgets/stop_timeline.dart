@@ -905,6 +905,21 @@ class _StopRow extends StatelessWidget {
                                   color: Colors.amber.shade800,
                                   fontSize: 12,
                                   fontWeight: FontWeight.bold)),
+                        // The train stops here but won't let you on/off. Looks
+                        // like an ordinary stop otherwise, so anyone planning
+                        // to board or change here would only find out on the
+                        // platform.
+                        if (!cancelled &&
+                            (stopover.noBoarding || stopover.noAlighting))
+                          Text(
+                              stopover.serviceNote ??
+                                  (stopover.noBoarding
+                                      ? 'Hält nur zum Aussteigen'
+                                      : 'Hält nur zum Einsteigen'),
+                              style: TextStyle(
+                                  color: Colors.amber.shade800,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold)),
                         if (!hideOccupancy &&
                             stopover.occupancy != OccupancyLevel.unknown)
                           Row(

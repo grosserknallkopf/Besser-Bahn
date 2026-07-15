@@ -320,6 +320,17 @@ class LegStopover {
   /// `ersatzhaltNotiz.typ == GECANCELT`). Boarding/alighting here is impossible.
   final bool cancelled;
 
+  /// The train stops but won't let you on ("Hält nur zum Aussteigen") or off
+  /// ("Hält nur zum Einsteigen") — vendo `serviceNotiz`, whose `key` carries
+  /// the meaning (`…stop.entry.disabled` / `…stop.exit.disabled`). Without
+  /// this such a stop looks exactly like any other, and someone planning to
+  /// change trains there simply can't.
+  final bool noBoarding;
+  final bool noAlighting;
+
+  /// DB's own wording for the above, ready to show.
+  final String? serviceNote;
+
   const LegStopover({
     required this.stop,
     this.arrival,
@@ -327,6 +338,9 @@ class LegStopover {
     this.arrivalDelay,
     this.departureDelay,
     this.cancelled = false,
+    this.noBoarding = false,
+    this.noAlighting = false,
+    this.serviceNote,
   });
 
   factory LegStopover.fromHafas(Map<String, dynamic> json) {
@@ -348,6 +362,9 @@ class LegStopover {
         'arrivalDelay': arrivalDelay,
         'departureDelay': departureDelay,
         'cancelled': cancelled,
+        'noBoarding': noBoarding,
+        'noAlighting': noAlighting,
+        'serviceNote': serviceNote,
       };
 
   factory LegStopover.fromJson(Map<String, dynamic> json) => LegStopover(
@@ -357,6 +374,9 @@ class LegStopover {
         arrivalDelay: json['arrivalDelay'] as int?,
         departureDelay: json['departureDelay'] as int?,
         cancelled: json['cancelled'] as bool? ?? false,
+        noBoarding: json['noBoarding'] as bool? ?? false,
+        noAlighting: json['noAlighting'] as bool? ?? false,
+        serviceNote: json['serviceNote'] as String?,
       );
 }
 

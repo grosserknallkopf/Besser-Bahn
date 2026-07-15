@@ -616,9 +616,18 @@ class VendoService {
       plannedArrivalPlatform: gleis,
       cancelled: _haltCancelled(h),
       additional: h['istZusatzhalt'] as bool? ?? false,
+      noBoarding: _serviceKey(h) == 'text.realtime.stop.entry.disabled',
+      noAlighting: _serviceKey(h) == 'text.realtime.stop.exit.disabled',
+      serviceNote:
+          (h['serviceNotiz'] as Map<String, dynamic>?)?['text'] as String?,
       occupancy: _occupancyFrom(h['auslastungsInfos'] as List<dynamic>?),
     );
   }
+
+  /// `serviceNotiz.key` — the machine-readable half of "Hält nur zum
+  /// Aussteigen". Match on this, never the German text; DB owns the wording.
+  static String _serviceKey(Map<String, dynamic> h) =>
+      (h['serviceNotiz'] as Map<String, dynamic>?)?['key'] as String? ?? '';
 
   /// Map a vendo `attributNotiz` ({key, text, priority}) to a [TripAttribute].
   /// The train-detail UI keys its bike/wheelchair icons off `kategorie`, which
@@ -1004,11 +1013,17 @@ class VendoService {
   }
 
   LegStopover _parseStopover(Map<String, dynamic> h) {
+    final sn = h['serviceNotiz'] as Map<String, dynamic>?;
+    final key = sn?['key'] as String? ?? '';
     return LegStopover(
       stop: _stationFromVendo(h['ort'] as Map<String, dynamic>? ?? const {}),
       arrival: _parse(h['ezAnkunftsDatum']) ?? _parse(h['ankunftsDatum']),
       departure: _parse(h['ezAbgangsDatum']) ?? _parse(h['abgangsDatum']),
       cancelled: _haltCancelled(h),
+      // Keyed off `key`, not the German text — DB owns the wording.
+      noBoarding: key == 'text.realtime.stop.entry.disabled',
+      noAlighting: key == 'text.realtime.stop.exit.disabled',
+      serviceNote: sn?['text'] as String?,
     );
   }
 

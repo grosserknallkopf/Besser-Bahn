@@ -13,6 +13,7 @@ Map<String, dynamic> _halt(
   bool zusatz = false,
   bool cancelled = false,
   List<Map<String, String>>? echtzeitNotizen,
+  Map<String, String>? serviceNotiz,
 }) =>
     {
       'ort': {'evaNr': name, 'name': name},
@@ -23,6 +24,7 @@ Map<String, dynamic> _halt(
       if (cancelled)
         'ersatzhaltNotiz': {'text': 'Halt entfällt', 'typ': 'GECANCELT'},
       if (echtzeitNotizen != null) 'echtzeitNotizen': echtzeitNotizen,
+      if (serviceNotiz != null) 'serviceNotiz': serviceNotiz,
     };
 
 Future<dynamic> _trip(Map<String, dynamic> body) {
@@ -71,6 +73,36 @@ void main() {
 
       expect(trip.disruptions, contains('Neuer Zielhalt'));
       expect(trip.disruptions, contains('Halt entfällt'));
+    });
+
+
+    test('a stop that only lets you off is flagged (#20)', () async {
+      // 9 of 450 live stops carry this; without it such a stop looks exactly
+      // like any other and someone changing trains there simply can't.
+      final trip = await _trip({
+        'mitteltext': 'ICE 844',
+        'halte': [
+          _halt('Berlin Hbf'),
+          _halt('Hannover Hbf', serviceNotiz: {
+            'key': 'text.realtime.stop.entry.disabled',
+            'text': 'Hält nur zum Aussteigen',
+          }),
+          _halt('Köln Hbf', serviceNotiz: {
+            'key': 'text.realtime.stop.exit.disabled',
+            'text': 'Hält nur zum Einsteigen',
+          }),
+        ],
+      });
+
+      expect(trip.stopovers[0].noBoarding, isFalse);
+      expect(trip.stopovers[0].noAlighting, isFalse);
+
+      expect(trip.stopovers[1].noBoarding, isTrue);
+      expect(trip.stopovers[1].noAlighting, isFalse);
+      expect(trip.stopovers[1].serviceNote, 'Hält nur zum Aussteigen');
+
+      expect(trip.stopovers[2].noAlighting, isTrue);
+      expect(trip.stopovers[2].noBoarding, isFalse);
     });
 
     test('attributNotizen stay out of disruptions (amenities, not faults)',
