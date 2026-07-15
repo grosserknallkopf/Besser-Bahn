@@ -894,6 +894,12 @@ class VendoService {
     final plannedArr = _parse(a['ankunftsDatum']);
     final actualArr = _parse(a['ezAnkunftsDatum']) ?? plannedArr;
 
+    // The train terminates short of `ankunftsOrt` — that field keeps saying
+    // "Berlin Hbf 00:17" while the run actually ends at Berlin-Spandau 00:04.
+    // Kept alongside the planned values rather than replacing them, so the UI
+    // can show that the leg changed, not the rider's search.
+    final ersatzZiel = a['ersatzAnkunftsHalt'] as Map<String, dynamic>?;
+
     final halte = a['halte'] as List<dynamic>? ?? [];
     final stopovers = halte
         .whereType<Map<String, dynamic>>()
@@ -982,6 +988,16 @@ class VendoService {
       stopovers: stopovers,
       occupancy: _occupancy(a['auslastungsInfos'] as List<dynamic>?),
       disruptions: disruptions,
+      replacementDestination: ersatzZiel == null
+          ? null
+          : _stationFromVendo(
+              ersatzZiel['ort'] as Map<String, dynamic>? ?? const {}),
+      replacementArrival: ersatzZiel == null
+          ? null
+          : _parse(ersatzZiel['ezAnkunftsDatum']) ??
+              _parse(ersatzZiel['ankunftsDatum']),
+      replacementArrivalPlatform:
+          ersatzZiel?['ezGleis'] as String? ?? ersatzZiel?['gleis'] as String?,
     );
   }
 

@@ -1,3 +1,4 @@
+import 'package:besser_bahn/models/journey.dart';
 import 'package:besser_bahn/services/vendo_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -76,6 +77,63 @@ void main() {
 
     test('an undisturbed connection has none', () {
       expect(svc.parseConnection(_conn()).disruptions, isEmpty);
+    });
+  });
+
+  group('ersatzAnkunftsHalt — train ends early (#20)', () {
+    final svc = VendoService();
+
+    /// The live ICE 947 shape: ankunftsOrt still says Berlin Hbf 00:17 while
+    /// the run really terminates at Berlin-Spandau 00:04 on platform 5.
+    Map<String, dynamic> connEndingEarly() {
+      final c = _conn();
+      final leg = (c['verbindung']
+          as Map<String, dynamic>)['verbindungsAbschnitte'] as List;
+      (leg.first as Map<String, dynamic>)['ersatzZielhaltIndex'] = 4;
+      (leg.first as Map<String, dynamic>)['ersatzAnkunftsHalt'] = {
+        'ankunftsDatum': '2026-07-16T00:04:00+02:00',
+        'abgangsDatum': '2026-07-16T00:06:00+02:00',
+        'gleis': '5',
+        'ort': {'evaNr': '8010404', 'name': 'Berlin-Spandau'},
+      };
+      return c;
+    }
+
+    test('the real terminus is parsed out', () {
+      final leg = svc.parseConnection(connEndingEarly()).legs.first;
+
+      expect(leg.endsEarly, isTrue);
+      expect(leg.replacementDestination?.name, 'Berlin-Spandau');
+      expect(leg.replacementArrival?.hour, 0);
+      expect(leg.replacementArrival?.minute, 4);
+      expect(leg.replacementArrivalPlatform, '5');
+    });
+
+    test('the planned destination is kept, not overwritten', () {
+      // The rider searched for Berlin Hbf — they need to see that the train
+      // changed, not their search.
+      final leg = svc.parseConnection(connEndingEarly()).legs.first;
+
+      expect(leg.destination.name, 'Berlin Hbf');
+      expect(leg.arrival?.hour, 0);
+      expect(leg.arrival?.minute, 17);
+    });
+
+    test('an ordinary leg ends nowhere early', () {
+      final leg = svc.parseConnection(_conn()).legs.first;
+      expect(leg.endsEarly, isFalse);
+      expect(leg.replacementDestination, isNull);
+    });
+
+    test('survives a save/load round trip', () {
+      // Saved journeys go through toJson/fromJson — dropping the field there
+      // would lose the warning on exactly the trip the rider bookmarked.
+      final leg = svc.parseConnection(connEndingEarly()).legs.first;
+      final back = JourneyLeg.fromJson(leg.toJson());
+
+      expect(back.replacementDestination?.name, 'Berlin-Spandau');
+      expect(back.replacementArrivalPlatform, '5');
+      expect(back.endsEarly, isTrue);
     });
   });
 }

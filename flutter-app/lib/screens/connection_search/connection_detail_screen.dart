@@ -307,7 +307,9 @@ class _ConnectionDetailScreenState
                   i > 0 ? legs[i - 1] : null,
                   i + 1 < legs.length ? legs[i + 1] : null)
             else ...[
-              if (legs[i].cancelled || legs[i].partiallyCancelled)
+              if (legs[i].cancelled ||
+                  legs[i].partiallyCancelled ||
+                  legs[i].endsEarly)
                 _LegCancelBanner(leg: legs[i]),
               _LegNotes(notes: _visibleNotes(legs[i].disruptions)),
               Builder(builder: (_) {
@@ -1577,6 +1579,12 @@ class _LegCancelBanner extends StatelessWidget {
   final JourneyLeg leg;
   const _LegCancelBanner({required this.leg});
 
+  /// " um 00:04", or nothing when the time is unknown.
+  static String? _hhmm(DateTime? t) => t == null
+      ? null
+      : ' um ${t.hour.toString().padLeft(2, '0')}:'
+          '${t.minute.toString().padLeft(2, '0')}';
+
   @override
   Widget build(BuildContext context) {
     final partial = !leg.cancelled;
@@ -1587,11 +1595,20 @@ class _LegCancelBanner extends StatelessWidget {
         .map((s) => s.stop.name)
         .where((n) => n.isNotEmpty)
         .toList();
-    final label = partial
-        ? (dropped.isEmpty
-            ? '$line: Halt entfällt'
-            : '$line: Halt entfällt – ${dropped.join(', ')}')
-        : '$line fällt aus';
+    // Where the train really ends beats listing which stops it drops — that's
+    // the bit the rider has to act on.
+    final endsAt = leg.replacementDestination?.name;
+    final label = endsAt != null
+        ? '$line endet vorzeitig in $endsAt'
+            '${_hhmm(leg.replacementArrival) ?? ''}'
+            '${leg.replacementArrivalPlatform != null
+                ? ', Gleis ${leg.replacementArrivalPlatform}'
+                : ''}'
+        : partial
+            ? (dropped.isEmpty
+                ? '$line: Halt entfällt'
+                : '$line: Halt entfällt – ${dropped.join(', ')}')
+            : '$line fällt aus';
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),

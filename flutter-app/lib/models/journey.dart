@@ -142,6 +142,20 @@ class JourneyLeg {
   /// reservation hints are deliberately NOT included here.
   final List<String> disruptions;
 
+  /// Where the train actually ends when it stops short of [destination]
+  /// (vendo `ersatzAnkunftsHalt`, note typ NEUER_ENDHALT) — e.g. terminating
+  /// at Berlin-Spandau while [destination] still reads Berlin Hbf.
+  ///
+  /// [destination]/[arrival] deliberately keep the *planned* values: the rider
+  /// searched for Berlin Hbf and needs to see that it's the leg that changed,
+  /// not their search. The UI shows both.
+  final Station? replacementDestination;
+  final DateTime? replacementArrival;
+  final String? replacementArrivalPlatform;
+
+  /// True when the train terminates before its planned destination.
+  bool get endsEarly => replacementDestination != null;
+
   const JourneyLeg({
     this.tripId,
     required this.origin,
@@ -164,6 +178,9 @@ class JourneyLeg {
     this.stopovers = const [],
     this.occupancy,
     this.disruptions = const [],
+    this.replacementDestination,
+    this.replacementArrival,
+    this.replacementArrivalPlatform,
   });
 
   bool get hasDeparturePlatformChange =>
@@ -244,6 +261,9 @@ class JourneyLeg {
         'stopovers': stopovers.map((s) => s.toJson()).toList(),
         'occupancy': occupancy?.level.name,
         'disruptions': disruptions,
+        'replacementDestination': replacementDestination?.toJson(),
+        'replacementArrival': replacementArrival?.toIso8601String(),
+        'replacementArrivalPlatform': replacementArrivalPlatform,
       };
 
   factory JourneyLeg.fromJson(Map<String, dynamic> json) => JourneyLeg(
@@ -278,6 +298,14 @@ class JourneyLeg {
         disruptions: (json['disruptions'] as List<dynamic>? ?? [])
             .whereType<String>()
             .toList(),
+        replacementDestination:
+            json['replacementDestination'] is Map<String, dynamic>
+                ? Station.fromJson(
+                    json['replacementDestination'] as Map<String, dynamic>)
+                : null,
+        replacementArrival: _parse(json['replacementArrival']),
+        replacementArrivalPlatform:
+            json['replacementArrivalPlatform'] as String?,
       );
 }
 
