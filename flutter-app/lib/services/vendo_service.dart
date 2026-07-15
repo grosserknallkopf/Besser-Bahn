@@ -552,7 +552,10 @@ class VendoService {
     collect(data['himNotizen']);
     collect(data['echtzeitNotizen']);
     for (final h in halte.whereType<Map<String, dynamic>>()) {
-      collect(h['himNotizen']);
+      // Per stop it is `echtzeitNotizen` that carries "Halt entfällt" /
+      // "Neuer Zielhalt" — `himNotizen` only ever appears at the root. Reading
+      // it here matched nothing at all (0 of 450 stops probed).
+      collect(h['echtzeitNotizen']);
     }
 
     return Trip(
@@ -895,7 +898,8 @@ class VendoService {
     collect(a['himNotizen']);
     collect(a['echtzeitNotizen']);
     for (final h in halte.whereType<Map<String, dynamic>>()) {
-      collect(h['himNotizen']);
+      // See _parseTripFromZuglauf: stop-level notes live in `echtzeitNotizen`.
+      collect(h['echtzeitNotizen']);
     }
 
     String? depPlatform;

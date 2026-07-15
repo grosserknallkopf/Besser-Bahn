@@ -51,6 +51,28 @@ void main() {
       expect(trip.disruptions, contains('Verspätung aus vorheriger Fahrt'));
     });
 
+    test('per-stop notes land in disruptions too', () async {
+      // Live data puts "Halt entfällt" / "Neuer Zielhalt" in the *stop's*
+      // `echtzeitNotizen`; `himNotizen` is only ever set at the root (0 of 450
+      // stops probed carried one). Collecting himNotizen per stop — as the
+      // original #17 fix did — silently matched nothing.
+      final trip = await _trip({
+        'mitteltext': 'ICE 947',
+        'halte': [
+          _halt('Köln Hbf'),
+          _halt('Berlin-Spandau', echtzeitNotizen: [
+            {'text': 'Neuer Zielhalt'}
+          ]),
+          _halt('Berlin Hbf', cancelled: true, echtzeitNotizen: [
+            {'text': 'Halt entfällt'}
+          ]),
+        ],
+      });
+
+      expect(trip.disruptions, contains('Neuer Zielhalt'));
+      expect(trip.disruptions, contains('Halt entfällt'));
+    });
+
     test('attributNotizen stay out of disruptions (amenities, not faults)',
         () async {
       final trip = await _trip({
