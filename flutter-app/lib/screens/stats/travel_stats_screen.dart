@@ -6,6 +6,7 @@ import '../../models/db_account.dart';
 import '../../models/travel_stats.dart';
 import '../../providers/account_provider.dart';
 import '../../providers/travel_stats_provider.dart';
+import '../../services/db_account_service.dart';
 
 /// "Reise­statistik" — lifetime, on-device totals derived from completed saved
 /// trips plus the official current-year CO₂ balance from BahnBonus.
