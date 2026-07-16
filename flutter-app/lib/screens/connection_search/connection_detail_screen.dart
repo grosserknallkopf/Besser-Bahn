@@ -34,6 +34,7 @@ import '../../widgets/trip_progress_inline.dart';
 import '../../widgets/trwl_checkin_sheet.dart';
 import '../train_lookup/widgets/train_detail_view.dart';
 import 'widgets/leg_switcher.dart';
+import 'widgets/transfer_coach_hint.dart';
 
 /// In-memory cache (app session) so a leg's train data is fetched once and
 /// reused — scrolling away and back never re-downloads or rebuilds from
@@ -320,6 +321,21 @@ class _ConnectionDetailScreenState
                   i > 0 ? legs[i - 1] : null,
                   i + 1 < legs.length ? legs[i + 1] : null)
             else ...[
+              // Which section of the train you're ON to be in, so the change
+              // here is a step across the platform (#27). Sits right under the
+              // transfer tile — vendo models the change as a FUSSWEG leg, so
+              // that tile is the walk rendered at i-1. Self-hides unless both
+              // Wagenreihungen back it up.
+              Builder(builder: (_) {
+                final prev = _prevTransitLeg(legs, i);
+                if (prev == null) return const SizedBox.shrink();
+                return TransferCoachHint(
+                  key: ValueKey('coach-hint-${prev.tripId}-${legs[i].tripId}'),
+                  arriving: prev,
+                  departing: legs[i],
+                  samePlatform: journey.samePlatformTransferInto(legs[i]),
+                );
+              }),
               if (legs[i].cancelled ||
                   legs[i].partiallyCancelled ||
                   legs[i].endsEarly)
