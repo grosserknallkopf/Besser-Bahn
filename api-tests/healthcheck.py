@@ -27,6 +27,8 @@ import collections
 import json
 import math
 import re
+import base64
+import struct
 import pathlib
 import sys
 import time
@@ -1134,6 +1136,73 @@ def check_vendo_stammdaten_drift() -> str:
             f"live — {detail}")
 
 
+def check_vendo_calculateroute() -> str:
+    """Real walking routing, used for "Fußweg zum Gleis" (#21).
+
+    The app deliberately does NOT send `desiredCoordinateType: WKB`: without it
+    the same response carries the polyline as plain `gpsPositions`, so there is
+    no WKB decoder in the app at all. This asserts that plain form still comes
+    back with a real polyline — and, by decoding the WKB variant here only,
+    that the two still agree. If DB ever made the polyline WKB-only, the app
+    would silently fall back to straight lines forever; this check is what
+    would say so.
+    """
+    media = "application/x.db.vendo.mob.location.v3+json"
+    url = "https://app.services-bahn.de/mob/location/calculateroute"
+    # Köln Hbf → ~200 m south. Straight-line ~200 m, real walk ~680 m — the
+    # gap that makes the endpoint worth calling.
+    points = [
+        {"latitude": 50.943029, "longitude": 6.958730},
+        {"latitude": 50.941200, "longitude": 6.958730},
+    ]
+
+    r = _post(url, headers=_vendo_headers(media),
+              data=json.dumps({"gpsPositions": points}), timeout=TIMEOUT)
+    if r.status_code == 400:
+        raise CheckError("calculateroute rejected {gpsPositions:[{latitude,"
+                         "longitude}]} (400) — request shape changed")
+    r.raise_for_status()
+    d = r.json()
+    plain = d.get("gpsPositions") or []
+    if len(plain) < 2:
+        raise CheckError("no polyline in the plain response — the app has no "
+                         "WKB decoder and would draw straight lines forever")
+    for p in plain:
+        if not isinstance(p.get("latitude"), (int, float)) or \
+                not isinstance(p.get("longitude"), (int, float)):
+            raise CheckError("gpsPositions entries are not lat/lon numbers")
+    distance, traveltime = d.get("distance"), d.get("traveltime")
+    if not isinstance(distance, int) or not isinstance(traveltime, int):
+        raise CheckError("distance/traveltime missing or not ints (seconds "
+                         "and metres expected)")
+
+    # The whole point: routed distance must exceed the crow-flight one.
+    straight = 203  # metres between the two points above
+    if distance < straight:
+        raise CheckError(f"routed distance {distance} m is under the straight "
+                         f"line ({straight} m) — not a walking route")
+
+    time.sleep(2)
+    r2 = _post(url, headers=_vendo_headers(media),
+               data=json.dumps({"gpsPositions": points,
+                                "desiredCoordinateType": "WKB"}),
+               timeout=TIMEOUT)
+    r2.raise_for_status()
+    raw = base64.b64decode(r2.json()["wkb"])
+    endian = "<" if raw[0] == 1 else ">"
+    gtype = struct.unpack_from(endian + "I", raw, 1)[0]
+    if gtype != 2:
+        raise CheckError(f"WKB geometry type {gtype}, expected 2 (LineString)")
+    n = struct.unpack_from(endian + "I", raw, 5)[0]
+    if n != len(plain):
+        raise CheckError(f"WKB has {n} points but the plain response has "
+                         f"{len(plain)} — they no longer agree, and the app "
+                         "only reads the plain one")
+
+    return (f"{len(plain)} points, {distance} m / {traveltime}s walking vs "
+            f"~{straight} m straight; WKB agrees")
+
+
 def check_vendo_journey_party() -> str:
     """Advanced "Reisende & Klasse" search: the app lets you build a party of
     multiple passengers (with explicit ages), a bike and a dog, pick 1st class,
@@ -1956,6 +2025,7 @@ CHECKS = [
     ("vendo serviceDays (#20.8)", check_vendo_service_days, False),
     ("vendo tagesbestpreis (#21)", check_vendo_tagesbestpreis, False),
     ("stammdaten vs reisende.dart (#21)", check_vendo_stammdaten_drift, False),
+    ("vendo walking route (#21)", check_vendo_calculateroute, False),
     ("vendo party search (pax/bike/dog/SBA)", check_vendo_journey_party, False),
     ("vendo journey pagination (context)", check_vendo_journey_pagination, False),
     ("vendo weitere abfahrten (segment)", check_vendo_weitere_abfahrten, False),

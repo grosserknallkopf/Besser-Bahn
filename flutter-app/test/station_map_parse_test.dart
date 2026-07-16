@@ -1,7 +1,11 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
+import 'package:besser_bahn/core/osm_rail.dart';
+import 'package:besser_bahn/core/platform_train.dart';
 import 'package:besser_bahn/core/platform_train.dart' as pt;
+import 'package:besser_bahn/models/station_map.dart';
 import 'package:besser_bahn/services/station_map_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:latlong2/latlong.dart';
@@ -21,14 +25,69 @@ double _perpMetres(LatLng p, LatLng a, LatLng b) {
   return ((pp.x - pa.x) * ey - (pp.y - pa.y) * ex).abs() / len;
 }
 
-/// Deterministic parse test for the bahnhof.de station-map scrape, using a
-/// SAVED Kiel Hbf RSC fixture (no network) so it can't flake in CI.
+/// Shortest distance (metres) from [p] to a polyline — each segment measured
+/// as a real segment (clamped at its ends), not an infinite line.
+double _distanceToPath(LatLng p, List<LatLng> path) {
+  if (path.isEmpty) return double.infinity;
+  if (path.length == 1) {
+    return const Distance().as(LengthUnit.Meter, p, path.first);
+  }
+  const mlat = 111320.0;
+  final mlon = 111320.0 * math.cos(path.first.latitude * math.pi / 180);
+  math.Point<double> xy(LatLng q) =>
+      math.Point(q.longitude * mlon, q.latitude * mlat);
+  final pp = xy(p);
+  var best = double.infinity;
+  for (var i = 0; i + 1 < path.length; i++) {
+    final a = xy(path[i]), b = xy(path[i + 1]);
+    final ex = b.x - a.x, ey = b.y - a.y;
+    final len2 = ex * ex + ey * ey;
+    // Project p onto the segment, clamped to [0,1] so a point beyond an end
+    // measures to that end rather than to the line's imaginary extension.
+    final t = len2 < 1e-12
+        ? 0.0
+        : (((pp.x - a.x) * ex + (pp.y - a.y) * ey) / len2).clamp(0.0, 1.0);
+    final dx = pp.x - (a.x + t * ex), dy = pp.y - (a.y + t * ey);
+    best = math.min(best, math.sqrt(dx * dx + dy * dy));
+  }
+  return best;
+}
+
+// Deterministic parse test for the bahnhof.de station-map scrape, using a
+// SAVED Kiel Hbf RSC fixture (no network) so it can't flake in CI.
+//
+// Kiel Hbf is the station that "showed no train" in the app: this proves the
+// data IS in the payload (8 platforms / 16 sector cubes) and our parser pulls
+// it out — so if a train fails to render there, the bug is in placement
+// (platform_train), not the scrape. See station_map_live_test for the
+// network round-trip.
+
+/// The OSM rail a Gleis's train body rides, built exactly the way the app does
+/// it (station_map_provider → osmRailForGleis, anchored on the cube side).
 ///
-/// Kiel Hbf is the station that "showed no train" in the app: this proves the
-/// data IS in the payload (8 platforms / 16 sector cubes) and our parser pulls
-/// it out — so if a train fails to render there, the bug is in placement
-/// (platform_train), not the scrape. See [station_map_live_test] for the
-/// network round-trip.
+/// [pt.platformGenericBody] deliberately returns nothing without a trusted rail
+/// — "no train" beats a train drawn beside the track — so a test that omits it
+/// isn't testing the placement, it's testing that guard. These tests used to
+/// call without one: two failed outright, and the third passed vacuously
+/// because it skipped every empty body.
+List<LatLng> _railFor(StationMap map, String fixture, String gleis) {
+  final osm = json.decode(File('test/fixtures/$fixture').readAsStringSync())
+      as Map<String, dynamic>;
+  List<LatLng> pts(dynamic list) => [
+        for (final q in (list as List))
+          LatLng((q['lat'] as num).toDouble(), (q['lng'] as num).toDouble()),
+      ];
+  return osmRailForGleis(
+    platforms: [
+      for (final p in (osm['platforms'] as List))
+        (ref: p['ref'] as String, pts: pts(p['pts'])),
+    ],
+    rails: [for (final r in (osm['rails'] as List)) pts(r['pts'])],
+    gleis: gleis,
+    cubeSide: platformCubeSide(map, gleis),
+  );
+}
+
 void main() {
   test('parses Kiel Hbf RSC fixture: platforms, sector cubes, levels', () {
     final body =
@@ -62,8 +121,10 @@ void main() {
     // Without a Wagenreihung we still get a single closed polygon (a train
     // body), curved along the platform, sized to a realistic length — not a
     // bare line nor the whole platform.
-    final outline =
-        pt.platformGenericBody(map, gleis: gleis, lengthM: 140);
+    final outline = pt.platformGenericBody(map,
+        gleis: gleis,
+        lengthM: 140,
+        osmRail: _railFor(map, 'kiel-osm.json', gleis));
     expect(outline.length, greaterThanOrEqualTo(3),
         reason: 'generic body is a closed ring');
   });
@@ -83,7 +144,10 @@ void main() {
         );
     expect(gleis, isNotEmpty, reason: 'expected a Gleis with ≥2 sector cubes');
 
-    final outline = pt.platformGenericBody(map, gleis: gleis, lengthM: 140);
+    final outline = pt.platformGenericBody(map,
+        gleis: gleis,
+        lengthM: 140,
+        osmRail: _railFor(map, 'kiel-osm.json', gleis));
     expect(outline.length, greaterThanOrEqualTo(3));
 
     // Chord between the two most-distant vertices (the body's long axis). On a
@@ -112,12 +176,18 @@ void main() {
         reason: 'Kiel platform is straight; body deviates $maxDev m from chord');
   });
 
-  test('Hamburg Hbf body stays straight despite mis-assigned cubes', () {
-    // Hamburg Hbf is strongly curved, BUT the bahnhof.de sector cubes are
-    // mis-assigned per letter (measured: a single Abschnitt sits up to ~60 m
-    // off the platform line — physically impossible). Connecting them would
-    // zig-zag, so we lay the train straight on the platform's best-fit axis.
-    // This locks that: every body vertex stays near its own chord.
+  test('Hamburg Hbf body rides the rail despite mis-assigned cubes', () {
+    // Hamburg Hbf's bahnhof.de sector cubes are mis-assigned per letter
+    // (measured: a single Abschnitt sits up to ~60 m off the platform line —
+    // physically impossible). Connecting them would zig-zag the train.
+    //
+    // This test used to assert the body came out *straight*, from when there
+    // was no OSM rail and we laid the train on a best-fit axis. Hamburg's
+    // platforms are strongly curved, so with the real rail a straight body
+    // would now be the bug: Gleis 11 bends ~9.5 m away from its own chord, and
+    // that is the track. What still has to hold — and is what the cubes could
+    // break — is that the body follows the RAIL: every vertex within half a
+    // body width (~1.4 m) of it, plus a little for the rounded snouts.
     final body = File('test/fixtures/hamburg-hbf.rsc.txt').readAsStringSync();
     final map = parseStationMapBody('hamburg-hbf', body);
     final dirty = map.platforms
@@ -125,27 +195,27 @@ void main() {
         .where((g) => pt.platformSectors(map, g).length >= 2)
         .toList();
     expect(dirty, isNotEmpty);
-    const dist = Distance();
+    var checked = 0;
     for (final g in dirty) {
-      final outline = pt.platformGenericBody(map, gleis: g, lengthM: 200);
+      final rail = _railFor(map, 'hamburg-osm.json', g);
+      final outline =
+          pt.platformGenericBody(map, gleis: g, lengthM: 200, osmRail: rail);
+      // Not every Gleis in the fixture has a recoverable rail; those draw no
+      // train at all, which is intended and nothing to assert.
       if (outline.length < 3) continue;
-      var ai = 0, bi = 0, best = -1.0;
-      for (var i = 0; i < outline.length; i++) {
-        for (var j = i + 1; j < outline.length; j++) {
-          final d = dist.as(LengthUnit.Meter, outline[i], outline[j]);
-          if (d > best) {
-            best = d;
-            ai = i;
-            bi = j;
-          }
-        }
-      }
-      var maxDev = 0.0;
+      checked++;
+      var maxOff = 0.0;
       for (final p in outline) {
-        maxDev = math.max(maxDev, _perpMetres(p, outline[ai], outline[bi]));
+        maxOff = math.max(maxOff, _distanceToPath(p, rail));
       }
-      expect(maxDev, lessThan(4.0),
-          reason: 'Gleis $g body should be straight, deviates $maxDev m');
+      expect(maxOff, lessThan(4.0),
+          reason: 'Gleis $g body strays $maxOff m from its rail — the '
+              'mis-assigned cubes are deforming it');
     }
+    // Without this the test passes by checking nothing — which is exactly how
+    // it survived losing its rail: every body came back empty and the loop
+    // skipped them all.
+    expect(checked, greaterThan(0),
+        reason: 'no Gleis produced a body — nothing was actually asserted');
   });
 }

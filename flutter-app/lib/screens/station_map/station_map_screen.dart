@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +9,7 @@ import '../../core/train_dimensions.dart';
 import '../../models/coach_sequence.dart';
 import '../../models/station.dart';
 import '../../models/station_map.dart';
+import '../../models/walking_route.dart';
 import '../../providers/service_providers.dart';
 import '../../providers/station_map_provider.dart';
 import '../../services/location_service.dart';
@@ -88,6 +91,30 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
   LatLng _targetFor(StationMap map) =>
       ref.read(stationMapProvider).highlightPoi?.latLng ?? map.center;
 
+  /// DB's real walking route from the fix to the target (#21), once it lands.
+  /// Null → the map keeps the dotted straight line.
+  WalkingRoute? _walkingRoute;
+
+  /// Ask DB how to actually walk there. Fire-and-forget on top of the fix: the
+  /// blue dot and the direction line are already drawn, so this only ever
+  /// upgrades them — a failure or a slow answer costs nothing.
+  Future<void> _loadWalkingRoute(UserFix fix, LatLng target) async {
+    try {
+      final route = await ref.read(vendoServiceProvider).calculateWalkingRoute(
+            fromLat: fix.latLng.latitude,
+            fromLon: fix.latLng.longitude,
+            toLat: target.latitude,
+            toLon: target.longitude,
+          );
+      // A newer fix may have landed while this was in flight; that one owns the
+      // route now.
+      if (!mounted || _userFix != fix) return;
+      setState(() => _walkingRoute = route);
+    } catch (_) {
+      // The straight line is still on screen — nothing to say.
+    }
+  }
+
   /// Request the device location and frame it together with the target so the
   /// rider sees where they are and roughly which way to walk.
   Future<void> _locateMe(StationMap map) async {
@@ -95,7 +122,12 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
     try {
       final fix = await ref.read(locationServiceProvider).currentFix();
       if (!mounted) return;
-      setState(() => _userFix = fix);
+      setState(() {
+        _userFix = fix;
+        // Belongs to the old fix — drop it before the new one lands, or the
+        // map briefly draws a route from where the rider used to be.
+        _walkingRoute = null;
+      });
       _mapController.fitCamera(
         CameraFit.bounds(
           bounds: LatLngBounds.fromPoints([fix.latLng, _targetFor(map)]),
@@ -103,6 +135,7 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
           maxZoom: 18.5,
         ),
       );
+      unawaited(_loadWalkingRoute(fix, _targetFor(map)));
     } on LocationException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -389,7 +422,13 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
             // "Mein Standort": the direction line to the target, the GPS
             // accuracy circle, and the blue dot — drawn on top of the POIs.
             if (_userFix != null)
-              ...mapLocateLayers(fix: _userFix!, target: _targetFor(map)),
+              ...mapLocateLayers(
+                fix: _userFix!,
+                target: _targetFor(map),
+                walkingRoute: _walkingRoute?.points
+                    .map((p) => LatLng(p.lat, p.lon))
+                    .toList(),
+              ),
           ],
         ),
         Positioned(
@@ -1117,14 +1156,27 @@ class _LegendRow extends StatelessWidget {
 /// the map when "Mein Standort" is active.
 class _DistanceChip extends StatelessWidget {
   final double metres;
-  const _DistanceChip({required this.metres});
+
+  /// DB's real walking route, when it landed (#21). With it the chip stops
+  /// hedging: "430 m · 6 min Fußweg" instead of "≈ 200 m bis zum Ziel", which
+  /// was the straight line through whatever stands in the way.
+  final WalkingRoute? route;
+
+  const _DistanceChip({required this.metres, this.route});
 
   String get _label {
+    final walk = route?.summary;
+    if (walk != null) return walk;
     if (metres >= 1000) {
       return '≈ ${(metres / 1000).toStringAsFixed(1).replaceAll('.', ',')} km';
     }
     return '≈ ${metres.round()} m';
   }
+
+  /// "bis zum Ziel" only for the air line — a routed walk is a walk, and
+  /// saying "Fußweg" about a straight line over the tracks would be a claim we
+  /// can't make.
+  String get _suffix => route?.summary != null ? ' Fußweg' : ' bis zum Ziel';
 
   @override
   Widget build(BuildContext context) {
@@ -1143,7 +1195,7 @@ class _DistanceChip extends StatelessWidget {
           const Icon(Icons.directions_walk, color: Colors.white, size: 16),
           const SizedBox(width: 6),
           Text(
-            '$_label bis zum Ziel',
+            '$_label$_suffix',
             style: const TextStyle(
                 color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
           ),
@@ -1357,6 +1409,10 @@ class _FallbackLocationMapState extends ConsumerState<_FallbackLocationMap> {
   UserFix? _userFix;
   bool _locating = false;
 
+  /// DB's real walking route to the station (#21). Null → the straight line
+  /// and its "≈" distance.
+  WalkingRoute? _walkingRoute;
+
   LatLng get _target =>
       LatLng(widget.station.latitude!, widget.station.longitude!);
 
@@ -1371,7 +1427,10 @@ class _FallbackLocationMapState extends ConsumerState<_FallbackLocationMap> {
     try {
       final fix = await ref.read(locationServiceProvider).currentFix();
       if (!mounted) return;
-      setState(() => _userFix = fix);
+      setState(() {
+        _userFix = fix;
+        _walkingRoute = null; // belongs to the previous fix
+      });
       _mapController.fitCamera(
         CameraFit.bounds(
           bounds: LatLngBounds.fromPoints([fix.latLng, _target]),
@@ -1379,6 +1438,7 @@ class _FallbackLocationMapState extends ConsumerState<_FallbackLocationMap> {
           maxZoom: 17.5,
         ),
       );
+      unawaited(_loadWalkingRoute(fix));
     } on LocationException catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
@@ -1396,6 +1456,23 @@ class _FallbackLocationMapState extends ConsumerState<_FallbackLocationMap> {
 
   double get _distanceToTarget =>
       const Distance().as(LengthUnit.Meter, _userFix!.latLng, _target);
+
+  /// Upgrade the straight line to DB's real route, best-effort — the map is
+  /// already usable, so a failure just leaves the "≈" distance standing.
+  Future<void> _loadWalkingRoute(UserFix fix) async {
+    try {
+      final route = await ref.read(vendoServiceProvider).calculateWalkingRoute(
+            fromLat: fix.latLng.latitude,
+            fromLon: fix.latLng.longitude,
+            toLat: _target.latitude,
+            toLon: _target.longitude,
+          );
+      if (!mounted || _userFix != fix) return;
+      setState(() => _walkingRoute = route);
+    } catch (_) {
+      // Straight line stays.
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1446,7 +1523,13 @@ class _FallbackLocationMapState extends ConsumerState<_FallbackLocationMap> {
               ],
             ),
             if (_userFix != null)
-              ...mapLocateLayers(fix: _userFix!, target: _target),
+              ...mapLocateLayers(
+                fix: _userFix!,
+                target: _target,
+                walkingRoute: _walkingRoute?.points
+                    .map((p) => LatLng(p.lat, p.lon))
+                    .toList(),
+              ),
           ],
         ),
         // Tell the rider this is a location fallback, not the full plan.
@@ -1493,7 +1576,9 @@ class _FallbackLocationMapState extends ConsumerState<_FallbackLocationMap> {
             left: 0,
             right: 0,
             bottom: 16,
-            child: Center(child: _DistanceChip(metres: _distanceToTarget)),
+            child: Center(
+                child: _DistanceChip(
+                    metres: _distanceToTarget, route: _walkingRoute)),
           ),
       ],
     );

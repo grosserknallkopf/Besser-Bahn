@@ -6,6 +6,7 @@ import '../core/app_log.dart';
 import '../models/station.dart';
 import 'db_api_service.dart' show SegmentPrice;
 import '../models/best_price.dart';
+import '../models/walking_route.dart';
 import '../models/departure.dart';
 import '../models/journey.dart';
 import '../models/trip.dart';
@@ -201,6 +202,66 @@ class VendoService {
           .toList(),
       earlierRef: data['frueherContext'] as String?,
       laterRef: data['spaeterContext'] as String?,
+    );
+  }
+
+  /// The real walking route between two points — the way you'd actually walk
+  /// it, not the straight line through the buildings
+  /// (`POST /mob/location/calculateroute`, #21).
+  ///
+  /// Deliberately does NOT ask for `desiredCoordinateType: WKB`: without it the
+  /// same response carries the polyline as plain `gpsPositions` JSON — verified
+  /// identical, 28 points either way — so there is nothing to decode. The
+  /// `distance`/`traveltime` come along regardless (Köln Hbf → 200 m south:
+  /// 683 m, 492 s — the walk, not the 200 m as the crow flies).
+  ///
+  /// Returns null when DB can't route between the two points, which is a normal
+  /// answer, not an error: the caller falls back to the straight line.
+  Future<WalkingRoute?> calculateWalkingRoute({
+    required double fromLat,
+    required double fromLon,
+    required double toLat,
+    required double toLon,
+  }) async {
+    final body = {
+      'gpsPositions': [
+        {'latitude': fromLat, 'longitude': fromLon},
+        {'latitude': toLat, 'longitude': toLon},
+      ],
+    };
+    final url = '$_base/location/calculateroute';
+    final res = await _client
+        .post(Uri.parse(url),
+            headers: _headers(_locationMedia),
+            body: utf8.encode(json.encode(body)))
+        .timeout(const Duration(seconds: 10));
+    AppLog.log('calculateroute HTTP ${res.statusCode} '
+        '(${res.bodyBytes.length}B)', tag: 'vendo');
+    if (res.statusCode != 200) {
+      // A route that can't be computed is not worth an exception — the map is
+      // useful without it.
+      AppLog.log('calculateroute failed: ${_snippet(res.bodyBytes)}',
+          tag: 'vendo');
+      return null;
+    }
+    final data = json.decode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+    final points = (data['gpsPositions'] as List<dynamic>? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map((p) => (
+              lat: (p['latitude'] as num?)?.toDouble(),
+              lon: (p['longitude'] as num?)?.toDouble(),
+            ))
+        .where((p) => p.lat != null && p.lon != null)
+        .map((p) => WalkingPoint(p.lat!, p.lon!))
+        .toList();
+    // Fewer than two points is not a line. A two-point answer is kept: it
+    // looks like the straight line, but `distance`/`traveltime` are still DB's
+    // real routed numbers, and those are most of the value here.
+    if (points.length < 2) return null;
+    return WalkingRoute(
+      points: points,
+      distanceMetres: (data['distance'] as num?)?.toInt(),
+      duration: _seconds(data['traveltime']),
     );
   }
 

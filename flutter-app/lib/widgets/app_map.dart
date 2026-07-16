@@ -130,17 +130,32 @@ class AppMap extends StatelessWidget {
   }
 }
 
-/// The "Mein Standort" overlay layers — the dotted direction line to [target],
-/// the GPS accuracy circle, and the blue dot. Shared by every map that locates
-/// the user, so they're drawn identically everywhere.
-List<Widget> mapLocateLayers({required UserFix fix, required LatLng target}) => [
+/// The "Mein Standort" overlay layers — the line to [target], the GPS accuracy
+/// circle, and the blue dot. Shared by every map that locates the user, so
+/// they're drawn identically everywhere.
+///
+/// [walkingRoute] is DB's real walking route (#21). When it's there the line
+/// follows the way you'd actually walk and is drawn solid; without it the line
+/// stays the dotted straight one — dotted precisely because it's a direction,
+/// not a route, and a solid line through the middle of a station building would
+/// claim to be one.
+List<Widget> mapLocateLayers({
+  required UserFix fix,
+  required LatLng target,
+  List<LatLng>? walkingRoute,
+}) =>
+    [
       PolylineLayer(
         polylines: [
           Polyline(
-            points: [fix.latLng, target],
+            points: (walkingRoute != null && walkingRoute.length >= 2)
+                ? walkingRoute
+                : [fix.latLng, target],
             color: AppColors.dbBlue.withAlpha(180),
             strokeWidth: 4,
-            pattern: StrokePattern.dotted(),
+            pattern: (walkingRoute != null && walkingRoute.length >= 2)
+                ? const StrokePattern.solid()
+                : StrokePattern.dotted(),
           ),
         ],
       ),
