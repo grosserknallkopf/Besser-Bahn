@@ -497,15 +497,10 @@ class BahnbonusCo2Controller extends AsyncNotifier<DbBahnBonusCo2Balance?> {
   Future<DbBahnBonusCo2Balance?> build() async {
     final auth = ref.watch(dbAuthProvider);
     if (!auth.isLoggedIn) return null;
-    final cached = await _currentCached();
-    if (cached != null) {
-      _refreshInBackground();
-      return cached;
-    }
     // Do not start the separate BahnBonus OAuth flow implicitly. With no
-    // last-good value, show the explicit connect action immediately instead
-    // of leaving the statistics card in a loading state while account restore
-    // and secure-storage reads are still settling.
+    // in-memory value, show the explicit connect action immediately. Reading
+    // SharedPreferences here can contend with the account restore during a
+    // cold start and leave Riverpod in AsyncLoading indefinitely.
     throw const DbBahnBonusAuthorizationRequired();
   }
 
