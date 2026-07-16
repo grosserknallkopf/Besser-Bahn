@@ -94,6 +94,13 @@ class DbAccountConstants {
   static const bahnbonusCo2Base =
       'https://apis.deutschebahn.com/db/apis/bahnbonus/co2-service/v1';
 
+  /// OAuth client used by the official BahnBonus app. CO₂ deliberately does
+  /// not accept DB Navigator's `kf_mobile` bearer, even for the same account.
+  static const bahnbonusOAuthClientId = 'fe_bb_app';
+  static const bahnbonusRedirectUrl = 'bahnbonus://authentication/redirect';
+  static const bahnbonusCallbackScheme = 'bahnbonus';
+  static const bahnbonusScope = 'openid offline_access self-impersonation';
+
   // Public app credentials shipped with the BahnBonus Android client. They
   // identify the calling app at DB's API gateway; the user's OAuth bearer is
   // still required separately and is what authorizes access to personal data.

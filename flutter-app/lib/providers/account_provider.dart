@@ -519,9 +519,21 @@ class BahnbonusCo2Controller extends AsyncNotifier<DbBahnBonusCo2Balance?> {
     }
   }
 
-  Future<DbBahnBonusCo2Balance?> _fetchAndPersist() async {
-    final fresh =
-        await ref.read(dbAccountServiceProvider).bahnbonusCo2Balance();
+  Future<void> connect() async {
+    state = const AsyncLoading();
+    try {
+      state = AsyncData(await _fetchAndPersist(connect: true));
+    } catch (e, st) {
+      state = AsyncError(e, st);
+    }
+  }
+
+  Future<DbBahnBonusCo2Balance?> _fetchAndPersist({
+    bool connect = false,
+  }) async {
+    final fresh = await ref
+        .read(dbAccountServiceProvider)
+        .bahnbonusCo2Balance(connect: connect);
     if (fresh == null) return _currentCached();
     await _BahnBonusCo2Cache.save(fresh);
     return fresh;
