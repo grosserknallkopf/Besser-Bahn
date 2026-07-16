@@ -13,8 +13,11 @@ class BestPriceArgs {
   final Station from;
   final Station to;
   final DateTime date;
-  const BestPriceArgs(
-      {required this.from, required this.to, required this.date});
+  const BestPriceArgs({
+    required this.from,
+    required this.to,
+    required this.date,
+  });
 }
 
 /// "Bestpreis" — what the trip costs across the whole day, and when it's
@@ -42,7 +45,10 @@ class BestPriceScreen extends ConsumerStatefulWidget {
 
 class _BestPriceScreenState extends ConsumerState<BestPriceScreen> {
   late DateTime _day = DateTime(
-      widget.date.year, widget.date.month, widget.date.day);
+    widget.date.year,
+    widget.date.month,
+    widget.date.day,
+  );
 
   /// Which slot is open. Only one at a time — the whole point is comparing
   /// slots, and five expanded lists would bury the prices.
@@ -69,8 +75,7 @@ class _BestPriceScreenState extends ConsumerState<BestPriceScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final req =
-        BestPriceRequest(from: widget.from, to: widget.to, date: _day);
+    final req = BestPriceRequest(from: widget.from, to: widget.to, date: _day);
     final async = ref.watch(bestPriceProvider(req));
     final theme = Theme.of(context);
 
@@ -100,7 +105,8 @@ class _BestPriceScreenState extends ConsumerState<BestPriceScreen> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant),
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ),
@@ -123,12 +129,17 @@ class _BestPriceScreenState extends ConsumerState<BestPriceScreen> {
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.error_outline,
-                    size: 40, color: theme.colorScheme.error),
+                Icon(
+                  Icons.error_outline,
+                  size: 40,
+                  color: theme.colorScheme.error,
+                ),
                 const SizedBox(height: 12),
-                Text('$e',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: theme.colorScheme.error)),
+                Text(
+                  '$e',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: theme.colorScheme.error),
+                ),
                 const SizedBox(height: 12),
                 OutlinedButton(
                   onPressed: () => ref.invalidate(bestPriceProvider(req)),
@@ -148,8 +159,10 @@ class _BestPriceScreenState extends ConsumerState<BestPriceScreen> {
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(32),
-          child: Text('Für diesen Tag gibt es keine Preise.',
-              textAlign: TextAlign.center),
+          child: Text(
+            'Für diesen Tag gibt es keine Preise.',
+            textAlign: TextAlign.center,
+          ),
         ),
       );
     }
@@ -211,7 +224,8 @@ class _IntervalTile extends StatelessWidget {
     final hhmm = DateFormat('HH:mm');
     // 00:00 as an end bound means midnight — "19:00 – 00:00" reads better than
     // the "19:00 – 00:00" of the next day it technically is.
-    final label = '${hhmm.format(interval.from)} – '
+    final label =
+        '${hhmm.format(interval.from)} – '
         '${hhmm.format(interval.to)}';
 
     return Column(
@@ -258,19 +272,28 @@ class _IntervalTile extends StatelessWidget {
                         ),
                       ),
                       if (interval.isBest)
-                        Text('Bestpreis',
-                            style: theme.textTheme.labelSmall
-                                ?.copyWith(color: scheme.primary))
+                        Text(
+                          'Bestpreis',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: scheme.primary,
+                          ),
+                        )
                       else if (interval.isPartialPrice)
                         // Not comparable with the other slots — say so rather
                         // than let it look like a bargain.
-                        Text('Teilpreis',
-                            style: theme.textTheme.labelSmall
-                                ?.copyWith(color: scheme.onSurfaceVariant))
+                        Text(
+                          'Teilpreis',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        )
                       else
-                        Text('${interval.journeys.length} Verb.',
-                            style: theme.textTheme.labelSmall
-                                ?.copyWith(color: scheme.onSurfaceVariant)),
+                        Text(
+                          '${interval.journeys.length} Verb.',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -289,7 +312,8 @@ class _IntervalTile extends StatelessWidget {
           // The connections came with the price in the same response — no
           // second request, and they carry `kontext`, so the detail screen and
           // everything hanging off it work as if they came from the search.
-          for (final j in interval.journeys) JourneyCard(journey: j),
+          for (final j in interval.journeys)
+            JourneyCard(journey: j, fromResults: true),
         const Divider(height: 1),
       ],
     );

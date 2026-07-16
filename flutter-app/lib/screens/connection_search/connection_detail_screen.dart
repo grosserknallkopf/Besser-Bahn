@@ -56,10 +56,17 @@ class ConnectionDetailScreen extends ConsumerStatefulWidget {
   /// connections.
   final TicketRef? ticketRef;
 
+  /// Opened straight from a result list, so the alternatives are literally one
+  /// back-tap away. "Alternative Verbindungen" then just re-runs the search the
+  /// user came from — a second back button (#25). It stays for the ways in that
+  /// have NO results behind them: the Reisen tab, a ticket, a saved trip.
+  final bool fromSearch;
+
   const ConnectionDetailScreen({
     super.key,
     required this.journey,
     this.ticketRef,
+    this.fromSearch = false,
   });
 
   @override
@@ -187,11 +194,15 @@ class _ConnectionDetailScreenState
               ),
             ],
           ),
-          IconButton(
-            icon: const Icon(Icons.alt_route),
-            tooltip: 'Alternative Verbindungen',
-            onPressed: () => _showAlternatives(context, ref),
-          ),
+          if (!widget.fromSearch)
+            IconButton(
+              icon: const Icon(Icons.alt_route),
+              // Says what it does: this starts a NEW search for the same route
+              // and time. "Alternative Verbindungen" read like an in-place
+              // feature (#25).
+              tooltip: 'Andere Fahrten für diese Strecke suchen',
+              onPressed: () => _showAlternatives(context, ref),
+            ),
           IconButton(
             icon: const Icon(Icons.call_split),
             tooltip: 'Split-Ticket suchen',

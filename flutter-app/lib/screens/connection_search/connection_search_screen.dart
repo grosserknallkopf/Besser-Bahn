@@ -36,10 +36,7 @@ class _ConnectionSearchScreenState
 
   void _search() {
     final notifier = ref.read(journeySearchProvider.notifier);
-    notifier.search(
-      fromText: _fromController.text,
-      toText: _toController.text,
-    );
+    notifier.search(fromText: _fromController.text, toText: _toController.text);
   }
 
   Future<void> _editParty() async {
@@ -89,28 +86,30 @@ class _ConnectionSearchScreenState
         actions: [
           const AppMenuButton(),
           if (state.from != null && state.to != null)
-            Builder(builder: (context) {
-              final saved = ref
-                  .watch(libraryProvider)
-                  .isRouteSaved(state.from!.id, state.to!.id);
-              return IconButton(
-                icon: Icon(saved ? Icons.bookmark : Icons.bookmark_border),
-                tooltip: saved ? 'Route entfernen' : 'Route speichern',
-                onPressed: () {
-                  ref
-                      .read(libraryProvider.notifier)
-                      .toggleRoute(state.from!, state.to!);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      duration: const Duration(seconds: 2),
-                      content: Text(saved
-                          ? 'Route entfernt'
-                          : 'Route gespeichert'),
-                    ),
-                  );
-                },
-              );
-            }),
+            Builder(
+              builder: (context) {
+                final saved = ref
+                    .watch(libraryProvider)
+                    .isRouteSaved(state.from!.id, state.to!.id);
+                return IconButton(
+                  icon: Icon(saved ? Icons.bookmark : Icons.bookmark_border),
+                  tooltip: saved ? 'Route entfernen' : 'Route speichern',
+                  onPressed: () {
+                    ref
+                        .read(libraryProvider.notifier)
+                        .toggleRoute(state.from!, state.to!);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        duration: const Duration(seconds: 2),
+                        content: Text(
+                          saved ? 'Route entfernt' : 'Route gespeichert',
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
           // Bestpreis over the whole day (#21) — needs only the route, so it's
           // offered as soon as both stations are set, before any search.
           if (state.from != null && state.to != null)
@@ -130,10 +129,8 @@ class _ConnectionSearchScreenState
             IconButton(
               icon: const Icon(Icons.price_check),
               tooltip: 'Preise vergleichen (Split-Ticket für alle)',
-              onPressed: () => context.push(
-                '/split-compare',
-                extra: state.sortedJourneys,
-              ),
+              onPressed: () =>
+                  context.push('/split-compare', extra: state.sortedJourneys),
             ),
           if (state.result != null)
             PopupMenuButton<JourneySortMode>(
@@ -141,14 +138,19 @@ class _ConnectionSearchScreenState
               tooltip: 'Sortierung',
               onSelected: notifier.setSortMode,
               itemBuilder: (_) => [
-                _sortItem(
-                    JourneySortMode.departure, 'Abfahrt', state.sortMode),
+                _sortItem(JourneySortMode.departure, 'Abfahrt', state.sortMode),
                 _sortItem(JourneySortMode.arrival, 'Ankunft', state.sortMode),
                 _sortItem(JourneySortMode.duration, 'Dauer', state.sortMode),
                 _sortItem(
-                    JourneySortMode.transfers, 'Umstiege', state.sortMode),
-                _sortItem(JourneySortMode.reliability, 'Zuverlässigkeit',
-                    state.sortMode),
+                  JourneySortMode.transfers,
+                  'Umstiege',
+                  state.sortMode,
+                ),
+                _sortItem(
+                  JourneySortMode.reliability,
+                  'Zuverlässigkeit',
+                  state.sortMode,
+                ),
               ],
             ),
         ],
@@ -216,10 +218,13 @@ class _ConnectionSearchScreenState
                         child: OutlinedButton.icon(
                           style: OutlinedButton.styleFrom(
                             padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 10),
+                              horizontal: 12,
+                              vertical: 10,
+                            ),
                             alignment: Alignment.centerLeft,
                             shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12)),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
                           ),
                           icon: const Icon(Icons.people_outline, size: 20),
                           label: Row(
@@ -227,8 +232,11 @@ class _ConnectionSearchScreenState
                               Expanded(
                                 child: Text(
                                   ref
-                                      .watch(settingsProvider
-                                          .select((s) => s.searchParty))
+                                      .watch(
+                                        settingsProvider.select(
+                                          (s) => s.searchParty,
+                                        ),
+                                      )
                                       .summary,
                                   style: theme.textTheme.bodyMedium,
                                 ),
@@ -261,17 +269,22 @@ class _ConnectionSearchScreenState
                                 isDense: true,
                                 prefixIcon: Icon(Icons.access_time, size: 18),
                                 prefixIconConstraints: BoxConstraints(
-                                    minWidth: 34, minHeight: 34),
+                                  minWidth: 34,
+                                  minHeight: 34,
+                                ),
                                 contentPadding: EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 8),
+                                  horizontal: 8,
+                                  vertical: 8,
+                                ),
                               ),
                               child: Row(
                                 children: [
                                   Expanded(
                                     child: Text(
                                       state.dateTime != null
-                                          ? DateFormat('dd.MM. HH:mm')
-                                              .format(state.dateTime!)
+                                          ? DateFormat(
+                                              'dd.MM. HH:mm',
+                                            ).format(state.dateTime!)
                                           : 'Jetzt',
                                       style: theme.textTheme.bodyMedium,
                                     ),
@@ -315,7 +328,8 @@ class _ConnectionSearchScreenState
                             // default stadium pill, which looked oddly clipped
                             // squeezed into this stretched row.
                             shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12)),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
                             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                           ),
                           onPressed: state.isLoading ? null : _search,
@@ -324,7 +338,9 @@ class _ConnectionSearchScreenState
                                   width: 18,
                                   height: 18,
                                   child: CircularProgressIndicator(
-                                      strokeWidth: 2, color: Colors.white),
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
                                 )
                               : const Icon(Icons.search, size: 24),
                         ),
@@ -355,8 +371,7 @@ class _ConnectionSearchScreenState
     return OutlinedButton(
       style: OutlinedButton.styleFrom(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         // An active constraint must be visible without opening the sheet —
         // otherwise a search silently missing connections looks like DB's
         // fault.
@@ -397,8 +412,11 @@ class _ConnectionSearchScreenState
     );
   }
 
-  Widget _buildResults(BuildContext context, JourneySearchState state,
-      JourneySearchNotifier notifier) {
+  Widget _buildResults(
+    BuildContext context,
+    JourneySearchState state,
+    JourneySearchNotifier notifier,
+  ) {
     if (state.error != null) {
       return Center(
         child: Padding(
@@ -406,13 +424,17 @@ class _ConnectionSearchScreenState
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.error_outline, size: 40,
-                  color: Theme.of(context).colorScheme.error),
+              Icon(
+                Icons.error_outline,
+                size: 40,
+                color: Theme.of(context).colorScheme.error,
+              ),
               const SizedBox(height: 12),
-              Text(state.error!,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      color: Theme.of(context).colorScheme.error)),
+              Text(
+                state.error!,
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
             ],
           ),
         ),
@@ -423,8 +445,10 @@ class _ConnectionSearchScreenState
       return const Center(
         child: Padding(
           padding: EdgeInsets.all(32),
-          child: Text('Start und Ziel eingeben, um Verbindungen zu suchen.',
-              textAlign: TextAlign.center),
+          child: Text(
+            'Start und Ziel eingeben, um Verbindungen zu suchen.',
+            textAlign: TextAlign.center,
+          ),
         ),
       );
     }
@@ -444,12 +468,13 @@ class _ConnectionSearchScreenState
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: Text(
-                        state.options.isDefault
-                            ? 'Keine Verbindungen — ggf. einen '
+                      state.options.isDefault
+                          ? 'Keine Verbindungen — ggf. einen '
                                 'Verkehrsmittel-Filter lockern.'
-                            : 'Keine Verbindung passt zu deinen Suchoptionen '
+                          : 'Keine Verbindung passt zu deinen Suchoptionen '
                                 '— tippe oben auf Optionen und lockere sie.',
-                        textAlign: TextAlign.center),
+                      textAlign: TextAlign.center,
+                    ),
                   ),
                 )
               : ListView.builder(
@@ -476,7 +501,10 @@ class _ConnectionSearchScreenState
                             : null,
                       );
                     }
-                    return JourneyCard(journey: journeys[index - 1]);
+                    return JourneyCard(
+                      journey: journeys[index - 1],
+                      fromResults: true,
+                    );
                   },
                 ),
         ),
@@ -531,8 +559,7 @@ class _ConnectionSearchScreenState
             child: Text(
               'Keine Verbindung mit ${profile.minTransferMinutes} min '
               'Umstiegszeit (${profile.label}) — hier sind die knapperen.',
-              style: TextStyle(
-                  fontSize: 11, color: scheme.onTertiaryContainer),
+              style: TextStyle(fontSize: 11, color: scheme.onTertiaryContainer),
             ),
           ),
         ],
@@ -540,8 +567,11 @@ class _ConnectionSearchScreenState
     );
   }
 
-  Widget _productFilterBar(BuildContext context, JourneySearchState state,
-      JourneySearchNotifier notifier) {
+  Widget _productFilterBar(
+    BuildContext context,
+    JourneySearchState state,
+    JourneySearchNotifier notifier,
+  ) {
     return SizedBox(
       height: 38,
       child: ListView(
@@ -577,8 +607,12 @@ class _ConnectionSearchScreenState
     );
   }
 
-  Widget _paginationButton(BuildContext context, String label, IconData icon,
-      VoidCallback? onPressed) {
+  Widget _paginationButton(
+    BuildContext context,
+    String label,
+    IconData icon,
+    VoidCallback? onPressed,
+  ) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 1),
       child: OutlinedButton.icon(
@@ -596,7 +630,10 @@ class _ConnectionSearchScreenState
   }
 
   PopupMenuEntry<JourneySortMode> _sortItem(
-      JourneySortMode mode, String label, JourneySortMode current) {
+    JourneySortMode mode,
+    String label,
+    JourneySortMode current,
+  ) {
     return PopupMenuItem(
       value: mode,
       child: Row(
@@ -628,8 +665,13 @@ class _ConnectionSearchScreenState
     );
     if (time == null) return;
 
-    final dt =
-        DateTime(date.year, date.month, date.day, time.hour, time.minute);
+    final dt = DateTime(
+      date.year,
+      date.month,
+      date.day,
+      time.hour,
+      time.minute,
+    );
     ref.read(journeySearchProvider.notifier).setDateTime(dt);
   }
 }
@@ -674,8 +716,8 @@ class _AbAnToggle extends StatelessWidget {
               color: !enabled
                   ? cs.onSurface.withValues(alpha: 0.38)
                   : selected
-                      ? cs.onSecondaryContainer
-                      : cs.onSurfaceVariant,
+                  ? cs.onSecondaryContainer
+                  : cs.onSurfaceVariant,
             ),
           ),
         ),

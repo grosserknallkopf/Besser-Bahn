@@ -141,12 +141,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         // no station search field and no app overflow menu — just this map.
         builder: (context, state) => const StationMapScreen(dedicated: true),
       ),
-      // Full multi-leg connection detail (pushed from a search result).
+      // Full multi-leg connection detail. `?src=search` marks the ways in that
+      // came from a result list — those hide the "search this route again"
+      // action, which there is just the back button (#25).
       GoRoute(
         path: '/connection',
         parentNavigatorKey: _rootNavigatorKey,
-        builder: (context, state) =>
-            ConnectionDetailScreen(journey: state.extra as Journey),
+        builder: (context, state) => ConnectionDetailScreen(
+          journey: state.extra as Journey,
+          fromSearch: state.uri.queryParameters['src'] == 'search',
+        ),
       ),
       // Split-ticket analysis pushed from a connection (above the tab shell) so
       // it gets a real back button — unlike the /split tab which has none.

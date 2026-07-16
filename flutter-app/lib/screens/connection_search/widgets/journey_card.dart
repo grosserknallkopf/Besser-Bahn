@@ -24,10 +24,16 @@ class JourneyCard extends ConsumerWidget {
   /// full connection-detail screen.
   final VoidCallback? onTap;
 
+  /// This card sits in a list of search results, so the detail screen it opens
+  /// has those alternatives right behind its back button (#25). False for the
+  /// same card standing in for a saved trip or a booked ticket.
+  final bool fromResults;
+
   const JourneyCard({
     super.key,
     required this.journey,
     this.onTap,
+    this.fromResults = false,
   });
 
   @override
@@ -53,7 +59,9 @@ class JourneyCard extends ConsumerWidget {
         onTap: onTap ??
             () {
               // Show the FULL connection (all legs + transfers), not just leg 1.
-              context.push('/connection', extra: journey);
+              context.push(
+                  fromResults ? '/connection?src=search' : '/connection',
+                  extra: journey);
             },
         // Long-press shares the official bahn.de "Reise teilen" link to this
         // exact connection — no need to open the detail screen first.
