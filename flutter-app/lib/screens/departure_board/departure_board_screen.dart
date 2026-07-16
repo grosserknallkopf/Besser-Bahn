@@ -6,6 +6,7 @@ import '../../models/departure.dart';
 import '../../providers/departure_board_provider.dart';
 import '../../providers/nearby_tab_provider.dart';
 import '../../providers/train_lookup_provider.dart';
+import '../../widgets/app_nav_bar.dart';
 import '../../widgets/station_search_field.dart';
 import '../../widgets/delay_badge.dart';
 import '../../widgets/platform_badge.dart';
@@ -194,7 +195,8 @@ class _DepartureBoardScreenState extends ConsumerState<DepartureBoardScreen>
       onRefresh: () =>
           ref.read(departureBoardProvider.notifier).refreshSilent(),
       child: ListView.separated(
-        padding: const EdgeInsets.only(bottom: 32),
+        // Clear the floating nav bar — it hovers over this list.
+        padding: EdgeInsets.only(bottom: 32 + AppNavBar.insetOf(context)),
         itemCount: departures.length,
         separatorBuilder: (_, __) => const Divider(height: 1, indent: 72),
         itemBuilder: (context, index) {

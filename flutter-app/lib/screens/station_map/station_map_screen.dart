@@ -15,6 +15,7 @@ import '../../providers/station_map_provider.dart';
 import '../../services/location_service.dart';
 import '../../theme/app_colors.dart';
 import '../../widgets/app_map.dart';
+import '../../widgets/app_nav_bar.dart';
 import '../../widgets/bay_departures_sheet.dart';
 import '../../widgets/app_menu_button.dart';
 import '../../widgets/embedded_action_bar.dart';
@@ -365,6 +366,11 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
       );
     }
 
+    // The map itself runs full-bleed under the floating nav bar (that's the
+    // point of the glass), but the controls anchored to the bottom edge would
+    // sit under it forever — lift them by the bar's footprint.
+    final navInset = AppNavBar.insetOf(context);
+
     return Stack(
       children: [
         AppMap(
@@ -434,7 +440,7 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
         Positioned(
           left: 8,
           top: 8,
-          bottom: 8,
+          bottom: 8 + navInset,
           // Centre vertically and let the switcher size to its floor count —
           // no full-height stretch.
           child: Align(
@@ -448,7 +454,7 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
         ),
         Positioned(
           right: 8,
-          bottom: 8,
+          bottom: 8 + navInset,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             mainAxisSize: MainAxisSize.min,
@@ -482,7 +488,7 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
           Positioned(
             left: 0,
             right: 0,
-            bottom: 16,
+            bottom: 16 + navInset,
             child: Center(child: _DistanceChip(metres: _distanceToTarget(map))),
           ),
         // Inline POI card — shown over the map (not a bottom sheet).

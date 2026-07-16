@@ -7,6 +7,7 @@ import '../../models/library_models.dart';
 import '../../providers/journey_search_provider.dart';
 import '../../providers/library_provider.dart';
 import '../../providers/settings_provider.dart';
+import '../../widgets/app_nav_bar.dart';
 import '../../widgets/station_search_field.dart';
 import '../../widgets/app_menu_button.dart';
 import 'best_price_screen.dart' show BestPriceArgs;
@@ -492,7 +493,9 @@ class _ConnectionSearchScreenState
                   ),
                 )
               : ListView.builder(
-                  padding: const EdgeInsets.only(bottom: 32),
+                  // Clear the floating nav bar — it hovers over the results.
+                  padding:
+                      EdgeInsets.only(bottom: 32 + AppNavBar.insetOf(context)),
                   itemCount: journeys.length + 2,
                   itemBuilder: (context, index) {
                     if (index == 0) {

@@ -13,6 +13,7 @@ import '../../providers/offline_package_provider.dart';
 import '../../providers/service_providers.dart';
 import '../../providers/travel_stats_provider.dart';
 import '../../widgets/app_menu_button.dart';
+import '../../widgets/app_nav_bar.dart';
 import '../../widgets/offline_package_bar.dart';
 import '../../widgets/trip_progress_card.dart';
 import '../connection_search/widgets/journey_card.dart';
@@ -85,7 +86,9 @@ class JourneysScreen extends ConsumerWidget {
               },
               child: ListView(
                 physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.only(top: 8, bottom: 32),
+                // Clear the floating nav bar — it hovers over this list.
+                padding: EdgeInsets.only(
+                    top: 8, bottom: 32 + AppNavBar.insetOf(context)),
                 children: [
                   // Always-visible live Reisefortschritt for the soonest active
                   // trip (self-hides unless in progress or departing soon) — the

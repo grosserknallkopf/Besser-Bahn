@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../vendor/chuk_ui/chuk_nav_bar.dart';
+import '../../widgets/app_nav_bar.dart';
 import '../../widgets/offline_banner.dart';
 
 class HomeScreen extends StatelessWidget {
@@ -23,6 +25,11 @@ class HomeScreen extends StatelessWidget {
       // Don't lift the bottom nav bar above the soft keyboard — it should sit
       // behind it. Per-tab scaffolds keep their own resize behaviour.
       resizeToAvoidBottomInset: false,
+      // The glass bar floats *over* the content instead of taking layout space
+      // — that's the whole point of the blur. In exchange, Flutter reports the
+      // bar's height as the body's bottom padding, which the tabs pad their
+      // scrollables and bottom-anchored overlays by (AppNavBar.insetOf).
+      extendBody: true,
       // Offline strip sits above the active tab (collapses to nothing online),
       // so the user always knows when they're on cached data.
       body: Column(
@@ -31,9 +38,9 @@ class HomeScreen extends StatelessWidget {
           Expanded(child: child),
         ],
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _currentIndex(context),
-        onDestinationSelected: (index) {
+      bottomNavigationBar: AppNavBar(
+        index: _currentIndex(context),
+        onChanged: (index) {
           switch (index) {
             case 0:
               context.go('/search');
@@ -45,25 +52,25 @@ class HomeScreen extends StatelessWidget {
               context.go('/profile');
           }
         },
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.search_outlined),
-            selectedIcon: Icon(Icons.search),
+        items: const [
+          ChukNavItem(
+            icon: Icons.search_outlined,
+            activeIcon: Icons.search,
             label: 'Suche',
           ),
-          NavigationDestination(
-            icon: Icon(Icons.bookmark_border),
-            selectedIcon: Icon(Icons.bookmark),
+          ChukNavItem(
+            icon: Icons.bookmark_border,
+            activeIcon: Icons.bookmark,
             label: 'Reisen',
           ),
-          NavigationDestination(
-            icon: Icon(Icons.train_outlined),
-            selectedIcon: Icon(Icons.train),
+          ChukNavItem(
+            icon: Icons.train_outlined,
+            activeIcon: Icons.train,
             label: 'Bahnhof',
           ),
-          NavigationDestination(
-            icon: Icon(Icons.account_circle_outlined),
-            selectedIcon: Icon(Icons.account_circle),
+          ChukNavItem(
+            icon: Icons.account_circle_outlined,
+            activeIcon: Icons.account_circle,
             label: 'Profil',
           ),
         ],

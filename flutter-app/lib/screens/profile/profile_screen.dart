@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import '../../models/db_account.dart';
 import '../../models/db_ticket.dart';
 import '../../providers/account_provider.dart';
+import '../../widgets/app_nav_bar.dart';
 import 'widgets/bahncard_view.dart';
 
 /// "Profil" tab — the signed-in DB account: identity, BahnBonus, BahnCards and
@@ -114,7 +115,10 @@ class _LoggedOutState extends ConsumerState<_LoggedOut> {
     final theme = Theme.of(context);
     return Center(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
+        // Bottom pad clears the floating nav bar, so the login button can
+        // always be scrolled out from under the glass.
+        padding:
+            EdgeInsets.fromLTRB(24, 24, 24, 24 + AppNavBar.insetOf(context)),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -238,7 +242,9 @@ class _LoggedIn extends ConsumerWidget {
       onRefresh: () => ref.read(accountRefreshProvider).refresh(),
       child: ListView(
         physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+        // Clear the floating nav bar — it hovers over this list.
+        padding:
+            EdgeInsets.fromLTRB(16, 12, 16, 32 + AppNavBar.insetOf(context)),
         children: [
           _header(context),
           _refreshStatus(context),

@@ -11,6 +11,7 @@ import '../../services/hafas_service.dart';
 import '../../core/extensions.dart';
 import '../../core/auto_refresh.dart';
 import '../../widgets/app_menu_button.dart';
+import '../../widgets/app_nav_bar.dart';
 import '../../widgets/embedded_action_bar.dart';
 import '../../widgets/station_search_field.dart';
 import '../../widgets/traewelling_logo.dart';
@@ -337,7 +338,8 @@ class _TrainLookupScreenState extends ConsumerState<TrainLookupScreen>
     return RefreshIndicator(
       onRefresh: () => ref.read(trainLookupProvider.notifier).refresh(),
       child: ListView(
-        padding: const EdgeInsets.only(bottom: 32),
+        // Clear the floating nav bar — it hovers over this list.
+        padding: EdgeInsets.only(bottom: 32 + AppNavBar.insetOf(context)),
         children: [
           TrainDetailView(
             trip: trip,
