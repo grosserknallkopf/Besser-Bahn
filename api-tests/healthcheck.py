@@ -2330,18 +2330,95 @@ def check_basemap_offline_bundle() -> str:
             f"pbf {len(tile.content) // 1024} KB, maxzoom {maxzoom}")
 
 
+def _app_user_agent() -> str:
+    """The identifying User-Agent the app actually ships, read out of
+    `AppConstants.userAgent` in the Dart source (not a copy of it) so this
+    check exercises the real string and cannot drift from it."""
+    src = (pathlib.Path(__file__).resolve().parent.parent
+           / "flutter-app" / "lib" / "core" / "constants.dart").read_text()
+    version = re.search(r"appVersion\s*=\s*'([^']+)'", src)
+    ua = re.search(r"userAgent\s*=\n?\s*'(BesserBahn/[^']+)'", src)
+    if not version or not ua:
+        raise CheckError("cannot read AppConstants.appVersion/userAgent from "
+                         "lib/core/constants.dart — did it get renamed?")
+    return ua.group(1).replace("$appVersion", version.group(1))
+
+
+def check_traewelling_user_agent() -> str:
+    """Träwelling gates its entire surface — OAuth token exchange, refresh and
+    the REST API alike — on an *identifiable* User-Agent, answering 403 "No
+    identifiable User-Agent provided" without one. That is what broke the login
+    in #34: the token exchange set no UA, so Dart sent its default
+    `Dart/x (dart:io)`, which is rejected just like a missing one.
+
+    Measured live against traewelling.de: no UA, `Dart/…`, `curl/…` and
+    `python-requests/…` all 403 regardless of the route; our
+    `BesserBahn/<version> (+<repo>)` gets past the gate — 200 on the public
+    `/api/v1/statuses`, 401 on this auth-gated route. The tell is 403 vs 401:
+    403 means "who are you", 401 means the UA was fine and only a token is
+    missing.
+
+    So this pins both directions:
+      - a generic UA must still be refused (the requirement is real, and the
+        `_isRejectedUa` shape our tests reproduce still matches reality), and
+      - the UA the app actually ships must still be accepted (if Träwelling
+        ever tightened the rule against us, the login would break again).
+
+    Soft, like the check-in probe below: an optional third-party social feature,
+    so traewelling.de being down must not fail the whole run.
+    """
+    url = "https://traewelling.de/api/v1/trains/station/autocomplete/Berlin"
+
+    # Direction 1: a generic library UA is refused. (`requests` sends
+    # `python-requests/x` by default — one of the UAs Träwelling blocks.)
+    generic = _get(url, headers={"Accept": "application/json"}, timeout=TIMEOUT)
+    if generic.status_code != 403:
+        raise CheckError(
+            "Träwelling no longer 403s a generic User-Agent "
+            f"(status={generic.status_code}) — the UA rule changed; re-check "
+            "the reproduction in test/traewelling_user_agent_test.dart")
+    if "identifiable User-Agent" not in generic.text:
+        raise CheckError(f"403 but not the UA rejection: {generic.text[:120]}")
+
+    # Direction 2: the UA the app ships is accepted. This is the one that has
+    # to keep working — everything else is diagnosis.
+    ua = _app_user_agent()
+    ours = _get(url, headers={"Accept": "application/json", "User-Agent": ua},
+                timeout=TIMEOUT)
+    if ours.status_code == 403:
+        raise CheckError(
+            f"Träwelling rejects the app's own User-Agent ({ua!r}): "
+            f"{ours.text[:160]} — the Träwelling login is broken (#34)")
+    if ours.status_code in (404, 410):
+        raise CheckError(f"autocomplete path gone (status={ours.status_code})")
+    if ours.status_code not in (200, 401):
+        raise CheckError(f"unexpected status {ours.status_code}")
+
+    return (f"UA rule holds: generic 403, {ua!r} → {ours.status_code}")
+
+
 def check_traewelling_api() -> str:
     """Träwelling REST host the check-in flow rides on. The endpoints we call
     (station autocomplete, departures, trip, checkin) all require a Bearer token
     — without one a *live* endpoint answers 401, while a removed/renamed path is
     404/410. So we assert the autocomplete route still exists (status != 404),
     which confirms the path shape the app builds. Soft: optional social feature,
-    and we can't exercise the authenticated body from CI."""
+    and we can't exercise the authenticated body from CI.
+
+    Sends the app's identifying User-Agent, because Träwelling 403s without one.
+    This check used to tolerate 403 as "reachable" and send no UA — so it went
+    green against the very rejection that made the login fail in #34. A 403 is
+    now a failure here; `check_traewelling_user_agent` owns the UA rule."""
     url = "https://traewelling.de/api/v1/trains/station/autocomplete/Berlin"
-    r = _get(url, headers={"Accept": "application/json"}, timeout=TIMEOUT)
+    r = _get(url,
+             headers={"Accept": "application/json",
+                      "User-Agent": _app_user_agent()},
+             timeout=TIMEOUT)
     if r.status_code in (404, 410):
         raise CheckError(f"autocomplete path gone (status={r.status_code})")
-    if r.status_code not in (200, 401, 403):
+    if r.status_code == 403:
+        raise CheckError(f"403 despite an identifying UA: {r.text[:160]}")
+    if r.status_code not in (200, 401):
         raise CheckError(f"unexpected status {r.status_code}")
     return f"trains/station/autocomplete reachable (status={r.status_code})"
 
@@ -2452,6 +2529,7 @@ CHECKS = [
     ("map bay ↔ departures link", check_bay_departure_link, True),
     ("map Gleis ↔ departures (normalised)", check_gleis_departure_link, False),
     ("bahnhof.de sitemap", check_bahnhof_sitemap, False),
+    ("traewelling UA requirement (#34)", check_traewelling_user_agent, True),
     ("traewelling check-in API", check_traewelling_api, True),
     ("DB account token endpoint (kf_mobile)", check_db_account_token_endpoint, True),
     ("DB account mob endpoints (auth-gated)", check_db_account_endpoints_require_auth, True),

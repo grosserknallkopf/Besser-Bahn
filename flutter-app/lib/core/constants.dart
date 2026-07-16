@@ -10,7 +10,11 @@ class ApiConstants {
   /// DB international web API
   static const dbIntlApiBaseUrl = 'https://int.bahn.de/web/api';
 
-  /// User-Agent mimicking a browser
+  /// User-Agent mimicking a browser.
+  ///
+  /// Deliberately *not* identifying: DB's Akamai edge blocks non-browser
+  /// clients. For APIs that require the opposite — an honest, identifiable
+  /// client — use [AppConstants.userAgent] instead (see #34).
   static const userAgent =
       'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Mobile Safari/537.36';
 
@@ -117,7 +121,26 @@ class AppConstants {
   AppConstants._();
 
   static const appName = 'Bessere Bahn';
-  static const appVersion = '2.0.0';
+
+  /// App version, without the build number.
+  ///
+  /// Must match the `version:` line in `pubspec.yaml` — `test/app_version_test`
+  /// fails the build when the two drift apart. That test is the reason this can
+  /// stay a plain const instead of pulling in `package_info_plus`: it is baked
+  /// in at compile time, needs no plugin channel (so it also works in tests and
+  /// on desktop), yet cannot silently go stale. It had gone stale before — it
+  /// read 2.0.0 while pubspec was already at 2.1.0 (#34).
+  static const appVersion = '2.1.0-rc.2';
+
+  /// Honest, identifying User-Agent for APIs that require one.
+  ///
+  /// Träwelling answers HTTP 403 "No identifiable User-Agent provided" to a
+  /// missing UA *and* to generic library UAs (measured: `Dart/x (dart:io)`,
+  /// `curl/x`, `python-requests/x` are all rejected). Their API guidelines ask
+  /// for an app name + contact URL, so send exactly that rather than a browser
+  /// UA that would merely sneak past the filter (#34).
+  static const userAgent =
+      'BesserBahn/$appVersion (+https://github.com/chuk-development/Besser-Bahn)';
 
   /// Major German stations (EVA numbers) for train number lookup fallback
   static const majorStations = {
