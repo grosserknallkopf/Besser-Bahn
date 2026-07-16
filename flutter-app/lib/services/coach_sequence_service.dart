@@ -18,8 +18,10 @@ class CoachSequenceService {
   /// [category] - Train category: ICE, IC, EC, etc.
   /// [number] - Train number (e.g., 148)
   /// [stationEva] - Station EVA number
-  /// [date] - Date of travel
-  /// [time] - Departure time at the station (ISO 8601)
+  /// [date] - SERVICE date of the run — the one selector that matters (#32)
+  /// [time] - Time of day at the station (ISO 8601). Measured to be ignored by
+  ///   the endpoint; pass the scheduled time anyway so [date] stays the
+  ///   timetable's service date.
   Future<CoachSequence> getCoachSequence({
     required String category,
     required int number,
@@ -132,6 +134,19 @@ class CoachSequenceService {
   /// [trainNumber] - the *train* number (Zugnummer / fahrtNr, e.g. "11266"),
   ///   NOT the line number — a wing train's two portions share the line "RE 7"
   ///   but carry distinct train numbers.
+  /// [departureTime] - the SCHEDULED time at this stop, not the live one.
+  ///
+  /// WHY SCHEDULED (#32). Measured against the live endpoint: the run is
+  /// selected by `date` + category + number + evaNumber, and `time` is ignored
+  /// outright — ICE 205 @ Köln Hbf answered with a byte-identical body for
+  /// every time from −12 h to +12 h as long as `date` stayed the service date.
+  /// So a delay does NOT break the lookup the way it looks like it should…
+  /// except across midnight: [date] is derived from this very DateTime, so a
+  /// live departure that slips past 00:00 rolls it onto the NEXT service date
+  /// and 404s (verified: same train, date+1 → 404). The scheduled time keeps
+  /// the run on its own date, and for a punctual train the two are identical —
+  /// which also makes every caller's cache key agree instead of splitting into
+  /// a planned-keyed and a live-keyed copy of the same sequence.
   Future<CoachSequence?> getCoachSequenceForDeparture({
     required String category,
     required String trainNumber,

@@ -198,7 +198,7 @@ class TrainLookupNotifier extends Notifier<TrainLookupState> {
         category: trip.line.productName,
         trainNumber: trip.line.fahrtNr,
         stationEva: currentStop.stop.id,
-        departureTime: currentStop.departure ?? currentStop.arrival,
+        departureTime: currentStop.sequenceTime,
       );
 
       if (cs != null) {

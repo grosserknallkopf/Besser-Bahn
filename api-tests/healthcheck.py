@@ -2159,6 +2159,107 @@ def check_wagenreihung_transfer_sectors() -> str:
     return "; ".join(parts)
 
 
+def _delayed_board_trains(eva: str, cats: set, min_delay: int = 5) -> list:
+    """Board rows whose realtime departure runs >= min_delay behind the planned
+    one. Returns (category, number, planned, live, delay_min, label)."""
+    out = []
+    for p in _vendo_board(eva):
+        cat = (p.get("kurztext") or "").upper().strip()
+        if cat not in cats:
+            continue
+        plan, live = p.get("abgangsDatum"), p.get("ezAbgangsDatum")
+        if not plan or not live:
+            continue
+        dp, dl = datetime.fromisoformat(plan), datetime.fromisoformat(live)
+        delay = (dl - dp).total_seconds() / 60
+        if delay >= min_delay:
+            out.append((cat, p.get("zugnummer"), dp, dl, delay,
+                        p.get("mitteltext") or f"{cat} {p.get('zugnummer')}"))
+    out.sort(key=lambda x: -x[4])
+    return out
+
+
+def check_wagenreihung_time_key() -> str:
+    """WHICH parameter selects the run (#32) — the semantics the app's cache key
+    and every call site depend on.
+
+    Measured 2026-07-16: `time` is IGNORED. ICE 205 @ Köln Hbf returned a
+    byte-identical body for every time from −12 h to +12 h as long as `date`
+    stayed the service date, and 404'd the moment `date` moved by a day. So the
+    key is date + category + number + evaNumber.
+
+    That is *why* the app asks with the SCHEDULED time: it derives `date` from
+    the same DateTime, so a live time is harmless until a delay pushes it past
+    midnight — then it asks for tomorrow's run and gets nothing, exactly when
+    the rider needs the Wagenreihung most.
+
+    This check nails both halves down:
+      1. a really delayed train answers the SAME for its planned and its live
+         time (proves `time` is not the selector — if DB ever made it one, the
+         app must go back to caring which time it sends);
+      2. the same train on the next day's `date` does NOT return that body
+         (proves `date` IS the selector, so deriving it from a live time across
+         midnight really is a bug).
+
+    Soft: needs a >=5 min delayed long-distance train on the board right now.
+    """
+    delayed = []
+    for eva in (KOELN_HBF, "8000105"):  # Köln, Frankfurt(Main)Hbf
+        delayed += _delayed_board_trains(eva, {"ICE", "IC", "EC"}, min_delay=5)
+        if delayed:
+            break
+    if not delayed:
+        raise _SkipCheck("no delayed long-distance train on the board to probe")
+
+    for (cat, num, dp, dl, delay, label) in delayed[:4]:
+        r_plan = _wagenreihung_get({
+            "administrationId": "80", "category": cat,
+            "date": f"{dp.year}-{dp.month:02d}-{dp.day:02d}",
+            "evaNumber": eva, "number": str(num),
+            "time": dp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+        })
+        if r_plan.status_code != 200:
+            continue  # this train simply isn't served here — try the next
+        r_live = _wagenreihung_get({
+            "administrationId": "80", "category": cat,
+            "date": f"{dl.year}-{dl.month:02d}-{dl.day:02d}",
+            "evaNumber": eva, "number": str(num),
+            "time": dl.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+        })
+        # Same calendar day => `date` is unchanged => must be the same run.
+        if dl.date() == dp.date():
+            if r_live.status_code != 200:
+                raise CheckError(
+                    f"{label} +{delay:.0f}min: planned time 200 but live time "
+                    f"{r_live.status_code} on the SAME service date — `time` "
+                    f"has become a selector; the app's key assumptions (#32) "
+                    f"no longer hold")
+            # Bodies carry live fields (platform/status), so compare the
+            # composition, not the bytes.
+            a = [v.get("vehicleID") for g in r_plan.json().get("groups", [])
+                 for v in (g.get("vehicles") or [])]
+            b = [v.get("vehicleID") for g in r_live.json().get("groups", [])
+                 for v in (g.get("vehicles") or [])]
+            if a != b:
+                raise CheckError(
+                    f"{label} +{delay:.0f}min: planned and live time return "
+                    f"DIFFERENT compositions ({len(a)} vs {len(b)} cars) — "
+                    f"`time` now selects the run (#32)")
+        # `date` is the selector: tomorrow's date must not serve this run.
+        nxt = dp + timedelta(days=1)
+        r_next = _wagenreihung_get({
+            "administrationId": "80", "category": cat,
+            "date": f"{nxt.year}-{nxt.month:02d}-{nxt.day:02d}",
+            "evaNumber": eva, "number": str(num),
+            "time": dp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+        })
+        date_matters = r_next.status_code != 200
+        return (f"{label} +{delay:.0f}min: planned & live time agree "
+                f"(time ignored); next-day date -> {r_next.status_code} "
+                f"({'date is the selector' if date_matters else 'date tolerated'})")
+    raise _SkipCheck("no delayed train that the endpoint actually serves")
+
+
 def check_osm_platform_geometry() -> str:
     """OpenStreetMap platform + rail geometry via Overpass — the accurate track
     centre-line the platform train rides (services/osm_platform_service.dart →
@@ -2445,6 +2546,9 @@ CHECKS = [
     ("wagenreihung wing-train split (RE)", check_wagenreihung_split, True),
     ("wagenreihung transfer sectors (#27)",
      check_wagenreihung_transfer_sectors, True),
+    # Soft: needs a delayed long-distance train on the board right now, so a
+    # punctual board is a skip, not a broken API.
+    ("wagenreihung time-vs-date key (#32)", check_wagenreihung_time_key, True),
     ("osm platform geometry (overpass)", check_osm_platform_geometry, False),
     ("basemap (OpenFreeMap Positron vector)", check_basemap_tiles, True),
     ("basemap offline style bundle (#29)", check_basemap_offline_bundle, True),

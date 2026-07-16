@@ -288,7 +288,10 @@ class LegAlternativeSwitcherState
             category: line.productName,
             trainNumber: line.fahrtNr,
             stationEva: l.origin.id,
-            departureTime: l.departure ?? l.plannedDeparture,
+            // Scheduled first — same key the detail screen reads with (#32),
+            // otherwise a delayed train warms a key nobody looks up and gets
+            // fetched twice.
+            departureTime: l.plannedDeparture ?? l.departure,
           );
     }
   }

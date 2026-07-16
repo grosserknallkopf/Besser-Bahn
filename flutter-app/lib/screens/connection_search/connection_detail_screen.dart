@@ -946,18 +946,21 @@ class _ConnectionDetailScreenState
                 next?.departurePlatform,
                 // Einstieg (primary) = the departing/next train; Ausstieg
                 // (secondary) = the arriving/prev train — each drawn to scale.
+                // SCHEDULED times throughout: the Wagenreihung is keyed by
+                // service date, and a live time that has slipped past midnight
+                // asks for the next day's run (#32).
                 depRef: (next?.line?.fahrtNr.isNotEmpty ?? false)
                     ? (
                         category: next!.line?.productName ?? '',
                         trainNumber: next.line!.fahrtNr,
-                        time: _liveDepartureOf(next) ?? next.departure,
+                        time: next.plannedDeparture ?? next.departure,
                       )
                     : null,
                 arrRef: (prev?.line?.fahrtNr.isNotEmpty ?? false)
                     ? (
                         category: prev!.line?.productName ?? '',
                         trainNumber: prev.line!.fahrtNr,
-                        time: _liveArrivalOf(prev) ?? prev.arrival,
+                        time: prev.plannedArrival ?? prev.arrival,
                       )
                     : null,
                 // ORIGIN refs → each train's real composition, fetched at its
@@ -967,7 +970,7 @@ class _ConnectionDetailScreenState
                         category: next!.line?.productName ?? '',
                         trainNumber: next.line!.fahrtNr,
                         originEva: next.origin.id,
-                        departureTime: next.departure,
+                        departureTime: next.plannedDeparture ?? next.departure,
                       )
                     : null,
                 arrFallbackRef: (prev?.line?.fahrtNr.isNotEmpty ?? false)
@@ -975,7 +978,7 @@ class _ConnectionDetailScreenState
                         category: prev!.line?.productName ?? '',
                         trainNumber: prev.line!.fahrtNr,
                         originEva: prev.origin.id,
-                        departureTime: prev.departure,
+                        departureTime: prev.plannedDeparture ?? prev.departure,
                       )
                     : null,
                 product: next?.line?.product, // Einstieg (primary)
@@ -1080,12 +1083,13 @@ class _ConnectionDetailScreenState
                 // ORIGIN refs → real per-car compositions for both trains,
                 // fetched at each train's origin so the Ausstieg train draws to
                 // scale even where this transfer stop's Wagenreihung 404s.
+                // Scheduled times: keyed by service date (#32).
                 depFallbackRef: (next.line?.fahrtNr.isNotEmpty ?? false)
                     ? (
                         category: next.line?.productName ?? '',
                         trainNumber: next.line!.fahrtNr,
                         originEva: next.origin.id,
-                        departureTime: next.departure,
+                        departureTime: next.plannedDeparture ?? next.departure,
                       )
                     : null,
                 arrFallbackRef: (prev.line?.fahrtNr.isNotEmpty ?? false)
@@ -1093,7 +1097,7 @@ class _ConnectionDetailScreenState
                         category: prev.line?.productName ?? '',
                         trainNumber: prev.line!.fahrtNr,
                         originEva: prev.origin.id,
-                        departureTime: prev.departure,
+                        departureTime: prev.plannedDeparture ?? prev.departure,
                       )
                     : null,
                 product: next.line?.product, // Einstieg (primary)
@@ -1377,7 +1381,10 @@ class _LegSectionState extends ConsumerState<_LegSection>
           category: leg.line?.productName ?? '',
           trainNumber: leg.line?.fahrtNr ?? '',
           stationEva: leg.origin.id,
-          departureTime: leg.departure,
+          // Scheduled, not live: the endpoint keys on the service DATE, which
+          // is derived from this DateTime — a delay past midnight would ask for
+          // tomorrow's run and 404 (#32).
+          departureTime: leg.plannedDeparture ?? leg.departure,
         )
         .catchError((_) => null);
     try {
@@ -1457,7 +1464,8 @@ class _LegSectionState extends ConsumerState<_LegSection>
               ? (
                   category: leg.line?.productName ?? '',
                   trainNumber: leg.line!.fahrtNr,
-                  time: stop.departure ?? stop.arrival,
+                  // Scheduled — keyed by service date, see #32.
+                  time: stop.sequenceTime,
                 )
               : null,
           // The leg's composition (fetched at its origin) — the fallback so we
@@ -1472,7 +1480,7 @@ class _LegSectionState extends ConsumerState<_LegSection>
                   category: leg.line?.productName ?? '',
                   trainNumber: leg.line!.fahrtNr,
                   originEva: leg.origin.id,
-                  departureTime: leg.departure,
+                  departureTime: leg.plannedDeparture ?? leg.departure,
                 )
               : null,
           product: leg.line?.product,
