@@ -194,7 +194,7 @@ class OfflinePackageService {
       final time = leg.plannedDeparture ?? leg.departure;
       if (line == null || time == null || leg.origin.id.isEmpty) continue;
       final k = CoachSequenceService.sequenceKeyFor(line.productName, line.fahrtNr);
-      if (k == null) continue; // S-Bahn/bus/tram — no Wagenreihung exists
+      if (k == null) continue; // bus/tram — no Wagenreihung exists
       targets.add((
         key: CoachSequenceService.cacheKeyFor(
             category: k.category,

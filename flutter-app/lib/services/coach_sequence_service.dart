@@ -72,7 +72,7 @@ class CoachSequenceService {
 
   /// Normalise a leg's product + train number the way the vehicle-sequence
   /// endpoint expects, or null when this train has no sequence to fetch
-  /// (S-Bahn/bus/tram, or an unparseable number). Shared so the offline package
+  /// (bus/tram/U-Bahn, or an unparseable number). Shared so the offline package
   /// decides "is there a Wagenreihung here at all?" by exactly the same rule the
   /// live fetch uses — otherwise a package would report a part as missing that
   /// was never fetchable.
@@ -123,14 +123,33 @@ class CoachSequenceService {
   /// (ICE/IC/EC) *and* the regional trains (RE/RB/IRE) — the latter matters for
   /// wing trains (Flügelzüge, e.g. the RE7 that splits in Neumünster into a Kiel
   /// and a Flensburg portion): the Wagenreihung is the only source that says
-  /// *which* coaches go where. S-Bahn / bus / tram have no sequence → skipped.
+  /// *which* coaches go where.
+  ///
+  /// `S` is in the list despite the old "S-Bahn has no sequence" rule, which was
+  /// simply wrong (#33). Measured over 9 networks (3 departures each, real
+  /// endpoint, not DB's own board flag — that flag claims a Wagenreihung for
+  /// München/Stuttgart/Frankfurt and then 404s): it is per-NETWORK and
+  /// all-or-nothing, not random.
+  ///
+  ///   served 3/3  Rhein-Neckar (Heidelberg), Rhein-Ruhr (Essen),
+  ///               Nürnberg, Dresden          → real cars, metres and sectors
+  ///   served 0/3  Hamburg, Berlin, München, Stuttgart, Rhein-Main → 404
+  ///
+  /// So roughly half of all S-Bahn departures carry one, and where a network
+  /// doesn't, the endpoint 404s and the app stays quiet exactly as it already
+  /// does for a regional train's terminus. Worth having: the Rhein-Neckar S-Bahn
+  /// even splits (S1 Homburg / S3 Germersheim portions coupled together), which
+  /// is precisely the "which portion do I board" case this data exists for.
+  ///
+  /// Bus / tram / U-Bahn have no sequence → still skipped.
   static const _coachCategories = {
     'ICE', 'IC', 'EC', 'ECE', 'RE', 'RB', 'IRE', 'RJ', 'RJX', 'EN', 'NJ', 'D',
+    'S',
   };
 
   /// Get coach sequence for a train portion.
   ///
-  /// [category] - product (ICE, IC, RE, RB, …).
+  /// [category] - product (ICE, IC, RE, RB, S, …).
   /// [trainNumber] - the *train* number (Zugnummer / fahrtNr, e.g. "11266"),
   ///   NOT the line number — a wing train's two portions share the line "RE 7"
   ///   but carry distinct train numbers.

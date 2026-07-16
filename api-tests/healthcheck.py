@@ -2260,6 +2260,64 @@ def check_wagenreihung_time_key() -> str:
     raise _SkipCheck("no delayed train that the endpoint actually serves")
 
 
+def check_wagenreihung_sbahn() -> str:
+    """S-Bahnen DO have a Wagenreihung (#33) — the app fetches them.
+
+    They were excluded for years on the premise "S-Bahn hat keine Sequenz".
+    Measured 2026-07-16 against the real endpoint (3 departures per network):
+    it's per-network and all-or-nothing, not random —
+
+      served  Rhein-Neckar (Heidelberg), Rhein-Ruhr (Essen), Nürnberg, Dresden
+      404     Hamburg, Berlin, München, Stuttgart, Rhein-Main
+
+    Note DB's OWN board flag `wagenreihung: true` is NOT evidence: München,
+    Stuttgart and Frankfurt set it and then 404. Only the endpoint counts.
+
+    Soft, and deliberately weak: it asserts that SOME S-Bahn network still
+    serves sequences, not that any particular one does. A single network
+    dropping out is DB's business; all of them dropping out means the `S`
+    category earns nothing but wasted requests and should come back out.
+    """
+    tried = served = 0
+    detail = []
+    for name, eva in (("Rhein-Neckar", "8000156"),  # Heidelberg Hbf
+                      ("Rhein-Ruhr", "8000098"),    # Essen Hbf
+                      ("Nürnberg", "8000284")):
+        rows = [p for p in _vendo_board(eva)
+                if (p.get("kurztext") or "").upper().strip() == "S"
+                and p.get("abgangsDatum")]
+        for p in rows[:2]:
+            tried += 1
+            seq = _wagenreihung("S", p.get("zugnummer"), eva,
+                                datetime.fromisoformat(p["abgangsDatum"]))
+            if not seq or not seq.get("groups"):
+                continue
+            cars = [v for g in seq["groups"] for v in (g.get("vehicles") or [])]
+            positioned = [c for c in cars
+                          if isinstance(c.get("platformPosition"), dict)
+                          and (c["platformPosition"].get("end", 0)
+                               - c["platformPosition"].get("start", 0)) > 0]
+            if not positioned:
+                # A sequence with no metres is useless to the drawing — the app
+                # would fetch it and draw nothing.
+                continue
+            served += 1
+            detail.append(f"{name} {p.get('mitteltext')}: {len(cars)} cars, "
+                          f"{len(positioned)} positioned, "
+                          f"{len(seq['groups'])} portion(s)")
+            break
+        if served:
+            break
+    if not tried:
+        raise _SkipCheck("no S-Bahn departures on the boards to probe")
+    if not served:
+        raise CheckError(
+            f"no S-Bahn sequence served across {tried} probes in Rhein-Neckar/"
+            f"Rhein-Ruhr/Nürnberg — the `S` category in "
+            f"coach_sequence_service.dart now only costs 404s (#33)")
+    return "; ".join(detail)
+
+
 def check_osm_platform_geometry() -> str:
     """OpenStreetMap platform + rail geometry via Overpass — the accurate track
     centre-line the platform train rides (services/osm_platform_service.dart →
@@ -2546,9 +2604,11 @@ CHECKS = [
     ("wagenreihung wing-train split (RE)", check_wagenreihung_split, True),
     ("wagenreihung transfer sectors (#27)",
      check_wagenreihung_transfer_sectors, True),
-    # Soft: needs a delayed long-distance train on the board right now, so a
-    # punctual board is a skip, not a broken API.
+    # Soft: both need the right train on the board right now (a delayed
+    # long-distance run / an S-Bahn in a served network), so a quiet board is a
+    # skip, not a broken API.
     ("wagenreihung time-vs-date key (#32)", check_wagenreihung_time_key, True),
+    ("wagenreihung S-Bahn served (#33)", check_wagenreihung_sbahn, True),
     ("osm platform geometry (overpass)", check_osm_platform_geometry, False),
     ("basemap (OpenFreeMap Positron vector)", check_basemap_tiles, True),
     ("basemap offline style bundle (#29)", check_basemap_offline_bundle, True),
