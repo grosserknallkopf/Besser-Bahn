@@ -22,9 +22,10 @@
 //     FocusableActionDetector (Tab to reach, Enter/Space to activate). Worth
 //     upstreaming — chuk_ui's own CLAUDE.md requires exactly this.
 //
-// NOTE: upstream's working tree carries an uncommitted tweak dropping the
-// dark-mode rim (`highlight: t.isLight ? white55 : transparent`). Not vendored:
-// this file follows the tagged v0.4.2 code.
+// DELTA vs the tag: the dark-mode rim is dropped (`highlight` transparent
+// unless light). That is upstream's own uncommitted decision from 2026-07-12,
+// not ours to reinvent — v0.4.2 predates it. Drop this delta once chuk_ui
+// tags it.
 
 import 'package:flutter/widgets.dart';
 
@@ -256,7 +257,11 @@ class _ChukNavBarState extends State<ChukNavBar> {
     Widget bar = ChukGlass(
       shape: SquircleBorder(radius: barRadius),
       fill: fill,
-      highlight: Color.fromRGBO(255, 255, 255, t.isLight ? 0.55 : 0.16),
+      // No rim in dark (the supported theme) — the bar lies raw with no border.
+      // Light/glass keeps a faint rim (experimental).
+      highlight: t.isLight
+          ? const Color.fromRGBO(255, 255, 255, 0.55)
+          : const Color(0x00000000),
       blurSigma: 34,
       shadow: s.shadow,
       child: AnimatedSize(
