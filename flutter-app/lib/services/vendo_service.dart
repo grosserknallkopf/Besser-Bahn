@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import '../core/app_log.dart';
 import '../models/station.dart';
 import 'db_api_service.dart' show SegmentPrice;
+import '../models/best_price.dart';
 import '../models/departure.dart';
 import '../models/journey.dart';
 import '../models/trip.dart';
@@ -200,6 +201,115 @@ class VendoService {
           .toList(),
       earlierRef: data['frueherContext'] as String?,
       laterRef: data['spaeterContext'] as String?,
+    );
+  }
+
+  /// The Bestpreis calendar for ONE day: what the trip costs at each time of
+  /// day, in a single request (`POST /mob/angebote/tagesbestpreis`, #21).
+  ///
+  /// Same media type and body as the journey search, minus the pagination
+  /// context. Each interval carries its cheapest `angebotsPreis` plus the full
+  /// connections behind it — `kontext` included, so what comes back here is a
+  /// [Journey] like any other and detail/share/split need no special case.
+  ///
+  /// The alternative is roughly six paginated searches against a backend that
+  /// 429s a client for ~4 minutes after about ten requests in six seconds.
+  Future<BestPriceDay> fetchBestPrices({
+    required String fromLocationId,
+    required String toLocationId,
+    required DateTime date,
+    bool firstClass = false,
+    List<Map<String, dynamic>>? reisende,
+    bool deutschlandTicket = false,
+    List<String>? verkehrsmittel,
+    bool nurDeutschlandTicketVerbindungen = false,
+  }) async {
+    // Midnight: the endpoint prices the whole DAY, so the time of day in the
+    // request is noise — pinning it makes the result cacheable and identical
+    // no matter when the user opened the sheet.
+    final day = DateTime(date.year, date.month, date.day);
+    final body = {
+      'autonomeReservierung': false,
+      'einstiegsTypList': ['STANDARD'],
+      'fahrverguenstigungen': {
+        'deutschlandTicketVorhanden': deutschlandTicket,
+        'nurDeutschlandTicketVerbindungen': nurDeutschlandTicketVerbindungen,
+      },
+      'klasse': firstClass ? 'KLASSE_1' : 'KLASSE_2',
+      'reiseHin': {
+        'wunsch': {
+          'abgangsLocationId': fromLocationId,
+          'alternativeHalteBerechnung': true,
+          'verkehrsmittel': (verkehrsmittel == null || verkehrsmittel.isEmpty)
+              ? const ['ALL']
+              : verkehrsmittel,
+          'zeitWunsch': {
+            'reiseDatum': _isoWithOffset(day),
+            'zeitPunktArt': 'ABFAHRT',
+          },
+          'zielLocationId': toLocationId,
+        },
+      },
+      'reisendenProfil': {
+        'reisende': (reisende == null || reisende.isEmpty)
+            ? [
+                {
+                  'ermaessigungen': ['KEINE_ERMAESSIGUNG KLASSENLOS'],
+                  'reisendenTyp': 'ERWACHSENER',
+                }
+              ]
+            : reisende,
+      },
+      'reservierungsKontingenteVorhanden': false,
+    };
+
+    final url = '$_base/angebote/tagesbestpreis';
+    AppLog.log('POST $url day=${_isoWithOffset(day)} '
+        'klasse=${firstClass ? 1 : 2}', tag: 'vendo');
+    // Bytes, not a String — see searchJourneys: a charset on the vendo media
+    // type is rejected with a 405.
+    final res = await _client
+        .post(Uri.parse(url),
+            headers: _headers(_journeyMedia),
+            body: utf8.encode(json.encode(body)))
+        .timeout(const Duration(seconds: 20));
+    AppLog.log('tagesbestpreis HTTP ${res.statusCode} '
+        '(${res.bodyBytes.length}B)', tag: 'vendo');
+    if (res.statusCode != 200) {
+      throw VendoException(_dbAnzeigeText(res.bodyBytes) ??
+          'Vendo tagesbestpreis HTTP ${res.statusCode}: '
+              '${_snippet(res.bodyBytes)}');
+    }
+    final data = json.decode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+    final intervals = (data['tagesbestPreisIntervalle'] as List<dynamic>? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .map((iv) => _parseBestPriceInterval(iv, firstClass: firstClass))
+        .where((iv) => iv != null)
+        .cast<BestPriceInterval>()
+        .toList();
+    AppLog.log('${intervals.length} price intervals', tag: 'vendo');
+    return BestPriceDay(date: day, intervals: intervals);
+  }
+
+  /// One `tagesbestPreisIntervalle` entry. Null when it has no bounds — those
+  /// are the only field the UI can't do without.
+  BestPriceInterval? _parseBestPriceInterval(Map<String, dynamic> iv,
+      {bool firstClass = false}) {
+    final from = _parse(iv['intervallAb']);
+    final to = _parse(iv['intervallBis']);
+    if (from == null || to == null) return null;
+    final preis = iv['angebotsPreis'] as Map<String, dynamic>?;
+    return BestPriceInterval(
+      from: from,
+      to: to,
+      price: (preis?['betrag'] as num?)?.toDouble(),
+      currency: preis?['waehrung'] as String? ?? 'EUR',
+      isBest: iv['istBestpreis'] as bool? ?? false,
+      isPartialPrice: iv['istTeilpreis'] as bool? ?? false,
+      journeys: (iv['verbindungen'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map((c) => _parseConnection(c, firstClass: firstClass))
+          .toList(),
     );
   }
 

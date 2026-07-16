@@ -965,6 +965,89 @@ def check_vendo_service_days() -> str:
             "its own travel date")
 
 
+def check_vendo_tagesbestpreis() -> str:
+    """The Bestpreis calendar: a whole day of prices in ONE request (#21).
+
+    Same media type and body as /angebote/fahrplan, minus the context. Each
+    interval carries `angebotsPreis` and DB's own `istBestpreis`, plus the full
+    connections — `kontext` included, which is what lets the app hand them
+    straight to the detail/share/split paths instead of re-searching.
+
+    Asserts the parts the app leans on: the interval bounds, that DB flags
+    exactly one best interval, and that a connection still carries a kontext.
+    """
+    media = "application/x.db.vendo.mob.verbindungssuche.v9+json"
+    koeln = "A=1@O=Köln Hbf@X=6958730@Y=50943029@U=80@L=8000207@"
+    body = {
+        "autonomeReservierung": False,
+        "einstiegsTypList": ["STANDARD"],
+        "fahrverguenstigungen": {
+            "deutschlandTicketVorhanden": False,
+            "nurDeutschlandTicketVerbindungen": False,
+        },
+        "klasse": "KLASSE_2",
+        "reiseHin": {"wunsch": {
+            "abgangsLocationId": koeln,
+            "alternativeHalteBerechnung": True,
+            "verkehrsmittel": ["ALL"],
+            "zeitWunsch": {
+                "reiseDatum": (datetime.now().astimezone() + timedelta(days=6))
+                .replace(hour=0, minute=0, second=0,
+                         microsecond=0).isoformat(),
+                "zeitPunktArt": "ABFAHRT",
+            },
+            "zielLocationId": BERLIN_LOC,
+        }},
+        "reisendenProfil": {"reisende": [{
+            "ermaessigungen": ["KEINE_ERMAESSIGUNG KLASSENLOS"],
+            "reisendenTyp": "ERWACHSENER",
+        }]},
+        "reservierungsKontingenteVorhanden": False,
+    }
+    r = _post(
+        "https://app.services-bahn.de/mob/angebote/tagesbestpreis",
+        headers=_vendo_headers(media), data=json.dumps(body), timeout=TIMEOUT,
+    )
+    r.raise_for_status()
+    intervals = r.json().get("tagesbestPreisIntervalle", [])
+    if not intervals:
+        raise CheckError("no tagesbestPreisIntervalle returned")
+
+    best = 0
+    priced = 0
+    kontext_seen = False
+    for iv in intervals:
+        if not iv.get("intervallAb") or not iv.get("intervallBis"):
+            raise CheckError("interval without intervallAb/intervallBis — the "
+                             "app drops those, the calendar would lose a slot")
+        if iv.get("istBestpreis"):
+            best += 1
+        preis = iv.get("angebotsPreis")
+        if preis is not None:
+            priced += 1
+            if not isinstance(preis.get("betrag"), (int, float)):
+                raise CheckError("angebotsPreis.betrag is not a number")
+        for c in iv.get("verbindungen", []):
+            if c.get("verbindung", {}).get("kontext"):
+                kontext_seen = True
+            else:
+                raise CheckError("a Bestpreis connection has no kontext — "
+                                 "detail/share/split would break on it")
+
+    if best != 1:
+        raise CheckError(f"{best} intervals flagged istBestpreis (expected "
+                         "exactly 1) — the app marks what DB marks")
+    if not priced:
+        raise CheckError("no interval carried angebotsPreis")
+    if not kontext_seen:
+        raise CheckError("no connections in any interval")
+
+    cheapest = min(iv["angebotsPreis"]["betrag"] for iv in intervals
+                   if iv.get("angebotsPreis") and not iv.get("istTeilpreis"))
+    return (f"{len(intervals)} intervals, {priced} priced, best flagged once, "
+            f"cheapest {cheapest} EUR")
+
+
 def check_vendo_journey_party() -> str:
     """Advanced "Reisende & Klasse" search: the app lets you build a party of
     multiple passengers (with explicit ages), a bike and a dog, pick 1st class,
@@ -1785,6 +1868,7 @@ CHECKS = [
     ("vendo search options (#19)", check_vendo_search_options, False),
     ("vendo transfer info (#20.6)", check_vendo_transfer_info, False),
     ("vendo serviceDays (#20.8)", check_vendo_service_days, False),
+    ("vendo tagesbestpreis (#21)", check_vendo_tagesbestpreis, False),
     ("vendo party search (pax/bike/dog/SBA)", check_vendo_journey_party, False),
     ("vendo journey pagination (context)", check_vendo_journey_pagination, False),
     ("vendo weitere abfahrten (segment)", check_vendo_weitere_abfahrten, False),

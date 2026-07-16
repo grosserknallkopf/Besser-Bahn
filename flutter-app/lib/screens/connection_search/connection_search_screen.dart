@@ -9,6 +9,7 @@ import '../../providers/library_provider.dart';
 import '../../providers/settings_provider.dart';
 import '../../widgets/station_search_field.dart';
 import '../../widgets/app_menu_button.dart';
+import 'best_price_screen.dart' show BestPriceArgs;
 import 'widgets/journey_card.dart';
 import 'widgets/reisende_sheet.dart';
 import 'widgets/search_options_sheet.dart';
@@ -110,6 +111,21 @@ class _ConnectionSearchScreenState
                 },
               );
             }),
+          // Bestpreis over the whole day (#21) — needs only the route, so it's
+          // offered as soon as both stations are set, before any search.
+          if (state.from != null && state.to != null)
+            IconButton(
+              icon: const Icon(Icons.savings_outlined),
+              tooltip: 'Bestpreis über den Tag',
+              onPressed: () => context.push(
+                '/best-price',
+                extra: BestPriceArgs(
+                  from: state.from!,
+                  to: state.to!,
+                  date: state.dateTime ?? DateTime.now(),
+                ),
+              ),
+            ),
           if (state.result != null && state.sortedJourneys.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.price_check),

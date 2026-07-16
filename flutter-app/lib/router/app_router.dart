@@ -12,6 +12,7 @@ import '../screens/profile/profile_screen.dart';
 import '../screens/profile/ticket_detail_screen.dart';
 import '../screens/connection_search/connection_detail_screen.dart' show TicketRef;
 import '../screens/connection_search/connection_search_screen.dart';
+import '../screens/connection_search/best_price_screen.dart';
 import '../screens/station_map/station_map_screen.dart';
 import '../screens/connection_search/connection_detail_screen.dart';
 import '../models/journey.dart';
@@ -162,6 +163,16 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         parentNavigatorKey: _rootNavigatorKey,
         builder: (context, state) => BulkSplitScreen(
             journeys: (state.extra as List<Journey>?) ?? const []),
+      ),
+      // Bestpreis calendar: what this trip costs across the whole day (#21).
+      GoRoute(
+        path: '/best-price',
+        parentNavigatorKey: _rootNavigatorKey,
+        builder: (context, state) {
+          final args = state.extra as BestPriceArgs;
+          return BestPriceScreen(
+              from: args.from, to: args.to, date: args.date);
+        },
       ),
       // A single train's run, pushed (with back button) from a connection leg
       // or anywhere — renders the same train view as the tab.
