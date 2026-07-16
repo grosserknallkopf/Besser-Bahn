@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart'
+    show AndroidWebViewController;
 
 import '../../../models/db_account.dart';
 import '../../../providers/account_provider.dart';
@@ -256,6 +258,16 @@ class _BahnCardHtmlState extends State<_BahnCardHtml> {
       ..setJavaScriptMode(JavaScriptMode.disabled)
       ..setBackgroundColor(Colors.transparent)
       ..loadHtmlString(html);
+    // The CSS above only hides the scrollbar the PAGE draws. Android's system
+    // WebView draws its own overlay scrollbar on top of that, which no
+    // stylesheet can reach — the platform view has to be told. The ticket view
+    // already learned this the hard way; the BahnCard never got the same
+    // treatment, so a scrollbar rode along the card face. No-op off Android.
+    final platform = _controller.platform;
+    if (platform is AndroidWebViewController) {
+      platform.setVerticalScrollBarEnabled(false);
+      platform.setHorizontalScrollBarEnabled(false);
+    }
   }
 
   @override
