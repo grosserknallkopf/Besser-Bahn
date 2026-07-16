@@ -32,6 +32,11 @@ class LegAlternativeSwitcher extends ConsumerStatefulWidget {
   /// Where you change into this train — shown in the at-risk message.
   final String? transferStationName;
 
+  /// DB says the transfer into this train stays on one platform
+  /// (`weiterfahrtAmGleichenBahnsteig`, #20 point 6) — no stairs, no lift, so
+  /// the profile has no walk to price.
+  final bool samePlatformTransfer;
+
   const LegAlternativeSwitcher({
     super.key,
     required this.leg,
@@ -40,6 +45,7 @@ class LegAlternativeSwitcher extends ConsumerStatefulWidget {
     this.incomingGapMinutes,
     this.readyAt,
     this.transferStationName,
+    this.samePlatformTransfer = false,
   });
 
   @override
@@ -61,7 +67,8 @@ class LegAlternativeSwitcherState
   int? get _gap {
     final planned = widget.incomingGapMinutes;
     if (planned == null) return null;
-    return ref.read(settingsProvider).transferProfile.effectiveGap(planned);
+    return ref.read(settingsProvider).transferProfile.effectiveGap(planned,
+        samePlatform: widget.samePlatformTransfer);
   }
 
   bool get _atRisk => _gap != null && _gap! <= 2;

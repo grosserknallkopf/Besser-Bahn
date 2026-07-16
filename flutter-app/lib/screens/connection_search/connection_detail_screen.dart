@@ -326,6 +326,7 @@ class _ConnectionDetailScreenState
                   incomingGapMinutes: gap,
                   readyAt: readyAt,
                   transferStationName: prev?.destination.name,
+                  samePlatformTransfer: journey.samePlatformTransferInto(legs[i]),
                   // A fresh trip fetch carries live delays → recompute the
                   // transfer windows above so a shrunk gap shows immediately.
                   onTripUpdated: () {
@@ -749,14 +750,40 @@ class _ConnectionDetailScreenState
 
   /// Tone for an available transfer time: red ≤2 min (Anschluss gefährdet),
   /// amber ≤5, else null (normal). Returns (textColor, warningText).
-  (Color?, String?) _transferTone(BuildContext context, int? mins) {
+  ///
+  /// [samePlatform] is DB's `weiterfahrtAmGleichenBahnsteig` (#20, point 6):
+  /// the next train leaves from the platform you're standing on. 3 minutes is
+  /// then genuinely enough, so the amber "knapp" hint would be noise — but a
+  /// train you cannot physically reach (≤2 min) stays red either way.
+  (Color?, String?) _transferTone(BuildContext context, int? mins,
+      {bool samePlatform = false}) {
     if (mins == null) return (null, null);
     if (mins <= 2) {
       return (Theme.of(context).colorScheme.error,
           'Anschluss evtl. nicht erreichbar');
     }
-    if (mins <= 5) return (const Color(0xFFCC8800), null);
+    if (mins <= 5 && !samePlatform) return (const Color(0xFFCC8800), null);
     return (null, null);
+  }
+
+  /// The second line of a transfer tile: what the change actually involves.
+  ///
+  /// DB's own words where it has them (#20, point 6) — "gleicher Bahnsteig"
+  /// when it says so, and the real walking time when the walk crosses between
+  /// stations ("12 min Zeit, davon 7 min Fußweg"). It only sends those for
+  /// inter-station walks; within one station there's nothing but the window
+  /// itself, so the tile stays at the plain "mit Fußweg" it had.
+  String _walkDetail(JourneyLeg leg) {
+    final parts = <String>[
+      if (leg.samePlatformTransfer)
+        'gleicher Bahnsteig'
+      else
+        'mit Fußweg',
+      if (leg.walkingDuration != null)
+        '${leg.walkingDuration!.inMinutes} min Weg',
+      if (leg.walkingDistance != null) '${leg.walkingDistance} m',
+    ];
+    return parts.join(' · ');
   }
 
   /// Minutes from [a] to [b], or null if either time is missing.
@@ -798,10 +825,10 @@ class _ConnectionDetailScreenState
   Widget _walkLeg(BuildContext context, WidgetRef ref, JourneyLeg leg,
       JourneyLeg? prev, JourneyLeg? next) {
     // Available transfer time: from the train's arrival to the next departure.
-    // DB gives NO walk duration — only (sometimes) a distance — so we never
-    // present minutes as how long the walk takes. Use the freshest (live)
-    // times so a delay shrinks the window; strike the scheduled value when it
-    // no longer holds.
+    // Use the freshest (live) times so a delay shrinks the window; strike the
+    // scheduled value when it no longer holds. The leg's own
+    // `verfuegbareZeit` says the same thing, but only for the planned times —
+    // it can't know about today's delay, so it stays out of the headline.
     final liveArr = prev != null ? _liveArrivalOf(prev) : leg.departure;
     final liveDep = next != null ? _liveDepartureOf(next) : leg.arrival;
     final planArr = prev != null
@@ -815,16 +842,17 @@ class _ConnectionDetailScreenState
     final planGap = _gapMinutes(planArr, planDep);
     final shown = liveGap ?? planGap;
     final changed = liveGap != null && planGap != null && liveGap != planGap;
-    final (color, warn) = _transferTone(context, shown);
+    final (color, warn) =
+        _transferTone(context, shown, samePlatform: leg.samePlatformTransfer);
 
     final head = shown != null ? '$shown min zum Umsteigen' : 'Umstieg';
-    final detail = leg.walkingDistance != null
-        ? 'mit Fußweg · ${leg.walkingDistance} m'
-        : 'mit Fußweg';
+    final detail = _walkDetail(leg);
 
     return _transferTile(
       context,
-      icon: Icons.directions_walk,
+      icon: leg.samePlatformTransfer
+          ? Icons.swap_horiz
+          : Icons.directions_walk,
       head: head,
       strikeBefore: changed ? '$planGap min' : null,
       headColor: color,
@@ -940,15 +968,22 @@ class _ConnectionDetailScreenState
     final arrGleis = prev.arrivalPlatform;
     final depGleis = next.departurePlatform;
     final station = prev.destination;
-    final (color, warn) = _transferTone(context, shown);
+    // Vendo models every transfer as a FUSSWEG leg, so this path is for the
+    // other sources; the flag rides on the arriving side there.
+    final samePlatform = next.samePlatformTransfer;
+    final (color, warn) =
+        _transferTone(context, shown, samePlatform: samePlatform);
 
+    // "Gleis 4 → Gleis 5" reads like a hike; DB knows 4 and 5 are two sides of
+    // one island platform and says so.
     final gleisText = (arrGleis != null || depGleis != null)
         ? 'Gleis ${arrGleis ?? '?'} → Gleis ${depGleis ?? '?'}'
-        : null;
+            '${samePlatform ? ' · gleicher Bahnsteig' : ''}'
+        : (samePlatform ? 'gleicher Bahnsteig' : null);
 
     return _transferTile(
       context,
-      icon: Icons.swap_calls,
+      icon: samePlatform ? Icons.swap_horiz : Icons.swap_calls,
       head: shown != null
           ? '$shown min zum Umsteigen in ${station.name}'
           : 'Umstieg in ${station.name}',
@@ -1118,6 +1153,10 @@ class _LegSection extends ConsumerStatefulWidget {
   final DateTime? readyAt;
   final String? transferStationName;
 
+  /// DB says that transfer stays on one platform — the profile then has no
+  /// walk to price (#20, point 6).
+  final bool samePlatformTransfer;
+
   const _LegSection({
     super.key,
     required this.leg,
@@ -1128,6 +1167,7 @@ class _LegSection extends ConsumerStatefulWidget {
     this.incomingGapMinutes,
     this.readyAt,
     this.transferStationName,
+    this.samePlatformTransfer = false,
   });
 
   @override
@@ -1379,6 +1419,7 @@ class _LegSectionState extends ConsumerState<_LegSection>
               index: widget.index,
               onReplace: widget.onReplaceLeg!,
               incomingGapMinutes: widget.incomingGapMinutes,
+              samePlatformTransfer: widget.samePlatformTransfer,
               readyAt: widget.readyAt,
               transferStationName: widget.transferStationName,
             )

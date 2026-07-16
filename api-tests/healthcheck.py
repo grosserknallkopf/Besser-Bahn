@@ -754,6 +754,108 @@ def check_vendo_search_options() -> str:
             f", via → {len(via)} conns / with 60-min stay {len(via_stay)}")
 
 
+def check_vendo_transfer_info() -> str:
+    """DB's own transfer facts, which we used to re-derive or miss (#20.6).
+
+    Two shapes, and the difference matters:
+
+    - a walk BETWEEN stations (Köln Messe/Deutz → …Gl.11-12) carries
+      `verfuegbareZeit` (the window, seconds) next to `abschnittsDauer` (the
+      walk itself) and `distanz`;
+    - a change WITHIN one station carries neither, and `abschnittsDauer` is
+      the whole window again.
+
+    vendo_service therefore only reads `abschnittsDauer` as a walk when
+    `verfuegbareZeit` sits beside it. If DB ever started sending
+    `verfuegbareZeit` on same-station changes too, that rule would start
+    inventing walk times — so assert the pairing, not just the presence.
+
+    `weiterfahrtAmGleichenBahnsteig` rides on the FUSSWEG leg (true also for
+    Gleis 4 → 5 on one island platform) and is what stops the transfer profile
+    warning about the easiest change DB can offer.
+    """
+    media = "application/x.db.vendo.mob.verbindungssuche.v9+json"
+    kiel_augsburg = (
+        "A=1@O=Kiel Hbf@X=10131976@Y=54314982@U=80@L=8000199@",
+        "A=1@O=Augsburg Hbf@X=10885802@Y=48365456@U=80@L=8000013@",
+    )
+    body = {
+        "autonomeReservierung": False,
+        "einstiegsTypList": ["STANDARD"],
+        "fahrverguenstigungen": {
+            "deutschlandTicketVorhanden": False,
+            "nurDeutschlandTicketVerbindungen": False,
+        },
+        "klasse": "KLASSE_2",
+        "reiseHin": {"wunsch": {
+            "abgangsLocationId": kiel_augsburg[0],
+            "alternativeHalteBerechnung": True,
+            "verkehrsmittel": ["ALL"],
+            "zeitWunsch": {
+                "reiseDatum": (datetime.now().astimezone() + timedelta(days=2))
+                .replace(hour=8, minute=0, second=0, microsecond=0).isoformat(),
+                "zeitPunktArt": "ABFAHRT",
+            },
+            "zielLocationId": kiel_augsburg[1],
+        }},
+        "reisendenProfil": {"reisende": [{
+            "ermaessigungen": ["KEINE_ERMAESSIGUNG KLASSENLOS"],
+            "reisendenTyp": "ERWACHSENER",
+        }]},
+        "reservierungsKontingenteVorhanden": False,
+    }
+    r = _post(
+        "https://app.services-bahn.de/mob/angebote/fahrplan",
+        headers=_vendo_headers(media), data=json.dumps(body), timeout=TIMEOUT,
+    )
+    r.raise_for_status()
+    conns = r.json().get("verbindungen", [])
+    if not conns:
+        raise CheckError("no verbindungen returned")
+
+    walks = same_platform = paired = 0
+    adjacent_trains = 0
+    for c in conns:
+        legs = c["verbindung"]["verbindungsAbschnitte"]
+        for a, b in zip(legs, legs[1:]):
+            if a.get("typ") == "FAHRZEUG" and b.get("typ") == "FAHRZEUG":
+                # Every transfer is modelled as a FUSSWEG leg; if that ever
+                # changes, the flag has to be read off the train instead.
+                adjacent_trains += 1
+        for a in legs:
+            if a.get("typ") != "FUSSWEG":
+                continue
+            walks += 1
+            wf = a.get("weiterfahrtAmGleichenBahnsteig")
+            if wf is not None and not isinstance(wf, bool):
+                raise CheckError("weiterfahrtAmGleichenBahnsteig is not a bool")
+            if wf:
+                same_platform += 1
+            vz, dauer = a.get("verfuegbareZeit"), a.get("abschnittsDauer")
+            if vz is None:
+                continue
+            paired += 1
+            if not isinstance(vz, int) or not isinstance(dauer, int):
+                raise CheckError("verfuegbareZeit/abschnittsDauer not ints "
+                                 "(seconds expected)")
+            # The invariant the parser leans on: where DB gives both, the walk
+            # fits inside the window. If they were ever equal on a same-station
+            # change, "X min Weg" would be a window mislabelled as a walk.
+            if dauer > vz:
+                raise CheckError(
+                    f"walk ({dauer}s) longer than the window ({vz}s) — "
+                    "verfuegbareZeit is not the transfer window any more")
+
+    if not walks:
+        raise CheckError("no FUSSWEG legs — transfers are modelled elsewhere "
+                         "now, the same-platform flag moved with them")
+    if adjacent_trains:
+        raise CheckError(f"{adjacent_trains} train→train transfers with no "
+                         "FUSSWEG leg — read the flag off the train too")
+    return (f"{walks} transfers: {same_platform} same-platform, {paired} with "
+            f"verfuegbareZeit+abschnittsDauer paired")
+
+
 def check_vendo_journey_party() -> str:
     """Advanced "Reisende & Klasse" search: the app lets you build a party of
     multiple passengers (with explicit ages), a bike and a dog, pick 1st class,
@@ -1572,6 +1674,7 @@ CHECKS = [
     ("vendo journey + prices (v9)", check_vendo_journey, False),
     ("vendo verkehrsmittel filter (#18)", check_vendo_verkehrsmittel, False),
     ("vendo search options (#19)", check_vendo_search_options, False),
+    ("vendo transfer info (#20.6)", check_vendo_transfer_info, False),
     ("vendo party search (pax/bike/dog/SBA)", check_vendo_journey_party, False),
     ("vendo journey pagination (context)", check_vendo_journey_pagination, False),
     ("vendo weitere abfahrten (segment)", check_vendo_weitere_abfahrten, False),

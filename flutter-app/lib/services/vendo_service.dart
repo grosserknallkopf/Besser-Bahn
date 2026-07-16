@@ -986,6 +986,23 @@ class VendoService {
       arrPlatform = last['ezGleis'] as String? ?? plannedArrPlatform;
     }
 
+    // What DB itself says about this transfer, instead of us re-deriving it
+    // from timestamps (#20, point 6).
+    //
+    // `verfuegbareZeit` (seconds) is the window from the previous train's
+    // arrival to the next one's departure — it matches our computed gap
+    // exactly. It only appears where the walk crosses between two distinct
+    // stations, and there `abschnittsDauer` is the walk itself (Köln Messe/
+    // Deutz: 720s available, 420s walking, 59 m).
+    //
+    // For a change inside one station DB sends neither and `abschnittsDauer`
+    // is the whole window again (Mannheim Hbf: dauer 720 == gap 720). Reading
+    // it as a walk estimate there would invent a 12-minute walk across one
+    // platform — hence both are only taken together.
+    final available = _seconds(a['verfuegbareZeit']);
+    final walkDuration =
+        isWalking && available != null ? _seconds(a['abschnittsDauer']) : null;
+
     TransitLine? line;
     if (!isWalking) {
       line = TransitLine(
@@ -1013,6 +1030,11 @@ class VendoService {
       line: line,
       direction: a['richtung'] as String?,
       isWalking: isWalking,
+      walkingDistance: (a['distanz'] as num?)?.toInt(),
+      walkingDuration: walkDuration,
+      transferAvailable: available,
+      samePlatformTransfer:
+          a['weiterfahrtAmGleichenBahnsteig'] as bool? ?? false,
       cancelled: cancelled,
       stopovers: stopovers,
       occupancy: _occupancy(a['auslastungsInfos'] as List<dynamic>?,
@@ -1149,6 +1171,10 @@ class VendoService {
 
   DateTime? _parse(dynamic v) =>
       v is String ? DateTime.tryParse(v)?.toLocal() : null;
+
+  /// Vendo durations (`verfuegbareZeit`, `abschnittsDauer`) are seconds.
+  Duration? _seconds(dynamic v) =>
+      v is num ? Duration(seconds: v.toInt()) : null;
 
   /// ISO-8601 with the local UTC offset, as the DB Navigator app sends.
   String _isoWithOffset(DateTime dt) {

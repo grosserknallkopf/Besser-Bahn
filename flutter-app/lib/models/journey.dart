@@ -112,6 +112,22 @@ class Journey {
   bool get hasPartialCancellation =>
       !hasCancelledLeg &&
       legs.any((l) => !l.isWalking && l.partiallyCancelled);
+
+  /// Whether the change into [leg] stays on one platform, as DB says
+  /// (`weiterfahrtAmGleichenBahnsteig`, #20 point 6).
+  ///
+  /// Vendo models every transfer as a FUSSWEG leg and puts the flag there, so
+  /// the answer sits on the walk *before* the train, not on the train. The
+  /// fallback reads the train's own flag, for a source that pairs two trains
+  /// without a walk between them.
+  bool samePlatformTransferInto(JourneyLeg leg) {
+    final i = legs.indexOf(leg);
+    if (i <= 0) return false;
+    final before = legs[i - 1];
+    return before.isWalking
+        ? before.samePlatformTransfer
+        : leg.samePlatformTransfer;
+  }
 }
 
 class JourneyLeg {
@@ -132,6 +148,31 @@ class JourneyLeg {
   final String? direction;
   final bool isWalking;
   final int? walkingDistance;
+
+  /// How long DB reckons this walk actually takes (vendo `abschnittsDauer` on
+  /// a FUSSWEG), when it says so — see [transferAvailable].
+  final Duration? walkingDuration;
+
+  /// The full window for this transfer (vendo `verfuegbareZeit`): from the
+  /// previous train's arrival to the next one's departure. Equal to the gap we
+  /// compute from timestamps, but it's DB's own number and it comes with
+  /// [walkingDuration] — together they are "12 min Zeit, 7 min Weg" instead of
+  /// a bare "12 min", which reads as if the whole window were slack.
+  ///
+  /// Only present where the walk crosses between two distinct stations
+  /// (Köln Messe/Deutz → Köln Messe/Deutz Gl.11-12). For a change within one
+  /// station DB sends neither, and `abschnittsDauer` is then just the window
+  /// again — NOT a walk estimate, which is why [walkingDuration] is only read
+  /// alongside this field.
+  final Duration? transferAvailable;
+
+  /// DB's own answer to "do I have to change platforms?"
+  /// (`weiterfahrtAmGleichenBahnsteig`). True also for Gleis 4 → 5 on one
+  /// island platform — you cross to the other side, no stairs, no lift. That
+  /// can't be derived from the Gleis numbers: 4 → 5 may be one platform while
+  /// 8 → 9 is two.
+  final bool samePlatformTransfer;
+
   final bool cancelled;
   final List<LegStopover> stopovers;
   final OccupancyInfo? occupancy;
@@ -174,6 +215,9 @@ class JourneyLeg {
     this.direction,
     this.isWalking = false,
     this.walkingDistance,
+    this.walkingDuration,
+    this.transferAvailable,
+    this.samePlatformTransfer = false,
     this.cancelled = false,
     this.stopovers = const [],
     this.occupancy,
@@ -182,6 +226,16 @@ class JourneyLeg {
     this.replacementArrival,
     this.replacementArrivalPlatform,
   });
+
+  /// Minutes of slack this transfer really leaves: the window minus the walk.
+  /// Null unless DB gave both — never guessed, since "12 min" and "12 min of
+  /// which 7 are walking" are different transfers.
+  int? get transferBufferMinutes {
+    final available = transferAvailable;
+    final walk = walkingDuration;
+    if (available == null || walk == null) return null;
+    return (available - walk).inMinutes;
+  }
 
   bool get hasDeparturePlatformChange =>
       departurePlatform != null &&
@@ -257,6 +311,9 @@ class JourneyLeg {
         'direction': direction,
         'walking': isWalking,
         'distance': walkingDistance,
+        'walkingSeconds': walkingDuration?.inSeconds,
+        'transferAvailableSeconds': transferAvailable?.inSeconds,
+        'samePlatformTransfer': samePlatformTransfer,
         'cancelled': cancelled,
         'stopovers': stopovers.map((s) => s.toJson()).toList(),
         'occupancy': occupancy?.level.name,
@@ -287,6 +344,9 @@ class JourneyLeg {
         direction: json['direction'] as String?,
         isWalking: json['walking'] as bool? ?? false,
         walkingDistance: json['distance'] as int?,
+        walkingDuration: _seconds(json['walkingSeconds']),
+        transferAvailable: _seconds(json['transferAvailableSeconds']),
+        samePlatformTransfer: json['samePlatformTransfer'] as bool? ?? false,
         cancelled: json['cancelled'] as bool? ?? false,
         stopovers: (json['stopovers'] as List<dynamic>? ?? [])
             .whereType<Map<String, dynamic>>()
@@ -468,3 +528,6 @@ DateTime? _parse(dynamic value) {
   if (value is String) return DateTime.tryParse(value);
   return null;
 }
+
+Duration? _seconds(dynamic value) =>
+    value is num ? Duration(seconds: value.toInt()) : null;

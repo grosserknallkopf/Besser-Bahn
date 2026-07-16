@@ -222,7 +222,8 @@ class LiveTripTracker extends Notifier<LiveTripState>
       if (liveArr != null && liveDep != null) {
         final gap = liveDep.difference(liveArr).inMinutes;
         _checkTransfer(next.tripId!, next.line?.displayName ?? 'Anschluss',
-            next.origin.name, gap, liveDep);
+            next.origin.name, gap, liveDep,
+            samePlatform: journey.samePlatformTransferInto(next));
       }
     }
 
@@ -258,11 +259,14 @@ class LiveTripTracker extends Notifier<LiveTripState>
   }
 
   void _checkTransfer(
-      String tripId, String nextLine, String station, int gap, DateTime dep) {
+      String tripId, String nextLine, String station, int gap, DateTime dep,
+      {bool samePlatform = false}) {
     // Judge the gap the way the rider experiences it, so the push and the
     // on-screen risk banner can't disagree about the same transfer (#11.7).
+    // Same platform → nothing to walk, so the profile doesn't scale it (#20.6)
+    // and we don't buzz someone's pocket over a 6-minute step across.
     final profile = ref.read(settingsProvider).transferProfile;
-    final felt = profile.effectiveGap(gap);
+    final felt = profile.effectiveGap(gap, samePlatform: samePlatform);
     if (felt >= 5) return; // comfortable, stay quiet
     final String title, body;
     if (gap < 0) {

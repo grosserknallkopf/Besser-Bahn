@@ -50,8 +50,15 @@ enum TransferProfile {
   /// Scales the gap rather than the thresholds so every consumer — the risk
   /// banner, the live alert, the reliability sort — gets one comparable number
   /// and can't drift apart.
-  int effectiveGap(int plannedGapMinutes) =>
-      (plannedGapMinutes / factor).floor();
+  ///
+  /// [samePlatform] is DB's own `weiterfahrtAmGleichenBahnsteig` (#20, point
+  /// 6). Every factor here prices a *walk* — stairs, lifts, distance, a pram
+  /// on an escalator. Crossing to the other side of one island platform has
+  /// none of that, so there is nothing to scale and 8 minutes really is 8
+  /// minutes, pram or not. Without this the "Barrierearm" rider gets warned
+  /// off the easiest transfer DB can offer them.
+  int effectiveGap(int plannedGapMinutes, {bool samePlatform = false}) =>
+      samePlatform ? plannedGapMinutes : (plannedGapMinutes / factor).floor();
 
   static TransferProfile fromName(String? name) =>
       TransferProfile.values.firstWhere((p) => p.name == name,
