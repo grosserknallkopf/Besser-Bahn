@@ -25,6 +25,7 @@ import '../../providers/station_map_provider.dart';
 import '../../services/db_api_service.dart';
 import '../../services/notification_service.dart';
 import '../../theme/app_colors.dart';
+import '../../utils/split_stops.dart';
 import '../../widgets/departure_card.dart';
 import '../../widgets/fahrgastrechte_card.dart';
 import '../../widgets/prediction_badge.dart';
@@ -530,68 +531,13 @@ class _ConnectionDetailScreenState
   }
 
   void _openSplitTicket(BuildContext context, WidgetRef ref) {
-    final stops = <Map<String, dynamic>>[];
-    // `boundary` = a leg endpoint (start, terminus or transfer) — always kept
-    // when we cap the candidate list, since those are the real rebook points.
-    void add(String id, String name, DateTime? dep, bool boundary) {
-      if (id.isEmpty) return;
-      if (stops.isNotEmpty && stops.last['id'] == id) {
-        if (dep != null) stops.last['departure_iso'] = dep.toIso8601String();
-        if (boundary) stops.last['_boundary'] = true;
-        return;
-      }
-      stops.add({
-        'name': name,
-        'id': id,
-        'departure_iso': dep?.toIso8601String() ?? '',
-        '_boundary': boundary,
-      });
-    }
-
-    // Cover the WHOLE route: use each leg's full stop list (richest source
-    // first — the already-fetched trip in the cache, else the leg's stopovers,
-    // else just its endpoints) so the split can break at intermediate stations,
-    // not only at transfers.
-    for (final leg in journey.legs) {
-      if (leg.isWalking) continue;
-      final cached = leg.tripId != null ? _tripCache[leg.tripId] : null;
-      if (cached != null && cached.stopovers.isNotEmpty) {
-        final n = cached.stopovers.length;
-        for (var i = 0; i < n; i++) {
-          final so = cached.stopovers[i];
-          add(so.stop.id, so.stop.name,
-              so.departure ?? so.plannedDeparture, i == 0 || i == n - 1);
-        }
-      } else if (leg.stopovers.isNotEmpty) {
-        final n = leg.stopovers.length;
-        for (var i = 0; i < n; i++) {
-          final so = leg.stopovers[i];
-          add(so.stop.id, so.stop.name, so.departure, i == 0 || i == n - 1);
-        }
-      } else {
-        add(leg.origin.id, leg.origin.name,
-            leg.plannedDeparture ?? leg.departure, true);
-        add(leg.destination.id, leg.destination.name, leg.arrival, true);
-      }
-    }
-
-    // Cap the candidates so the pairwise price scan stays quick: keep every
-    // boundary (rebook) stop and evenly sample the intermediate ones. The
-    // number of price queries grows with the square of the stop count.
-    const cap = 12;
-    if (stops.length > cap) {
-      final boundaries = stops.where((s) => s['_boundary'] == true).toList();
-      final inner = stops.where((s) => s['_boundary'] != true).toList();
-      final slots = (cap - boundaries.length).clamp(0, inner.length);
-      final keep = <Map<String, dynamic>>{...boundaries};
-      if (slots > 0) {
-        final step = inner.length / slots;
-        for (var k = 0; k < slots; k++) {
-          keep.add(inner[(k * step).floor()]);
-        }
-      }
-      stops.removeWhere((s) => !keep.contains(s));
-    }
+    // Same candidate list the bulk comparison uses, so both price identically.
+    // This screen additionally has the leg's full train run cached, which is
+    // handed over — trimmed to the ridden section, never the whole run (#22).
+    final stops = splitStopsFromJourney(
+      journey,
+      tripFor: (leg) => leg.tripId != null ? _tripCache[leg.tripId] : null,
+    );
 
     if (stops.length < 2) {
       ScaffoldMessenger.of(context).showSnackBar(

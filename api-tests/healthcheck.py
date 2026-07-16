@@ -109,6 +109,10 @@ HAMBURG_LOC = ("A=1@O=Hamburg Hbf@X=10006909@Y=53552733@U=80@L=8002549@"
 # an ["ALL"] search returns nothing but ICEs (see check_vendo_verkehrsmittel).
 MUNICH_LOC = "A=1@O=München Hbf@X=11558339@Y=48140229@U=80@L=8000261@"
 AUGSBURG_LOC = "A=1@O=Augsburg Hbf@X=10885802@Y=48365456@U=80@L=8000013@"
+# Berlin → Braunschweig: the ICE stops there and rides on to München. The split
+# scope check (#22) needs a route whose train clearly outlives the journey.
+BRAUNSCHWEIG_LOC = ("A=1@O=Braunschweig Hbf@X=10540293@Y=52252218@U=80@"
+                    "L=8000049@i=U×008013240@")
 
 
 def _corr_id() -> str:
@@ -569,6 +573,93 @@ def check_vendo_journey() -> str:
                     raise CheckError("ersatzhaltNotiz lacks a 'typ' field")
     ez_txt = ", ersatzhaltNotiz shape ok" if ersatz_seen else ""
     return f"{len(conns)} journeys, first has {len(legs)} legs{price_txt}{ez_txt}"
+
+
+def check_vendo_split_scope() -> str:
+    """Split-ticket scope (#22): a leg's `halte` must be exactly the stretch the
+    rider travels, while /mob/zuglauf answers with the WHOLE train run.
+
+    The split candidates are built from the leg (utils/split_stops.dart), and
+    the connection-detail screen may hand over its cached run — which is then
+    cut down to the leg via the boarding/alighting `evaNr`. Two things have to
+    hold for that, and both are asserted here on Berlin Hbf → Braunschweig Hbf,
+    where the ICE carries on to München long after the rider gets off:
+
+      * the leg's halte stop AT the destination (they did not, in #22's
+        screenshot: it offered Berlin → Hildesheim on a Braunschweig trip),
+      * the leg's halte are a contiguous slice of the run's halte, keyed on
+        evaNr — otherwise the trim can't find the leg in the run and the app
+        silently falls back to the leg's own stops.
+    """
+    media = "application/x.db.vendo.mob.verbindungssuche.v9+json"
+    when = (datetime.now().astimezone() + timedelta(days=1)).replace(
+        hour=9, minute=0, second=0, microsecond=0)
+    body = {
+        "autonomeReservierung": False,
+        "einstiegsTypList": ["STANDARD"],
+        "fahrverguenstigungen": {"deutschlandTicketVorhanden": False,
+                                 "nurDeutschlandTicketVerbindungen": False},
+        "klasse": "KLASSE_2",
+        "reiseHin": {"wunsch": {
+            "abgangsLocationId": BERLIN_LOC,
+            "alternativeHalteBerechnung": True,
+            "verkehrsmittel": ["HOCHGESCHWINDIGKEITSZUEGE"],
+            "zeitWunsch": {"reiseDatum": when.isoformat(),
+                           "zeitPunktArt": "ABFAHRT"},
+            "zielLocationId": BRAUNSCHWEIG_LOC,
+        }},
+        "reisendenProfil": {"reisende": [
+            {"ermaessigungen": ["KEINE_ERMAESSIGUNG KLASSENLOS"],
+             "reisendenTyp": "ERWACHSENER"}]},
+        "reservierungsKontingenteVorhanden": False,
+    }
+    r = _post("https://app.services-bahn.de/mob/angebote/fahrplan",
+              headers=_vendo_headers(media), data=json.dumps(body),
+              timeout=TIMEOUT)
+    r.raise_for_status()
+    conns = r.json().get("verbindungen", [])
+    if not conns:
+        raise CheckError("no Berlin → Braunschweig connections")
+
+    # First direct ICE leg that carries a run id — that's the #22 case.
+    for c in conns:
+        legs = c["verbindung"]["verbindungsAbschnitte"]
+        if len(legs) != 1:
+            continue
+        leg = legs[0]
+        zid = leg.get("zuglaufId") or leg.get("risZuglaufId")
+        if zid:
+            break
+    else:
+        raise CheckError("no direct ICE leg with a zuglaufId")
+
+    leg_ids = [h["ort"]["evaNr"] for h in leg["halte"]]
+    if leg_ids[-1] != "8000049":
+        raise CheckError(
+            f"leg halte end at {leg['halte'][-1]['ort']['name']}, not the "
+            "searched destination Braunschweig Hbf — the leg is NOT leg-scoped")
+
+    r = _get(
+        f"https://app.services-bahn.de/mob/zuglauf/{urllib.parse.quote(zid, safe='')}",
+        headers=_vendo_headers(ZUGLAUF_MEDIA), timeout=TIMEOUT)
+    r.raise_for_status()
+    run_ids = [h["ort"]["evaNr"] for h in r.json().get("halte") or []]
+    if not run_ids:
+        raise CheckError("zuglauf has no halte")
+    if leg_ids[0] not in run_ids or leg_ids[-1] not in run_ids:
+        raise CheckError("leg boarding/alighting evaNr absent from its own "
+                         "zuglauf — the trim to the ridden section can't key "
+                         "on evaNr any more")
+    board = run_ids.index(leg_ids[0])
+    alight = run_ids.index(leg_ids[-1], board)
+    if run_ids[board:alight + 1] != leg_ids:
+        raise CheckError(f"leg halte are not a contiguous slice of the run: "
+                         f"leg={leg_ids} vs run[{board}:{alight + 1}]="
+                         f"{run_ids[board:alight + 1]}")
+    past = len(run_ids) - 1 - alight
+    return (f"{leg.get('mitteltext')}: leg {len(leg_ids)} halte == run"
+            f"[{board}:{alight + 1}], run has {len(run_ids)} ({past} past the "
+            "rider's destination)")
 
 
 def check_vendo_verkehrsmittel() -> str:
@@ -2019,6 +2110,7 @@ CHECKS = [
     ("vendo nearby stations (bytypes)", check_vendo_nearby, False),
     ("mob endpoint surface reachable (67)", check_mob_surface, True),
     ("vendo journey + prices (v9)", check_vendo_journey, False),
+    ("vendo split scope: leg vs zuglauf (#22)", check_vendo_split_scope, False),
     ("vendo verkehrsmittel filter (#18)", check_vendo_verkehrsmittel, False),
     ("vendo search options (#19)", check_vendo_search_options, False),
     ("vendo transfer info (#20.6)", check_vendo_transfer_info, False),
