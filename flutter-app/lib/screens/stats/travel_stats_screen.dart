@@ -281,6 +281,9 @@ class TravelStatsScreen extends ConsumerWidget {
     }
     final balance = co2.value;
     if (balance != null) return _officialCo2Card(context, balance);
+    final needsAuthorization =
+        ref.read(bahnbonusCo2Provider.notifier).needsAuthorization ||
+            (co2.hasError && co2.error is DbBahnBonusAuthorizationRequired);
     if (co2.isLoading) {
       return const Card(
         child: ListTile(
@@ -293,36 +296,35 @@ class TravelStatsScreen extends ConsumerWidget {
         ),
       );
     }
-    if (co2.hasError) {
-      final needsAuthorization = co2.error is DbBahnBonusAuthorizationRequired;
+    if (needsAuthorization) {
       return Card(
         child: ListTile(
           leading: Icon(Icons.eco_outlined, color: theme.colorScheme.error),
-          title: Text(
-            needsAuthorization
-                ? 'BahnBonus verknüpfen'
-                : 'CO₂-Bilanz nicht verfügbar',
-          ),
-          subtitle: Text(
-            needsAuthorization
-                ? 'Einmalig freigeben. Eine bestehende DB-Websitzung wird '
-                    'verwendet; nur falls sie abgelaufen ist, zeigt DB die '
-                    'Anmeldung.'
-                : 'BahnBonus konnte gerade nicht geladen werden.',
+          title: const Text('BahnBonus verknüpfen'),
+          subtitle: const Text(
+            'Einmalig freigeben. Eine bestehende DB-Websitzung wird '
+            'verwendet; nur falls sie abgelaufen ist, zeigt DB die Anmeldung.',
           ),
           trailing: IconButton(
-            tooltip: needsAuthorization
-                ? 'BahnBonus verknüpfen'
-                : 'Erneut versuchen',
-            icon: Icon(needsAuthorization ? Icons.link : Icons.refresh),
-            onPressed: () {
-              final controller = ref.read(bahnbonusCo2Provider.notifier);
-              if (needsAuthorization) {
-                controller.connect();
-              } else {
-                controller.refresh();
-              }
-            },
+            tooltip: 'BahnBonus verknüpfen',
+            icon: const Icon(Icons.link),
+            onPressed: () => ref.read(bahnbonusCo2Provider.notifier).connect(),
+          ),
+        ),
+      );
+    }
+    if (co2.hasError) {
+      return Card(
+        child: ListTile(
+          leading: Icon(Icons.eco_outlined, color: theme.colorScheme.error),
+          title: const Text('CO₂-Bilanz nicht verfügbar'),
+          subtitle: const Text(
+            'BahnBonus konnte gerade nicht geladen werden.',
+          ),
+          trailing: IconButton(
+            tooltip: 'Erneut versuchen',
+            icon: const Icon(Icons.refresh),
+            onPressed: () => ref.read(bahnbonusCo2Provider.notifier).refresh(),
           ),
         ),
       );
