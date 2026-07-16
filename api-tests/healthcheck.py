@@ -27,6 +27,7 @@ import collections
 import json
 import math
 import re
+import pathlib
 import sys
 import time
 import urllib.parse
@@ -1048,6 +1049,91 @@ def check_vendo_tagesbestpreis() -> str:
             f"cheapest {cheapest} EUR")
 
 
+def check_vendo_stammdaten_drift() -> str:
+    """The app's compiled-in `reisende.dart` enums vs. the live master data.
+
+    `GET /mob/stammdaten` is the source these enums were copied from, by hand,
+    out of an APK asset. That's the same failure mode as the hardcoded
+    `verkehrsmittel: ['ALL']` of #18: a value that can't move when DB moves it.
+    This diffs the Dart source itself — not a snapshot of it — so drift shows up
+    the day it happens.
+
+    Why the two directions are not treated alike:
+
+    - `reisendenTyp` is a hard fail. We send exactly one per traveller, and a
+      renamed one is an immediate break.
+    - A BahnCard we ship that vanishes from the master data is a hard fail:
+      BahnCards demonstrably move the price (BC50 takes Köln→München from
+      153,69 € to 97,35 €), so if one stopped working, riders would silently be
+      quoted full fare.
+    - Anything else is REPORTED, not failed. The endpoint answers an invented
+      `ermaessigungen` key with a 200 and an unchanged price — it ignores what
+      it doesn't know. So a de-listed foreign/SBA key is indistinguishable from
+      a working one, and failing CI over it would only invite someone to delete
+      a working option (see SbaOption.beeintrOhneRolli).
+    - Live keys we don't offer are reported too: NL-100 was found exactly that
+      way, and it is real money (Köln→Amsterdam 73,99 € → 51,60 €).
+    """
+    media = "application/x.db.vendo.mob.stammdaten.v6+json"
+    r = _get("https://app.services-bahn.de/mob/stammdaten"
+             "?operatingSystem=ANDROID&sdtyp=RESOURCE",
+             headers=_vendo_headers(media), timeout=40)
+    r.raise_for_status()
+    data = r.json()
+
+    # `key` already carries the class suffix ("BAHNCARD50 KLASSE_2"), which is
+    # exactly the token the app puts in `ermaessigungen`.
+    live_erm = {e["key"] for e in data.get("ermaessigungen", [])
+                if e.get("key")}
+    live_typen = {e["key"] for e in data.get("reisendenTypen", []) if e.get("key")}
+    if not live_erm or not live_typen:
+        raise CheckError("stammdaten has no ermaessigungen/reisendenTypen — "
+                         "shape changed")
+
+    src = (pathlib.Path(__file__).resolve().parent.parent
+           / "flutter-app" / "lib" / "models" / "reisende.dart").read_text(
+               encoding="utf-8")
+
+    def enum_body(name: str) -> str:
+        """The `enum X { ... }` block, so one enum's keys can't leak into another."""
+        m = re.search(rf"enum {name} \{{(.*?)^\}}", src, re.S | re.M)
+        if not m:
+            raise CheckError(f"enum {name} not found in reisende.dart")
+        return m.group(1)
+
+    def keys_of(name: str) -> set:
+        # First string literal of each enum entry is its vendoKey.
+        return {m.group(1) for m in
+                re.finditer(r"'([A-Z0-9][A-Z0-9_\- ]*)'", enum_body(name))}
+
+    ours_erm = keys_of("Reduction") | keys_of("SbaOption")
+    ours_typen = keys_of("TravelerType")
+
+    if ours_typen != live_typen:
+        raise CheckError(
+            f"reisendenTyp drift — ours-not-live: {sorted(ours_typen - live_typen)}, "
+            f"live-not-ours: {sorted(live_typen - ours_typen)}")
+
+    ours_missing = ours_erm - live_erm
+    gone_bahncards = {k for k in ours_missing if k.startswith("BAHNCARD")}
+    if gone_bahncards:
+        raise CheckError(
+            f"BahnCard keys no longer in the master data: {sorted(gone_bahncards)} "
+            "— riders holding them would be quoted full fare")
+
+    live_missing = live_erm - ours_erm
+    notes = []
+    if ours_missing:
+        notes.append(f"we still offer {sorted(ours_missing)} (de-listed; the "
+                     "endpoint ignores unknown keys, so this is not provably "
+                     "broken)")
+    if live_missing:
+        notes.append(f"not offered by us: {sorted(live_missing)}")
+    detail = ("; ".join(notes)) if notes else "no drift"
+    return (f"{len(live_erm)} ermaessigungen / {len(live_typen)} reisendenTypen "
+            f"live — {detail}")
+
+
 def check_vendo_journey_party() -> str:
     """Advanced "Reisende & Klasse" search: the app lets you build a party of
     multiple passengers (with explicit ages), a bike and a dog, pick 1st class,
@@ -1869,6 +1955,7 @@ CHECKS = [
     ("vendo transfer info (#20.6)", check_vendo_transfer_info, False),
     ("vendo serviceDays (#20.8)", check_vendo_service_days, False),
     ("vendo tagesbestpreis (#21)", check_vendo_tagesbestpreis, False),
+    ("stammdaten vs reisende.dart (#21)", check_vendo_stammdaten_drift, False),
     ("vendo party search (pax/bike/dog/SBA)", check_vendo_journey_party, False),
     ("vendo journey pagination (context)", check_vendo_journey_pagination, False),
     ("vendo weitere abfahrten (segment)", check_vendo_weitere_abfahrten, False),

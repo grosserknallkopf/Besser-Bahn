@@ -72,6 +72,10 @@ enum Reduction {
   chHalbtax('CH-HALBTAXABO_OHNE_RAILPLUS KLASSENLOS', 'HalbtaxAbo (CH)', false),
   atVorteil('A-VORTEILSCARD KLASSENLOS', 'Vorteilscard (AT)', false),
   nl40('NL-40_OHNE_RAILPLUS KLASSENLOS', 'NL-40 %', false),
+  // Live in the master data and demonstrably real money: on Köln→Amsterdam it
+  // takes 73,99 € to 51,60 € and 68 € to 43 €, while a made-up key on the same
+  // search changes nothing (#21).
+  nl100('NL-100 KLASSENLOS', 'NL-100 %', false),
   klimaAt('KLIMATICKET_OE KLASSE_2', 'KlimaTicket (AT)', false);
 
   final String vendoKey;
@@ -92,8 +96,16 @@ enum Reduction {
 }
 
 /// Schwerbehindertenausweis options — the 2×2 matrix DB exposes
-/// (Schwerbehinderung vs. Begleitperson × mit/ohne Rollstuhlplatz). All four
-/// keys were verified to return 200 against the live endpoint.
+/// (Schwerbehinderung vs. Begleitperson × mit/ohne Rollstuhlplatz).
+///
+/// [beeintrOhneRolli] is no longer listed in the live master data, and is kept
+/// anyway. "Returns 200" says nothing here: the endpoint accepts an invented
+/// key like `TOTALLY_MADE_UP KLASSENLOS` with a 200 and the unchanged price,
+/// so it clearly ignores what it doesn't know rather than rejecting it. By
+/// every test available the de-listed key behaves exactly like its still-listed
+/// sibling, so dropping it would take a real option away from real riders on
+/// no evidence at all. The healthcheck reports the drift instead of failing on
+/// it — see check_vendo_stammdaten_drift.
 enum SbaOption {
   none('', 'Keiner'),
   beeintrOhneRolli(
