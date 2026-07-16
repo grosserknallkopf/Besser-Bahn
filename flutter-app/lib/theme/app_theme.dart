@@ -52,19 +52,9 @@ class AppTheme {
         ),
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       ),
-      navigationBarTheme: NavigationBarThemeData(
-        elevation: 0,
-        height: 64,
-        backgroundColor: colorScheme.surface,
-        indicatorColor: colorScheme.primaryContainer,
-        // 6 tabs on a phone → long labels (e.g. "Einstellungen") wrap to two
-        // lines and shove the icon up out of alignment. Only render the label
-        // for the active tab; the rest stay clean, centred icons.
-        labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
-        labelTextStyle: WidgetStateProperty.all(
-          const TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
-        ),
-      ),
+      // No navigationBarTheme: the bottom bar is no longer Material's
+      // NavigationBar but chuk_ui's floating glass bar, which reads this
+      // ColorScheme through lib/widgets/app_nav_bar.dart.
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),

@@ -11,6 +11,7 @@ import '../providers/settings_provider.dart';
 import '../providers/traewelling_provider.dart';
 import '../services/traewelling_service.dart';
 import '../theme/app_colors.dart';
+import 'app_nav_bar.dart';
 import 'traewelling_logo.dart';
 
 /// Entry point for checking the *current* train into Träwelling — used by the
@@ -297,9 +298,15 @@ class _CheckinSheetState extends ConsumerState<_CheckinSheet> {
     final theme = Theme.of(context);
     final trip = widget.trip;
     final boardDep = _boarding.departure ?? _boarding.plannedDeparture;
+    // Lift the sheet clear of whatever is in front of it at the bottom: the
+    // soft keyboard while typing, otherwise the floating nav bar (this sheet
+    // opens from the Zug tab, so the bar hovers over it). Never both — with the
+    // keyboard up the bar is behind it.
+    final keyboard = MediaQuery.of(context).viewInsets.bottom;
+    final navBar = AppNavBar.insetOf(context);
     return Padding(
       padding: EdgeInsets.fromLTRB(
-          20, 4, 20, MediaQuery.of(context).viewInsets.bottom + 20),
+          20, 4, 20, (keyboard > navBar ? keyboard : navBar) + 20),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
