@@ -32,6 +32,22 @@ const kDefaultPrimaryTypes = {'PLATFORM', 'PLATFORM_SECTOR_CUBE'};
 /// Which POI category is the *relevant* one to show by default for a leg of
 /// this transport [product] — Gleise for a train/S-Bahn, bus stops for a bus,
 /// U-Bahn entrances for a subway. Everything not in this set starts hidden.
+/// Default-visible categories when *browsing* a station (Karte tab), rather
+/// than arriving from one journey leg. Every kind of transit stop bahnhof.de
+/// ships — Gleise plus bus/tram/subway/replacement-bus halts — so a station
+/// like Kiel shows its 17 bus stops (11 on the ground floor, 6 down in the
+/// ZOB) instead of an empty basement. Amenities (lifts, lockers, stairs, WCs,
+/// parking) stay hidden until the rider enables them in the legend, keeping
+/// the first view uncluttered. Types absent at a station are simply no-ops.
+const kTransitStopTypes = {
+  'PLATFORM',
+  'PLATFORM_SECTOR_CUBE',
+  'BUS',
+  'CITY_TRAIN', // bahnhof.de's key for S-Bahn / tram halts
+  'SUBWAY',
+  'RAIL_REPLACEMENT_TRANSPORT',
+};
+
 Set<String> primaryPoiTypesForProduct(String? product) {
   switch (product) {
     case 'bus':
@@ -425,7 +441,9 @@ class StationMapNotifier extends Notifier<StationMapState> {
       String? secondaryProduct,
       String? trainLabel,
       Set<String>? primaryTypes}) async {
-    _primaryTypes = primaryTypes ?? kDefaultPrimaryTypes;
+    // No explicit types → browsing this station: show every transit stop, not
+    // just Gleise. A journey passes its own (e.g. just the boarding Gleise).
+    _primaryTypes = primaryTypes ?? kTransitStopTypes;
     _coachRef = coachRef;
     _coachRefSecondary = secondaryCoachRef;
     _fallbackRef = fallbackRef;
@@ -477,7 +495,8 @@ class StationMapNotifier extends Notifier<StationMapState> {
   }
 
   Future<void> loadBySlug(String slug) async {
-    _primaryTypes = kDefaultPrimaryTypes;
+    // Slug entry is always a browse (no journey context) → show all stops.
+    _primaryTypes = kTransitStopTypes;
     _coachRef = null;
     _coachRefSecondary = null;
     _fallbackRef = null;
