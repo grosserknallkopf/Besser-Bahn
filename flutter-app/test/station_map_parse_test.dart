@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:besser_bahn/core/osm_rail.dart';
 import 'package:besser_bahn/core/platform_train.dart';
 import 'package:besser_bahn/core/platform_train.dart' as pt;
+import 'package:besser_bahn/models/coach_sequence.dart';
 import 'package:besser_bahn/models/station_map.dart';
 import 'package:besser_bahn/services/station_map_service.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -217,5 +218,64 @@ void main() {
     // skipped them all.
     expect(checked, greaterThan(0),
         reason: 'no Gleis produced a body — nothing was actually asserted');
+  });
+
+  test('a Wagenreihung without a sector table still draws its cars (#33)', () {
+    // The S-Bahn payload shape, measured 2026-07-16: of the networks the
+    // vehicle-sequence endpoint serves, only Rhein-Neckar ships a sector table
+    // — Essen, Nürnberg and Dresden send real cars with real metre positions
+    // and `platform.sectors: []`, every car's `sector` null.
+    //
+    // Sector letters are what anchors DB's metre axis onto the track, so those
+    // sequences can't be placed exactly. They must still draw (to scale, in
+    // order, centred) rather than be fetched and thrown away — otherwise
+    // admitting S-Bahnen buys three of four networks nothing.
+    final body = File('test/fixtures/hamburg-hbf.rsc.txt').readAsStringSync();
+    final map = parseStationMapBody('hamburg-hbf', body);
+    final raw = json.decode(
+        File('test/fixtures/hamburg-wagenreihung.json').readAsStringSync())
+        as Map<String, dynamic>;
+
+    // Strip it down to what an Essen/Nürnberg/Dresden S-Bahn actually returns.
+    final sectorless = <String, dynamic>{
+      ...raw,
+      'platform': {...(raw['platform'] as Map<String, dynamic>), 'sectors': []},
+      'groups': [
+        for (final g in (raw['groups'] as List))
+          {
+            ...(g as Map<String, dynamic>),
+            'vehicles': [
+              for (final v in (g['vehicles'] as List))
+                {
+                  ...(v as Map<String, dynamic>),
+                  if (v['platformPosition'] != null)
+                    'platformPosition': {
+                      ...(v['platformPosition'] as Map<String, dynamic>),
+                      'sector': null,
+                    },
+                },
+            ],
+          },
+      ],
+    };
+    final cs = CoachSequence.fromJson(sectorless);
+    expect(cs.platform.sectors, isEmpty, reason: 'fixture must be sectorless');
+    expect(cs.allCoaches, isNotEmpty);
+
+    final gleis = pt.normalizeGleis(cs.departurePlatform);
+    final rail = _railFor(map, 'hamburg-osm.json', gleis);
+    if (rail.length < 2) {
+      markTestSkipped('Gleis $gleis has no recoverable rail in the fixture');
+      return;
+    }
+    final cars = pt.platformTrainCars(map,
+        gleis: gleis, cs: cs, osmRail: rail);
+    expect(cars, isNotEmpty,
+        reason: 'sectorless Wagenreihung drew no cars — S-Bahnen would be '
+            'fetched and then rendered as nothing');
+    for (final c in cars) {
+      expect(c.outline.length, greaterThanOrEqualTo(3),
+          reason: 'each car is a closed ring');
+    }
   });
 }

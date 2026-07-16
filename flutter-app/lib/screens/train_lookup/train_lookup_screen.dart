@@ -358,7 +358,8 @@ class _TrainLookupScreenState extends ConsumerState<TrainLookupScreen>
                         ? (
                             category: trip.line.productName,
                             trainNumber: trip.line.fahrtNr,
-                            time: stop.departure ?? stop.arrival,
+                            // Scheduled — keyed by service date (#32).
+                            time: stop.sequenceTime,
                           )
                         : null,
                     trainLabel: trip.line.displayName,

@@ -306,7 +306,7 @@ class _TrainMapState extends ConsumerState<TrainMap> {
               category: line.productName,
               trainNumber: line.fahrtNr,
               stationEva: s.stop.id,
-              departureTime: s.departure ?? s.arrival,
+              departureTime: s.sequenceTime,
             )
           : null;
       var failed = false;
@@ -365,7 +365,7 @@ class _TrainMapState extends ConsumerState<TrainMap> {
       category: line.productName,
       trainNumber: line.fahrtNr,
       stationEva: s.stop.id,
-      departureTime: s.departure ?? s.arrival,
+      departureTime: s.sequenceTime,
     );
 
     // Exact placement needs BOTH a per-stop Wagenreihung AND sector cubes to
