@@ -29,6 +29,14 @@ class DbAccountException implements Exception {
   String toString() => 'DbAccountException($status): $message';
 }
 
+/// Raised when the account is signed in for DB Navigator data, but has not yet
+/// granted this installation a BahnBonus token. The two public OAuth clients
+/// are intentionally separate at DB.
+class DbBahnBonusAuthorizationRequired extends DbAccountException {
+  const DbBahnBonusAuthorizationRequired()
+      : super('BahnBonus muss einmalig verknüpft werden', 403);
+}
+
 /// Authenticated client for the signed-in user's DB account: profile,
 /// BahnBonus, BahnCards and booked tickets — read from the same DB Navigator
 /// backend (`app.services-bahn.de/mob`) the official app uses, authenticated
@@ -62,6 +70,9 @@ class DbAccountService {
   static const _kRefresh = 'db_refresh_token';
   static const _kExpiry = 'db_expires_at'; // ISO-8601
   static const _kKontoId = 'db_kundenkonto_id';
+  static const _kBahnBonusAccess = 'db_bahnbonus_access_token';
+  static const _kBahnBonusRefresh = 'db_bahnbonus_refresh_token';
+  static const _kBahnBonusExpiry = 'db_bahnbonus_expires_at';
 
   /// Stable per-install pair of UUIDs DB Navigator stamps on every request as
   /// `x-correlation-id` — same value for the whole session/install life. Stored
@@ -78,6 +89,8 @@ class DbAccountService {
 
   String? _accessToken;
   DateTime? _expiresAt;
+  String? _bahnBonusAccessToken;
+  DateTime? _bahnBonusExpiresAt;
   String? _kundenkontoId;
   String? _correlationId;
   // Lazy-loaded device descriptors. We never lie about the device — sending
@@ -141,6 +154,7 @@ class DbAccountService {
         'response_type': 'code',
         'client_id': DbAccountConstants.clientId,
         'state': state,
+        'nonce': _randomString(24),
         'code_challenge': challenge,
         'code_challenge_method': 'S256',
         'prompt': 'login',
@@ -280,6 +294,152 @@ class DbAccountService {
     );
   }
 
+  Future<void> _loadBahnBonusTokens() async {
+    _bahnBonusAccessToken ??= await _read(_kBahnBonusAccess);
+    final expiry = await _read(_kBahnBonusExpiry);
+    _bahnBonusExpiresAt = expiry != null ? DateTime.tryParse(expiry) : null;
+  }
+
+  Future<void> _storeBahnBonusTokens(Map<String, dynamic> token) async {
+    final access = token['access_token'] as String?;
+    final refresh = token['refresh_token'] as String?;
+    final expiresIn = (token['expires_in'] as num?)?.toInt();
+    if (access == null) {
+      throw const DbAccountException(
+        'BahnBonus-Token-Antwort ohne access_token',
+      );
+    }
+    _bahnBonusAccessToken = access;
+    _bahnBonusExpiresAt = expiresIn != null
+        ? DateTime.now().add(Duration(seconds: expiresIn))
+        : null;
+    await _writeKey(_kBahnBonusAccess, access);
+    if (refresh != null) await _writeKey(_kBahnBonusRefresh, refresh);
+    if (_bahnBonusExpiresAt != null) {
+      await _writeKey(
+        _kBahnBonusExpiry,
+        _bahnBonusExpiresAt!.toIso8601String(),
+      );
+    }
+    AppLog.log('BahnBonus OAuth token stored', tag: 'db-account');
+  }
+
+  Future<void> _clearBahnBonusTokens() async {
+    _bahnBonusAccessToken = null;
+    _bahnBonusExpiresAt = null;
+    await _delete(_kBahnBonusAccess);
+    await _delete(_kBahnBonusRefresh);
+    await _delete(_kBahnBonusExpiry);
+  }
+
+  Future<_RefreshOutcome> _refreshBahnBonus() async {
+    final refresh = await _read(_kBahnBonusRefresh);
+    if (refresh == null) return _RefreshOutcome.rejected;
+    try {
+      final res = await _client.post(
+        Uri.parse(DbAccountConstants.tokenUrl),
+        headers: {'Accept': 'application/json'},
+        body: {
+          'grant_type': 'refresh_token',
+          'refresh_token': refresh,
+          'client_id': DbAccountConstants.bahnbonusOAuthClientId,
+        },
+      ).timeout(_timeout);
+      if (res.statusCode == 200) {
+        await _storeBahnBonusTokens(
+          json.decode(res.body) as Map<String, dynamic>,
+        );
+        return _RefreshOutcome.success;
+      }
+      if (res.statusCode == 400 || res.statusCode == 401) {
+        await _clearBahnBonusTokens();
+        return _RefreshOutcome.rejected;
+      }
+      return _RefreshOutcome.transient;
+    } on TimeoutException {
+      return _RefreshOutcome.transient;
+    } catch (_) {
+      return _RefreshOutcome.transient;
+    }
+  }
+
+  /// Creates the separate BahnBonus OAuth session. The authorization request
+  /// intentionally has no `prompt=login`: an existing DB browser session can
+  /// approve it without asking for credentials again.
+  Future<void> _authorizeBahnBonus() async {
+    final verifier = _randomString(64);
+    final challenge = _codeChallenge(verifier);
+    final state = 'bahnbonus-${_randomString(10)}';
+    final authUrl = Uri.parse(DbAccountConstants.authorizeUrl).replace(
+      queryParameters: {
+        'response_type': 'code',
+        'client_id': DbAccountConstants.bahnbonusOAuthClientId,
+        'state': state,
+        'code_challenge': challenge,
+        'code_challenge_method': 'S256',
+        'scope': DbAccountConstants.bahnbonusScope,
+        'redirect_uri': DbAccountConstants.bahnbonusRedirectUrl,
+        'kc_locale': 'de',
+      },
+    );
+    final result = await FlutterWebAuth2.authenticate(
+      url: authUrl.toString(),
+      callbackUrlScheme: DbAccountConstants.bahnbonusCallbackScheme,
+    );
+    final returned = Uri.parse(result);
+    final code = returned.queryParameters['code'];
+    if (returned.queryParameters['state'] != state) {
+      throw const DbAccountException(
+        'BahnBonus-Autorisierung: State stimmt nicht überein',
+      );
+    }
+    if (code == null) {
+      final message = returned.queryParameters['error_description'] ??
+          returned.queryParameters['error'] ??
+          'BahnBonus-Autorisierung abgebrochen';
+      throw DbAccountException(message);
+    }
+    final res = await _client.post(
+      Uri.parse(DbAccountConstants.tokenUrl),
+      headers: {'Accept': 'application/json'},
+      body: {
+        'grant_type': 'authorization_code',
+        'client_id': DbAccountConstants.bahnbonusOAuthClientId,
+        'redirect_uri': DbAccountConstants.bahnbonusRedirectUrl,
+        'code_verifier': verifier,
+        'code': code,
+      },
+    ).timeout(_timeout);
+    if (res.statusCode != 200) {
+      throw DbAccountException(
+        'BahnBonus-Autorisierung fehlgeschlagen',
+        res.statusCode,
+      );
+    }
+    await _storeBahnBonusTokens(
+      json.decode(res.body) as Map<String, dynamic>,
+    );
+  }
+
+  Future<void> _ensureBahnBonusAccess({required bool connect}) async {
+    await _loadBahnBonusTokens();
+    final stillValid = _bahnBonusAccessToken != null &&
+        (_bahnBonusExpiresAt == null ||
+            DateTime.now().isBefore(
+              _bahnBonusExpiresAt!.subtract(const Duration(seconds: 20)),
+            ));
+    if (stillValid) return;
+    final refresh = await _refreshBahnBonus();
+    if (refresh == _RefreshOutcome.success) return;
+    if (refresh == _RefreshOutcome.transient) {
+      throw const DbAccountException(
+        'BahnBonus ist temporär nicht erreichbar',
+      );
+    }
+    if (!connect) throw const DbBahnBonusAuthorizationRequired();
+    await _authorizeBahnBonus();
+  }
+
   Future<void> logout() async {
     _accessToken = null;
     _expiresAt = null;
@@ -289,6 +449,7 @@ class DbAccountService {
     await _delete(_kRefresh);
     await _delete(_kExpiry);
     await _delete(_kKontoId);
+    await _clearBahnBonusTokens();
     // Drop the per-install correlation-id and every cached ETag so the next
     // login looks like a fresh install — no cross-account leak of the prior
     // user's id or cache state.
@@ -613,7 +774,10 @@ class DbAccountService {
   /// The API groups the requested period by `YEARLY`. Asking from January 1
   /// through today yields the same live year tile as BahnBonus. A 304 means
   /// the provider should retain its persisted last-good value.
-  Future<DbBahnBonusCo2Balance?> bahnbonusCo2Balance({DateTime? now}) async {
+  Future<DbBahnBonusCo2Balance?> bahnbonusCo2Balance({
+    DateTime? now,
+    bool connect = false,
+  }) async {
     final today = now ?? DateTime.now();
     final date = today.toIso8601String().split('T').first;
     final startDate = '${today.year.toString().padLeft(4, '0')}-01-01';
@@ -625,17 +789,7 @@ class DbAccountService {
         'endDate': date,
       },
     );
-    final res = await _send(
-      'GET',
-      uri.toString(),
-      media: 'application/json',
-      extraHeaders: {
-        'DB-Client-Id': DbAccountConstants.bahnbonusClientId,
-        'DB-Api-Key': DbAccountConstants.bahnbonusApiKey,
-        'User-Agent':
-            'BahnBonus/3.6.3 Android/${_deviceOsVersion ?? 'unknown'}',
-      },
-    );
+    final res = await _sendBahnBonus(uri, connect: connect);
     if (res.statusCode == 304 || res.statusCode == 404) return null;
     final data = _decode(res, 'co2-statistics');
     final items = (data['items'] as List<dynamic>? ?? const [])
@@ -648,6 +802,41 @@ class DbAccountService {
       return (period['startDate'] ?? '').toString().startsWith(yearPrefix);
     }, orElse: () => items.last);
     return DbBahnBonusCo2Balance.fromJson(item);
+  }
+
+  Future<http.Response> _sendBahnBonus(
+    Uri uri, {
+    required bool connect,
+    bool retry = true,
+  }) async {
+    await _ensureDeviceInfo();
+    await _ensureBahnBonusAccess(connect: connect);
+    final res = await _client.get(
+      uri,
+      headers: {
+        'Authorization': 'Bearer $_bahnBonusAccessToken',
+        'Accept': 'application/json',
+        'Accept-Language': 'de',
+        'DB-Client-Id': DbAccountConstants.bahnbonusClientId,
+        'DB-Api-Key': DbAccountConstants.bahnbonusApiKey,
+        'User-Agent':
+            'BahnBonus/3.6.3 Android/${_deviceOsVersion ?? 'unknown'}',
+      },
+    ).timeout(_timeout);
+    if ((res.statusCode == 401 || res.statusCode == 403) && retry) {
+      final refresh = await _refreshBahnBonus();
+      if (refresh == _RefreshOutcome.success) {
+        return _sendBahnBonus(uri, connect: connect, retry: false);
+      }
+      if (refresh == _RefreshOutcome.transient) {
+        throw const DbAccountException(
+          'BahnBonus ist temporär nicht erreichbar',
+        );
+      }
+      await _clearBahnBonusTokens();
+      throw const DbBahnBonusAuthorizationRequired();
+    }
+    return res;
   }
 
   /// Fetch BahnCards. Returns null when the server replies 304 Not Modified
