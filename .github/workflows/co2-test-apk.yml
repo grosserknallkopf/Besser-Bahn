@@ -1,0 +1,56 @@
+name: CO2 test APK
+
+on:
+  push:
+    branches:
+      - build/co2-test
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.41.9"
+          channel: stable
+          cache: true
+
+      - name: Prepare side-by-side test app
+        working-directory: flutter-app
+        run: |
+          sed -i 's/applicationId = "dev.chuk.betterbahn"/applicationId = "dev.chuk.betterbahn.co2test"/' android/app/build.gradle.kts
+          sed -i 's/android:label="Besser Bahn"/android:label="Besser Bahn CO₂ Test"/' android/app/src/main/AndroidManifest.xml
+
+      - name: Install dependencies
+        working-directory: flutter-app
+        run: flutter pub get
+
+      - name: Test CO2 response model
+        working-directory: flutter-app
+        run: flutter test test/db_bahnbonus_co2_test.dart
+
+      - name: Build Android ARM64 test APK
+        working-directory: flutter-app
+        run: flutter build apk --debug --target-platform android-arm64
+
+      - name: Name APK
+        working-directory: flutter-app
+        run: cp build/app/outputs/flutter-apk/app-debug.apk Besser-Bahn-CO2-Test.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Besser-Bahn-CO2-Test
+          path: flutter-app/Besser-Bahn-CO2-Test.apk
+          retention-days: 1
