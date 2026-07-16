@@ -10,7 +10,9 @@ Two ways to run:
     python3 healthcheck.py            # human-readable table, exit 1 on failure
     pytest healthcheck.py             # CI / assertion mode
 
-Zero hard deps beyond `requests`.
+Zero hard deps beyond `requests`. `curl_cffi` is OPTIONAL: only the bahn.de
+wagenreihung checks need it (Akamai TLS-fingerprints plain `requests` there and
+403s it, while the app itself gets 200) — without it those checks SKIP.
 
 Endpoint map (see app code in flutter-app/lib/services/):
   bahn.de GET endpoints      -> autocomplete, departures, train run. Not bot-gated.
@@ -126,6 +128,50 @@ def _browser_headers() -> dict:
         "Accept": "application/json",
         "Accept-Language": "de-DE,de;q=0.9",
     }
+
+
+# Akamai in front of www.bahn.de fingerprints the TLS handshake, not the
+# headers: `requests` gets a flat 403 OPS_BLOCKED on the wagenreihung endpoint
+# no matter what User-Agent it sends, while the app's own dart:io client and any
+# real browser get 200. So a `requests` 403 here is NOT evidence the endpoint
+# died — checking it that way just cries wolf forever. curl_cffi replays a real
+# Chrome fingerprint and sees what the app sees.
+#
+# Optional import on purpose: this file promises zero hard deps beyond
+# `requests` (see module docstring). Without curl_cffi the wagenreihung checks
+# skip instead of lying.
+try:  # pragma: no cover - env dependent
+    from curl_cffi import requests as _curl_cffi_requests
+except ImportError:  # pragma: no cover
+    _curl_cffi_requests = None
+
+
+class _SkipCheck(Exception):
+    """Check can't run here (missing optional dep) — reported, not failed."""
+
+
+def _wagenreihung_get(params: dict):
+    """GET the vehicle-sequence endpoint the way the APP reaches it."""
+    if _curl_cffi_requests is None:
+        raise _SkipCheck("curl_cffi not installed (pip install curl_cffi) — "
+                         "plain requests is TLS-fingerprinted by Akamai")
+    return _curl_cffi_requests.get(
+        "https://www.bahn.de/web/api/reisebegleitung/wagenreihung/vehicle-sequence",
+        params=params, impersonate="chrome124", timeout=TIMEOUT)
+
+
+def _wagenreihung(category: str, number, eva: str, when: datetime):
+    """The train's coach sequence at ONE stop, or None when unserved (404)."""
+    r = _wagenreihung_get({
+        "administrationId": "80", "category": category,
+        "date": f"{when.year}-{when.month:02d}-{when.day:02d}",
+        "evaNumber": eva, "number": str(number),
+        "time": when.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+    })
+    if r.status_code == 404:
+        return None
+    r.raise_for_status()
+    return r.json()
 
 
 BAHNHOFSTAFEL_MEDIA = "application/x.db.vendo.mob.bahnhofstafeln.v2+json"
@@ -1969,17 +2015,9 @@ def check_wagenreihung_split() -> str:
 
     dep = datetime.fromisoformat(leg["abgangsDatum"])
     eva = leg["halte"][0]["ort"].get("evaNr", "8002549")
-    rr = _get(
-        "https://www.bahn.de/web/api/reisebegleitung/wagenreihung/vehicle-sequence",
-        params={
-            "administrationId": "80", "category": leg["kurztext"],
-            "date": f"{dep.year}-{dep.month:02d}-{dep.day:02d}",
-            "evaNumber": eva, "number": leg["zugNummer"],
-            "time": dep.astimezone(timezone.utc).isoformat().replace(
-                "+00:00", "Z"),
-        }, headers=_browser_headers(), timeout=TIMEOUT)
-    rr.raise_for_status()
-    seq = rr.json()
+    seq = _wagenreihung(leg["kurztext"], leg["zugNummer"], eva, dep)
+    if seq is None:
+        raise CheckError("vehicle-sequence 404 for the RE leg's own origin")
     groups = seq.get("groups", [])
     if not groups:
         raise CheckError("vehicle-sequence returned no groups")
@@ -2011,6 +2049,114 @@ def check_wagenreihung_split() -> str:
         raise CheckError("split train but group destinations missing")
     tag = " SPLIT→" + "/".join(dests) if len(groups) > 1 else " (solo)"
     return f"{leg['langtext']}: {len(groups)} portion(s){tag}"
+
+
+def check_wagenreihung_transfer_sectors() -> str:
+    """The two facts the transfer section advice stands on (#27, utils/
+    transfer_coach_advice.dart). If either dies the app must go quiet, not guess.
+
+    1. The vehicle-sequence endpoint serves a train at an INTERMEDIATE stop,
+       keyed by its ARRIVAL time there. The advice needs the arriving train's
+       composition at the *transfer* stop; the leg's stop list ends at the
+       rider's alight, so the arrival is the only time we have to ask with.
+       (Not every train/stop is served — a 404 is normal and means silence.)
+
+    2. Both tracks of ONE island platform report the SAME sector letter→metre
+       table. That shared frame is the whole basis for comparing where the two
+       trains stop; without it the metres are unrelated axes and the advice
+       would be a coin flip. Verified live at Berlin Hbf Gl. 3/4:
+           Gleis 3: G 0–97.5 … A 358.8–430.2
+           Gleis 4: G 0–97.5 … A 358.8–430.2
+       Real island tracks agree within ~2 m; genuinely different platforms are
+       far off (Dortmund Gl. 16 vs 11 put sector G's end 51 m apart), which is
+       exactly what the app's 15 m frame guard keys on.
+
+    Soft: needs a same-platform transfer to exist in today's search results and
+    both trains to be served, so it can legitimately find nothing to measure.
+    """
+    media = "application/x.db.vendo.mob.verbindungssuche.v9+json"
+    when = (datetime.now().astimezone().replace(hour=9, minute=0, second=0,
+                                                microsecond=0)
+            + timedelta(days=1)).isoformat()
+    body = {
+        "autonomeReservierung": False, "einstiegsTypList": ["STANDARD"],
+        "fahrverguenstigungen": {"deutschlandTicketVorhanden": False,
+                                 "nurDeutschlandTicketVerbindungen": False},
+        "klasse": "KLASSE_2",
+        "reiseHin": {"wunsch": {
+            "abgangsLocationId": HAMBURG_LOC, "alternativeHalteBerechnung": True,
+            "verkehrsmittel": ["ALL"],
+            "zeitWunsch": {"reiseDatum": when, "zeitPunktArt": "ABFAHRT"},
+            "zielLocationId": MUNICH_LOC}},
+        "reisendenProfil": {"reisende": [{
+            "ermaessigungen": ["KEINE_ERMAESSIGUNG KLASSENLOS"],
+            "reisendenTyp": "ERWACHSENER"}]},
+        "reservierungsKontingenteVorhanden": False,
+    }
+    r = _post("https://app.services-bahn.de/mob/angebote/fahrplan",
+              headers=_vendo_headers(media), data=json.dumps(body),
+              timeout=TIMEOUT)
+    r.raise_for_status()
+
+    intermediate_ok = None   # fact 1
+    frame_note = None        # fact 2
+    for c in r.json().get("verbindungen", []):
+        legs = [x for x in c["verbindung"]["verbindungsAbschnitte"]
+                if x.get("typ") == "FAHRZEUG"]
+        for a, b in zip(legs, legs[1:]):
+            stop = a["halte"][-1]
+            eva = stop["ort"].get("evaNr")
+            if not eva or b["halte"][0]["ort"].get("evaNr") != eva:
+                continue  # change between two different stations
+            arr_t = stop.get("ankunftsDatum")
+            dep_t = b["halte"][0].get("abgangsDatum")
+            if not arr_t or not dep_t:
+                continue
+            # Fact 1 — the arriving train, asked for by its arrival here. This
+            # stop is mid-run for it, not an origin.
+            arr = _wagenreihung(a["kurztext"], a["zugNummer"], eva,
+                                datetime.fromisoformat(arr_t))
+            if arr is not None and (arr.get("platform") or {}).get("sectors"):
+                intermediate_ok = (f"{a['kurztext']} {a['zugNummer']} mid-run @ "
+                                   f"{stop['ort'].get('name')} Gl."
+                                   f"{arr.get('departurePlatform')}")
+            dep = _wagenreihung(b["kurztext"], b["zugNummer"], eva,
+                                datetime.fromisoformat(dep_t))
+            if arr is None or dep is None:
+                continue
+            # Fact 2 — only meaningful for two tracks DB itself calls one
+            # platform. Vendo hangs that flag on the FUSSWEG before the train.
+            same = any(x.get("typ") == "FUSSWEG"
+                       and x.get("weiterfahrtAmGleichenBahnsteig")
+                       for x in c["verbindung"]["verbindungsAbschnitte"])
+            ta = {s["name"]: s for s in (arr.get("platform") or {}).get("sectors", [])}
+            tb = {s["name"]: s for s in (dep.get("platform") or {}).get("sectors", [])}
+            shared = set(ta) & set(tb)
+            if not (same and len(shared) >= 2):
+                continue
+            worst = max(
+                max(abs(ta[k]["start"] - tb[k]["start"]),
+                    abs(ta[k]["end"] - tb[k]["end"])) for k in shared)
+            gl_a, gl_b = arr.get("departurePlatform"), dep.get("departurePlatform")
+            if gl_a != gl_b and worst > 15.0:
+                raise CheckError(
+                    f"same-platform Gl.{gl_a}/{gl_b} at "
+                    f"{stop['ort'].get('name')}: sector tables disagree by "
+                    f"{worst:.1f} m (>15 m) — the shared-frame assumption "
+                    f"behind #27 no longer holds")
+            frame_note = (f"Gl.{gl_a}/{gl_b} @ {stop['ort'].get('name')}: "
+                          f"{len(shared)} shared sectors agree within "
+                          f"{worst:.1f} m")
+            break
+        if frame_note:
+            break
+
+    if intermediate_ok is None:
+        raise CheckError("no train's Wagenreihung served at a transfer stop "
+                         "keyed by arrival time (advice would never fire)")
+    parts = [f"mid-run sequence ok ({intermediate_ok})"]
+    parts.append(frame_note or "no same-platform pair to measure today")
+    return "; ".join(parts)
 
 
 def check_osm_platform_geometry() -> str:
@@ -2224,6 +2370,8 @@ CHECKS = [
     ("vendo train polyline (zuglauf)", check_vendo_train_polyline, False),
     ("vendo seat map (gsd free seats)", check_vendo_seat_map, False),
     ("wagenreihung wing-train split (RE)", check_wagenreihung_split, True),
+    ("wagenreihung transfer sectors (#27)",
+     check_wagenreihung_transfer_sectors, True),
     ("osm platform geometry (overpass)", check_osm_platform_geometry, False),
     ("basemap (OpenFreeMap Positron vector)", check_basemap_tiles, True),
     ("bahnhof.de station map (karte)", check_bahnhof_map, False),
@@ -2264,6 +2412,11 @@ def main() -> int:
             detail = fn()
             ms = int((time.monotonic() - t0) * 1000)
             print(f"  ✅ {name:36} {ms:>5}ms  {detail}")
+        except _SkipCheck as e:
+            # An optional dep is missing — the endpoint wasn't probed at all.
+            # Never counts as a failure: it says nothing about the API.
+            ms = int((time.monotonic() - t0) * 1000)
+            print(f"  ⏭️ SKIP {name:36} {ms:>5}ms  {e}")
         except Exception as e:  # noqa: BLE001 - report everything
             ms = int((time.monotonic() - t0) * 1000)
             tag = "⚠️ WARN" if soft else "❌ FAIL"
