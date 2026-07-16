@@ -502,7 +502,11 @@ class BahnbonusCo2Controller extends AsyncNotifier<DbBahnBonusCo2Balance?> {
       _refreshInBackground();
       return cached;
     }
-    return _fetchAndPersist();
+    // Do not start the separate BahnBonus OAuth flow implicitly. With no
+    // last-good value, show the explicit connect action immediately instead
+    // of leaving the statistics card in a loading state while account restore
+    // and secure-storage reads are still settling.
+    throw const DbBahnBonusAuthorizationRequired();
   }
 
   Future<void> refresh() async {
