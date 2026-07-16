@@ -99,6 +99,20 @@ class VendoService {
     // ['ALL'].
     List<String>? verkehrsmittel,
     bool nurDeutschlandTicketVerbindungen = false,
+    // Minimum transfer time in minutes (`minUmstiegsdauer`). Enforced by the
+    // backend — asking for 45 on Kiel–Augsburg turns 5-minute changes into
+    // 46+ ones. Without it the transfer profile can only warn about a gap it
+    // was handed, instead of asking for connections the rider can make.
+    int? minTransferMinutes,
+    // Cap on the number of changes (`maxUmstiege`). 0 = direct trains only.
+    // Note the backend answers an impossible cap with an empty list rather
+    // than an error.
+    int? maxTransfers,
+    // Stations the route must touch (`viaLocations`), each
+    // `{locationId, minUmstiegsdauer?}` — see [SearchOptions.viaLocationsJson].
+    // A via is "passed through", not necessarily changed at; its own
+    // minUmstiegsdauer applies only where the rider does change there.
+    List<Map<String, dynamic>>? viaLocations,
   }) async {
     final reisendeJson = (reisende == null || reisende.isEmpty)
         ? [
@@ -128,6 +142,11 @@ class VendoService {
             'zeitPunktArt': isArrival ? 'ANKUNFT' : 'ABFAHRT',
           },
           'zielLocationId': toLocationId,
+          if (minTransferMinutes != null)
+            'minUmstiegsdauer': minTransferMinutes,
+          if (maxTransfers != null) 'maxUmstiege': maxTransfers,
+          if (viaLocations != null && viaLocations.isNotEmpty)
+            'viaLocations': viaLocations,
           // Earlier/later pagination: the DB Navigator backend returns
           // frueherContext/spaeterContext tokens; replaying one here scrolls
           // the result window. Field is `context` (English), not `kontext`.

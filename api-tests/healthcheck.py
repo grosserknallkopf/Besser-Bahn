@@ -645,6 +645,115 @@ def check_vendo_verkehrsmittel() -> str:
             f"Fern={sorted(set(fern_g))}")
 
 
+def check_vendo_search_options() -> str:
+    """The search options must be honoured server-side (#19).
+
+    `maxUmstiege`, `minUmstiegsdauer` and `viaLocations` are the difference
+    between *searching* for a connection the rider can make and filtering holes
+    into a list we already fetched — the transfer profile can only warn about a
+    5-minute change it was handed, it can't ask for a better one.
+
+    Each is measured against a baseline on the same route rather than just
+    asserting a 200: the backend answers an unknown wunsch field by ignoring
+    it, so "not rejected" would prove nothing. Note it also answers an
+    impossible constraint with an empty list, not an error — hence the app's
+    relax-and-retry.
+    """
+    media = "application/x.db.vendo.mob.verbindungssuche.v9+json"
+    # Köln→München: enough one-change options for a cap to bite, and it has
+    # both direct ICEs and a natural via (Frankfurt).
+    koeln = "A=1@O=Köln Hbf@X=6958730@Y=50943029@U=80@L=8000207@"
+    frankfurt = "A=1@O=Frankfurt(Main)Hbf@X=8663785@Y=50107149@U=80@L=8000105@"
+
+    def search(**wunsch) -> list:
+        w = {
+            "abgangsLocationId": koeln,
+            "alternativeHalteBerechnung": True,
+            "verkehrsmittel": ["ALL"],
+            "zeitWunsch": {
+                "reiseDatum": (datetime.now().astimezone() + timedelta(days=2))
+                .replace(hour=9, minute=0, second=0, microsecond=0).isoformat(),
+                "zeitPunktArt": "ABFAHRT",
+            },
+            "zielLocationId": MUNICH_LOC,
+        }
+        w.update(wunsch)
+        body = {
+            "autonomeReservierung": False,
+            "einstiegsTypList": ["STANDARD"],
+            "fahrverguenstigungen": {
+                "deutschlandTicketVorhanden": False,
+                "nurDeutschlandTicketVerbindungen": False,
+            },
+            "klasse": "KLASSE_2",
+            "reiseHin": {"wunsch": w},
+            "reisendenProfil": {"reisende": [{
+                "ermaessigungen": ["KEINE_ERMAESSIGUNG KLASSENLOS"],
+                "reisendenTyp": "ERWACHSENER",
+            }]},
+            "reservierungsKontingenteVorhanden": False,
+        }
+        r = _post(
+            "https://app.services-bahn.de/mob/angebote/fahrplan",
+            headers=_vendo_headers(media), data=json.dumps(body),
+            timeout=TIMEOUT,
+        )
+        if r.status_code == 400:
+            raise CheckError(f"wunsch {list(wunsch)} rejected (400) — field "
+                             "renamed? re-extract from the Navigator APK")
+        r.raise_for_status()
+        out = []
+        for c in r.json().get("verbindungen", []):
+            legs = [a for a in c["verbindung"]["verbindungsAbschnitte"]
+                    if a.get("typ") == "FAHRZEUG"]
+            gaps = []
+            for a, b in zip(legs, legs[1:]):
+                gaps.append(int((datetime.fromisoformat(b["abgangsDatum"])
+                                 - datetime.fromisoformat(a["ankunftsDatum"])
+                                 ).total_seconds() // 60))
+            stops = {a.get("abgangsOrt", {}).get("name") for a in legs}
+            stops |= {a.get("ankunftsOrt", {}).get("name") for a in legs}
+            out.append({"umst": len(legs) - 1, "gaps": gaps, "stops": stops})
+        return out
+
+    base = search()
+    if not base:
+        raise CheckError("baseline search returned no verbindungen")
+
+    direct = search(maxUmstiege=0)
+    if not direct:
+        raise CheckError("maxUmstiege=0 returned nothing (route has ICEs)")
+    if any(c["umst"] > 0 for c in direct):
+        raise CheckError(
+            f"maxUmstiege=0 ignored: {[c['umst'] for c in direct]} changes")
+
+    slack = search(minUmstiegsdauer=40)
+    if not slack:
+        raise CheckError("minUmstiegsdauer=40 returned nothing")
+    tight = [g for c in slack for g in c["gaps"] if g < 40]
+    if tight:
+        raise CheckError(f"minUmstiegsdauer=40 ignored: gaps {tight} min")
+
+    # A via is *passed through*, not necessarily changed at — assert the route
+    # touches it, which is the promise the option makes.
+    via = search(viaLocations=[{"locationId": frankfurt}])
+    if not via:
+        raise CheckError("viaLocations returned nothing")
+    via_stay = search(viaLocations=[{"locationId": frankfurt,
+                                     "minUmstiegsdauer": 60}])
+    if not via_stay:
+        raise CheckError("viaLocations with own minUmstiegsdauer returned "
+                         "nothing")
+    if not any("Frankfurt(Main)Hbf" in c["stops"] for c in via_stay):
+        raise CheckError("per-via minUmstiegsdauer dropped the via itself")
+
+    base_min = min((g for c in base for g in c["gaps"]), default=None)
+    return (f"honoured — baseline {len(base)} conns (min gap {base_min} min), "
+            f"maxUmstiege=0 → {len(direct)} direct, minUmstiegsdauer=40 → "
+            f"min gap {min((g for c in slack for g in c['gaps']), default='—')}"
+            f", via → {len(via)} conns / with 60-min stay {len(via_stay)}")
+
+
 def check_vendo_journey_party() -> str:
     """Advanced "Reisende & Klasse" search: the app lets you build a party of
     multiple passengers (with explicit ages), a bike and a dog, pick 1st class,
@@ -1462,6 +1571,7 @@ CHECKS = [
     ("mob endpoint surface reachable (67)", check_mob_surface, True),
     ("vendo journey + prices (v9)", check_vendo_journey, False),
     ("vendo verkehrsmittel filter (#18)", check_vendo_verkehrsmittel, False),
+    ("vendo search options (#19)", check_vendo_search_options, False),
     ("vendo party search (pax/bike/dog/SBA)", check_vendo_journey_party, False),
     ("vendo journey pagination (context)", check_vendo_journey_pagination, False),
     ("vendo weitere abfahrten (segment)", check_vendo_weitere_abfahrten, False),

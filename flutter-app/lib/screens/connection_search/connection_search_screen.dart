@@ -11,6 +11,7 @@ import '../../widgets/station_search_field.dart';
 import '../../widgets/app_menu_button.dart';
 import 'widgets/journey_card.dart';
 import 'widgets/reisende_sheet.dart';
+import 'widgets/search_options_sheet.dart';
 
 class ConnectionSearchScreen extends ConsumerStatefulWidget {
   const ConnectionSearchScreen({super.key});
@@ -47,6 +48,19 @@ class _ConnectionSearchScreenState
     ref.read(settingsProvider.notifier).setSearchParty(updated);
     // Re-run the search so prices reflect the new party immediately.
     if (ref.read(journeySearchProvider).result != null) _search();
+  }
+
+  Future<void> _editOptions() async {
+    final state = ref.read(journeySearchProvider);
+    final updated = await showSearchOptionsSheet(
+      context,
+      state.options,
+      profile: ref.read(settingsProvider).transferProfile,
+    );
+    if (updated == null || !mounted) return;
+    // setOptions re-runs the search itself when results are already showing;
+    // before the first search it just records the wish.
+    ref.read(journeySearchProvider.notifier).setOptions(updated);
   }
 
   void _applyRoute(SavedRoute route) {
@@ -177,35 +191,41 @@ class _ConnectionSearchScreenState
                     ],
                   ),
                   const SizedBox(height: 6),
-                  // Reisende & Klasse — opens the party sheet (passengers,
-                  // ages, bike/dog, class, BahnCards, Schwerbehindertenausweis).
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 10),
-                        alignment: Alignment.centerLeft,
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
-                      ),
-                      icon: const Icon(Icons.people_outline, size: 20),
-                      label: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              ref
-                                  .watch(settingsProvider
-                                      .select((s) => s.searchParty))
-                                  .summary,
-                              style: theme.textTheme.bodyMedium,
-                            ),
+                  Row(
+                    children: [
+                      // Reisende & Klasse — opens the party sheet (passengers,
+                      // ages, bike/dog, class, BahnCards,
+                      // Schwerbehindertenausweis).
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 10),
+                            alignment: Alignment.centerLeft,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12)),
                           ),
-                          const Icon(Icons.expand_more, size: 18),
-                        ],
+                          icon: const Icon(Icons.people_outline, size: 20),
+                          label: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  ref
+                                      .watch(settingsProvider
+                                          .select((s) => s.searchParty))
+                                      .summary,
+                                  style: theme.textTheme.bodyMedium,
+                                ),
+                              ),
+                              const Icon(Icons.expand_more, size: 18),
+                            ],
+                          ),
+                          onPressed: _editParty,
+                        ),
                       ),
-                      onPressed: _editParty,
-                    ),
+                      const SizedBox(width: 6),
+                      _optionsButton(context, state),
+                    ],
                   ),
                   const SizedBox(height: 6),
                   // IntrinsicHeight + stretch: time field, Ab/An toggle and
@@ -309,6 +329,33 @@ class _ConnectionSearchScreenState
     );
   }
 
+  /// Opens the search-options sheet (#19). Sits next to the party button
+  /// rather than in the result filter bar: max. changes / transfer time / via
+  /// shape the *query*, so they have to be reachable before the first search,
+  /// and the filter bar only exists once there are results.
+  Widget _optionsButton(BuildContext context, JourneySearchState state) {
+    final count = state.options.activeCount;
+    final scheme = Theme.of(context).colorScheme;
+    return OutlinedButton(
+      style: OutlinedButton.styleFrom(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        // An active constraint must be visible without opening the sheet —
+        // otherwise a search silently missing connections looks like DB's
+        // fault.
+        foregroundColor: count > 0 ? scheme.onPrimaryContainer : null,
+        backgroundColor: count > 0 ? scheme.primaryContainer : null,
+      ),
+      onPressed: _editOptions,
+      child: Badge(
+        isLabelVisible: count > 0,
+        label: Text('$count'),
+        child: const Icon(Icons.tune, size: 20),
+      ),
+    );
+  }
+
   Widget _buildSavedRoutes(BuildContext context) {
     final routes = ref.watch(libraryProvider).routes;
     if (routes.isEmpty) return const SizedBox.shrink();
@@ -372,15 +419,20 @@ class _ConnectionSearchScreenState
     return Column(
       children: [
         _productFilterBar(context, state, notifier),
+        if (state.transferProfileRelaxed) _relaxedNotice(context),
         if (state.sortMode == JourneySortMode.reliability)
           _reliabilityNotice(context),
         Expanded(
           child: journeys.isEmpty
-              ? const Center(
+              ? Center(
                   child: Padding(
-                    padding: EdgeInsets.all(24),
+                    padding: const EdgeInsets.all(24),
                     child: Text(
-                        'Keine Verbindungen — ggf. einen Verkehrsmittel-Filter lockern.',
+                        state.options.isDefault
+                            ? 'Keine Verbindungen — ggf. einen '
+                                'Verkehrsmittel-Filter lockern.'
+                            : 'Keine Verbindung passt zu deinen Suchoptionen '
+                                '— tippe oben auf Optionen und lockere sie.',
                         textAlign: TextAlign.center),
                   ),
                 )
@@ -436,6 +488,35 @@ class _ConnectionSearchScreenState
               'Sortiert nach Prognose: Anschluss erreicht & pünktlich an. '
               'Ohne Prognose stehen unten.',
               style: TextStyle(fontSize: 11, color: scheme.onSurfaceVariant),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The transfer profile asked DB for connections with enough slack and got
+  /// none, so the list below is the unconstrained one (#19). Saying so beats
+  /// both alternatives: an empty list hides connections that exist, and
+  /// silently showing 5-minute changes to someone who set "Barrierearm" is the
+  /// bug the profile was supposed to fix.
+  Widget _relaxedNotice(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final profile = ref.watch(settingsProvider).transferProfile;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+      color: scheme.tertiaryContainer,
+      child: Row(
+        children: [
+          Icon(Icons.info_outline, size: 14, color: scheme.onTertiaryContainer),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Keine Verbindung mit ${profile.minTransferMinutes} min '
+              'Umstiegszeit (${profile.label}) — hier sind die knapperen.',
+              style: TextStyle(
+                  fontSize: 11, color: scheme.onTertiaryContainer),
             ),
           ),
         ],

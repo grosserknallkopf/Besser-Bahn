@@ -10,13 +10,30 @@
 enum TransferProfile {
   fast('Schnell', '🚀', 0.6, 'Du kennst die Bahnhöfe und gehst zügig.'),
   normal('Normal', '🚶', 1.0, 'Standard — wie die Bahn plant.'),
-  luggage('Mit Gepäck', '🧳', 1.4, 'Koffer, Treppen kosten Zeit.'),
-  child('Mit Kind', '👨‍👧', 1.6, 'Kinderwagen, kleine Schritte, Aufzüge.'),
-  bike('Mit Fahrrad', '🚲', 1.6, 'Aufzug oder Rampe statt Treppe.'),
-  accessible('Barrierearm', '♿', 1.8, 'Nur Aufzüge und Rampen.'),
-  slow('Mehr Zeit', '🐢', 2.0, 'Umsteigen darf nicht hetzen.');
+  luggage('Mit Gepäck', '🧳', 1.4, 'Koffer, Treppen kosten Zeit.',
+      minTransferMinutes: 10),
+  child('Mit Kind', '👨‍👧', 1.6, 'Kinderwagen, kleine Schritte, Aufzüge.',
+      minTransferMinutes: 12),
+  bike('Mit Fahrrad', '🚲', 1.6, 'Aufzug oder Rampe statt Treppe.',
+      minTransferMinutes: 12),
+  accessible('Barrierearm', '♿', 1.8, 'Nur Aufzüge und Rampen.',
+      minTransferMinutes: 15),
+  slow('Mehr Zeit', '🐢', 2.0, 'Umsteigen darf nicht hetzen.',
+      minTransferMinutes: 20);
 
-  const TransferProfile(this.label, this.emoji, this.factor, this.hint);
+  const TransferProfile(this.label, this.emoji, this.factor, this.hint,
+      {this.minTransferMinutes});
+
+  /// Minimum transfer time to *ask DB for* (`minUmstiegsdauer`), so the search
+  /// returns real alternatives with enough slack instead of 5-minute changes
+  /// this rider can't make. Verified server-side: minUmstiegsdauer 45 on
+  /// Kiel–Augsburg turns gaps of [13, 5] into [49, 46, 71].
+  ///
+  /// Null for `fast`/`normal` — DB's own station minimum already is that
+  /// rider, and constraining the search would only shrink the result set for
+  /// nothing. Deliberately well below `factor` would suggest: over-filtering
+  /// hands back an empty list, which is worse than a warning.
+  final int? minTransferMinutes;
 
   /// Shown in the settings picker.
   final String label;

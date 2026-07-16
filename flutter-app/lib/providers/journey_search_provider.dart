@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/station.dart';
 import '../core/app_log.dart';
 import '../models/journey.dart';
+import '../models/search_options.dart';
 import '../utils/journey_highlights.dart';
 import 'prediction_provider.dart';
 import 'service_providers.dart';
@@ -60,6 +61,15 @@ class JourneySearchState {
   /// #18 ("existiert auf der bahn.de Website"); the backend does the work.
   final bool onlyDeutschlandTicket;
 
+  /// The transfer profile's minimum was dropped because nothing matched it —
+  /// the results below have changes this rider may not manage. Told to them
+  /// rather than silently handing back tight connections.
+  final bool transferProfileRelaxed;
+
+  /// Max. changes / min. transfer time / via station — the backend-enforced
+  /// part of the search the rider steers (#19).
+  final SearchOptions options;
+
   JourneySearchState({
     this.from,
     this.to,
@@ -70,6 +80,8 @@ class JourneySearchState {
     this.error,
     this.sortMode = JourneySortMode.departure,
     this.onlyDeutschlandTicket = false,
+    this.transferProfileRelaxed = false,
+    this.options = const SearchOptions(),
     Set<ProductCategory>? products,
   }) : products = products ?? ProductCategory.values.toSet();
 
@@ -89,6 +101,8 @@ class JourneySearchState {
     JourneySortMode? sortMode,
     Set<ProductCategory>? products,
     bool? onlyDeutschlandTicket,
+    bool? transferProfileRelaxed,
+    SearchOptions? options,
     bool clearDateTime = false,
   }) {
     return JourneySearchState(
@@ -103,6 +117,9 @@ class JourneySearchState {
       products: products ?? this.products,
       onlyDeutschlandTicket:
           onlyDeutschlandTicket ?? this.onlyDeutschlandTicket,
+      transferProfileRelaxed:
+          transferProfileRelaxed ?? this.transferProfileRelaxed,
+      options: options ?? this.options,
     );
   }
 
@@ -175,6 +192,15 @@ class JourneySearchNotifier extends Notifier<JourneySearchState> {
     if (state.result != null) search();
   }
 
+  /// Apply max. changes / min. transfer time / via (#19). Backend-enforced, so
+  /// like the other query parts this re-runs the search — but only if the
+  /// options actually changed, since the sheet applies on every close.
+  void setOptions(SearchOptions options) {
+    if (options == state.options) return;
+    state = state.copyWith(options: options);
+    if (state.result != null) search();
+  }
+
   void swapStations() {
     state = state.copyWith(from: state.to, to: state.from);
   }
@@ -228,21 +254,52 @@ class JourneySearchNotifier extends Notifier<JourneySearchState> {
       // (chronically down) were removed — they never succeeded and only added a
       // multi-second hang before the real error surfaced.
       final vendo = ref.read(vendoServiceProvider);
-      final party = ref.read(settingsProvider).searchParty;
-      final result = await vendo.searchJourneys(
-        fromLocationId: from.vendoLocationId,
-        toLocationId: to.vendoLocationId,
-        dateTime: state.dateTime ?? DateTime.now(),
-        isArrival: state.useArrival,
-        firstClass: party.firstClass,
-        reisende: party.toReisendeJson(),
-        deutschlandTicket: party.deutschlandTicket,
-        verkehrsmittel: ProductCategory.codesFor(state.products),
-        nurDeutschlandTicketVerbindungen: state.onlyDeutschlandTicket,
-      );
-      AppLog.log('vendo result: ${result.journeys.length} journeys',
-          tag: 'journey');
-      state = state.copyWith(result: result, isLoading: false);
+      final settings = ref.read(settingsProvider);
+      final party = settings.searchParty;
+      final options = state.options;
+      // Ask DB for transfers this rider can actually make, instead of judging
+      // 5-minute changes after the fact (#19). An explicit wish from the
+      // options sheet wins over the profile's guess; null for fast/normal.
+      final fromProfile = options.minTransferMinutes == null;
+      final minTransfer = options.minTransferMinutes ??
+          settings.transferProfile.minTransferMinutes;
+
+      Future<JourneyResult> run({int? minTransferMinutes}) =>
+          vendo.searchJourneys(
+            fromLocationId: from!.vendoLocationId,
+            toLocationId: to!.vendoLocationId,
+            dateTime: state.dateTime ?? DateTime.now(),
+            isArrival: state.useArrival,
+            firstClass: party.firstClass,
+            reisende: party.toReisendeJson(),
+            deutschlandTicket: party.deutschlandTicket,
+            verkehrsmittel: ProductCategory.codesFor(state.products),
+            nurDeutschlandTicketVerbindungen: state.onlyDeutschlandTicket,
+            minTransferMinutes: minTransferMinutes,
+            maxTransfers: options.maxTransfers,
+            viaLocations: options.viaLocationsJson,
+          );
+
+      var result = await run(minTransferMinutes: minTransfer);
+      var relaxed = false;
+      // A profile that's too demanding for the route comes back empty — the
+      // backend answers an impossible constraint with an empty list, not an
+      // error. Showing "nothing found" would be a lie: connections exist, they
+      // just have tight changes. Retry unconstrained and say so.
+      //
+      // Only for the *profile's* minimum. A number the rider typed into the
+      // options sheet is a filter like any other — quietly ignoring it would
+      // be worse than an empty list they know how to widen.
+      if (result.journeys.isEmpty && minTransfer != null && fromProfile) {
+        AppLog.log('no journeys with minUmstiegsdauer=$minTransfer — retrying',
+            tag: 'journey');
+        result = await run();
+        relaxed = result.journeys.isNotEmpty;
+      }
+      AppLog.log('vendo result: ${result.journeys.length} journeys'
+          '${relaxed ? " (profile relaxed)" : ""}', tag: 'journey');
+      state = state.copyWith(
+          result: result, isLoading: false, transferProfileRelaxed: relaxed);
     } catch (e) {
       AppLog.log('search FAILED: $e', tag: 'journey');
       state = state.copyWith(error: 'Fehler: $e', isLoading: false);
@@ -264,7 +321,17 @@ class JourneySearchNotifier extends Notifier<JourneySearchState> {
     state = state.copyWith(isLoading: true, error: null);
     try {
       final vendo = ref.read(vendoServiceProvider);
-      final party = ref.read(settingsProvider).searchParty;
+      final settings = ref.read(settingsProvider);
+      final party = settings.searchParty;
+      final options = state.options;
+      // The constraints have to travel with the paged request too — the
+      // context token scrolls the window, it doesn't carry the wish. Without
+      // them, "Später" would append the very 5-minute changes the first page
+      // was searched to avoid.
+      //
+      // Deliberately no relax-retry here: an empty page means this end of the
+      // window has nothing left, not that the profile is too strict — the
+      // first page already proved connections exist.
       final more = await vendo.searchJourneys(
         fromLocationId: state.from!.vendoLocationId,
         toLocationId: state.to!.vendoLocationId,
@@ -276,6 +343,12 @@ class JourneySearchNotifier extends Notifier<JourneySearchState> {
         deutschlandTicket: party.deutschlandTicket,
         verkehrsmittel: ProductCategory.codesFor(state.products),
         nurDeutschlandTicketVerbindungen: state.onlyDeutschlandTicket,
+        minTransferMinutes: state.transferProfileRelaxed
+            ? null
+            : options.minTransferMinutes ??
+                settings.transferProfile.minTransferMinutes,
+        maxTransfers: options.maxTransfers,
+        viaLocations: options.viaLocationsJson,
       );
 
       // Dedupe against what we already show (paged windows can overlap).
