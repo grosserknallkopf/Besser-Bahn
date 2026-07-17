@@ -16,6 +16,7 @@ import '../screens/connection_search/best_price_screen.dart';
 import '../screens/station_map/station_map_screen.dart';
 import '../screens/connection_search/connection_detail_screen.dart';
 import '../models/journey.dart';
+import 'tab_slide.dart';
 import '../screens/split_ticket/split_ticket_screen.dart';
 import '../screens/split_ticket/bulk_split_screen.dart';
 import '../screens/settings/settings_screen.dart';
@@ -66,24 +67,48 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         routes: [
           GoRoute(
             path: '/search',
-            pageBuilder: (context, state) =>
-                const NoTransitionPage(child: ConnectionSearchScreen()),
+            pageBuilder: (context, state) => CustomTransitionPage(
+              key: state.pageKey,
+              transitionDuration: TabSlide.duration,
+              reverseTransitionDuration: TabSlide.duration,
+              transitionsBuilder: (context, animation, _, child) =>
+                  TabSlide.build(0, animation, child),
+              child: const ConnectionSearchScreen(),
+            ),
           ),
           GoRoute(
             path: '/journeys',
-            pageBuilder: (context, state) =>
-                const NoTransitionPage(child: JourneysScreen()),
+            pageBuilder: (context, state) => CustomTransitionPage(
+              key: state.pageKey,
+              transitionDuration: TabSlide.duration,
+              reverseTransitionDuration: TabSlide.duration,
+              transitionsBuilder: (context, animation, _, child) =>
+                  TabSlide.build(1, animation, child),
+              child: const JourneysScreen(),
+            ),
           ),
           // Combined Zug + Abfahrten + Karte screen (internal tab bar).
           GoRoute(
             path: '/nearby',
-            pageBuilder: (context, state) =>
-                const NoTransitionPage(child: NearbyScreen()),
+            pageBuilder: (context, state) => CustomTransitionPage(
+              key: state.pageKey,
+              transitionDuration: TabSlide.duration,
+              reverseTransitionDuration: TabSlide.duration,
+              transitionsBuilder: (context, animation, _, child) =>
+                  TabSlide.build(2, animation, child),
+              child: const NearbyScreen(),
+            ),
           ),
           GoRoute(
             path: '/profile',
-            pageBuilder: (context, state) =>
-                const NoTransitionPage(child: ProfileScreen()),
+            pageBuilder: (context, state) => CustomTransitionPage(
+              key: state.pageKey,
+              transitionDuration: TabSlide.duration,
+              reverseTransitionDuration: TabSlide.duration,
+              transitionsBuilder: (context, animation, _, child) =>
+                  TabSlide.build(3, animation, child),
+              child: const ProfileScreen(),
+            ),
           ),
         ],
       ),

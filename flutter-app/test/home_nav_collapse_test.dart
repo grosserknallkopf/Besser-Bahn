@@ -119,13 +119,9 @@ void main() {
       await tester.tap(find.byIcon(Icons.train_outlined));
       await tester.pumpAndSettle();
 
-      // Pre-existing, and not this feature's to fix: the tab slide holds the
-      // outgoing page for 260 ms while go_router rebuilds its shell Navigator,
-      // which carries a GlobalObjectKey — so two of them exist for one frame
-      // and the framework says so. The unmodified shell does this on every tab
-      // switch (verified), and recovers. Asserted rather than ignored, so a
-      // *different* exception can't slip through here unnoticed.
-      expect(tester.takeException().toString(), contains('Duplicate GlobalKey'));
+// The tab slide used to clash GlobalKeys here; it now runs on the
+      // router's pages, so a tab switch must throw nothing at all.
+      expect(tester.takeException(), isNull);
 
       // The new tab starts at its own top and cannot scroll — it will never
       // send a notification, so the shell has to reset with the slide.
