@@ -16,6 +16,7 @@ Better Bahn ("Besser Bahn") is a free and open-source application that helps use
 
 - **DB Links:** URLs from bahn.de that you paste into the app to analyze train connections
 - **User preferences:** Your settings such as age, BahnCard type, and Deutschland-Ticket status
+- **Optional background location:** If you explicitly enable the GPS journey companion, the app processes your device position locally during an active watched journey to warn before your stop, estimate possible unreported delays, and suggest alternatives after a possibly missed train or connection. The position is not sent to the developer or stored in a developer-operated service. Android shows a persistent notification while this is active, and the feature can be disabled in Settings at any time.
 
 All this data is processed locally on your device and is never sent to any server operated by the developer.
 

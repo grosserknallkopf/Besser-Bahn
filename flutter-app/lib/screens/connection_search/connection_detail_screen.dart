@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/app_log.dart';
 import '../../core/extensions.dart';
+import '../../core/missed_connection.dart';
 import '../../core/share_text.dart';
 import '../../models/coach_sequence.dart';
 import '../../models/journey.dart';
@@ -201,6 +202,7 @@ class _ConnectionDetailScreenState
   Widget build(BuildContext context) {
     final legs = journey.legs;
     final ticketRef = widget.ticketRef;
+    final missed = MissedConnectionRescue.forJourney(journey);
     return Scaffold(
       appBar: AppBar(
         // Full route is cut off on a phone here → moved into the summary block.
@@ -382,6 +384,12 @@ class _ConnectionDetailScreenState
           // folded into the summary block above (TripProgressInline).
           FahrgastrechteCard(journey: journey),
           DepartureCard(journey: journey),
+          if (missed != null)
+            _MissedConnectionCard(
+              rescue: missed,
+              onPressed: () =>
+                  _showMissedAlternatives(context, ref, missed),
+            ),
           for (var i = 0; i < legs.length; i++) ...[
             if (i > 0) _transfer(context, ref, legs[i - 1], legs[i]),
             if (legs[i].isWalking)
@@ -621,6 +629,23 @@ class _ConnectionDetailScreenState
     n.setFrom(from);
     n.setTo(to);
     n.setDateTime(journey.plannedDeparture ?? journey.departure);
+    n.setIsArrival(false);
+    context.go('/search');
+    n.search();
+  }
+
+  /// Reroute from the specific boarding stop that was missed, not from the
+  /// journey's original origin. The same action therefore also works halfway
+  /// through a journey after a missed connection.
+  void _showMissedAlternatives(
+    BuildContext context,
+    WidgetRef ref,
+    MissedConnectionRescue rescue,
+  ) {
+    final n = ref.read(journeySearchProvider.notifier);
+    n.setFrom(rescue.from);
+    n.setTo(rescue.to);
+    n.setDateTime(DateTime.now().add(const Duration(minutes: 1)));
     n.setIsArrival(false);
     context.go('/search');
     n.search();
@@ -1653,6 +1678,60 @@ class _TripDetailsUnavailable extends StatelessWidget {
 /// Top-of-screen banner: the connection as planned can't be travelled because a
 /// train fully cancels (red) or drops a stop (amber). Points the rider at the
 /// per-Fahrtblock alternative-departure switcher further down.
+class _MissedConnectionCard extends StatelessWidget {
+  final MissedConnectionRescue rescue;
+  final VoidCallback onPressed;
+
+  const _MissedConnectionCard({
+    required this.rescue,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Card(
+      margin: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      color: colors.secondaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Icon(Icons.directions_run, color: colors.onSecondaryContainer),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    rescue.isConnection
+                        ? 'Anschluss nicht geschafft?'
+                        : 'Zug nicht geschafft?',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          color: colors.onSecondaryContainer,
+                        ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Neue Verbindungen ab ${rescue.from.name} suchen.',
+                    style: TextStyle(color: colors.onSecondaryContainer),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            FilledButton(
+              onPressed: onPressed,
+              child: const Text('Verpasst'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _JourneyCancelBanner extends StatelessWidget {
   final bool partial;
   const _JourneyCancelBanner({required this.partial});

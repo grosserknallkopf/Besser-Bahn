@@ -8,6 +8,7 @@ import '../../models/split_ticket.dart';
 import '../../models/transfer_profile.dart';
 import '../../models/traewelling_models.dart';
 import '../../providers/offline_package_provider.dart';
+import '../../providers/service_providers.dart';
 import '../../providers/settings_provider.dart';
 import '../../providers/traewelling_provider.dart';
 import '../../services/notification_service.dart';
@@ -123,13 +124,15 @@ class SettingsScreen extends ConsumerWidget {
                     if (v) NotificationService.requestPermissions();
                   },
                 ),
-                if (settings.arrivalAlertEnabled) ...[
+                if (settings.arrivalAlertEnabled ||
+                    settings.exitAlarmEnabled) ...[
                   const Divider(height: 1),
                   SwitchListTile(
                     secondary: const Icon(Icons.alarm),
-                    title: const Text('Klingeln statt nur vibrieren'),
+                    title: const Text('Laut klingeln'),
                     subtitle: const Text(
-                        '5 Min vorher laut klingeln, bis du es stoppst.'),
+                        'Ankunfts- und GPS-Hinweis als echten Wecker klingeln '
+                        'lassen, bis du ihn stoppst.'),
                     value: settings.arrivalAlarmSound,
                     onChanged: (v) {
                       notifier.setArrivalAlarmSound(v);
@@ -142,12 +145,26 @@ class SettingsScreen extends ConsumerWidget {
                   secondary: const Icon(Icons.my_location),
                   title: const Text('GPS-Ausstiegsalarm'),
                   subtitle: const Text(
-                      'Klingelt per Standort, sobald du am Ziel ankommst — '
-                      'verspätungssicher (App muss offen sein).'),
+                      'Läuft im Hintergrund: warnt am Ziel und erkennt per '
+                      'Fahrplan + Position mögliche ungemeldete Verspätung.'),
                   value: settings.exitAlarmEnabled,
-                  onChanged: (v) {
-                    notifier.setExitAlarmEnabled(v);
-                    if (v) NotificationService.requestPermissions();
+                  onChanged: (v) async {
+                    if (!v) {
+                      notifier.setExitAlarmEnabled(false);
+                      return;
+                    }
+                    try {
+                      await ref
+                          .read(locationServiceProvider)
+                          .ensureBackgroundPermission();
+                      notifier.setExitAlarmEnabled(true);
+                      await NotificationService.requestPermissions();
+                    } catch (e) {
+                      if (!context.mounted) return;
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(e.toString())),
+                      );
+                    }
                   },
                 ),
                 const Divider(height: 1),

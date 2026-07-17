@@ -1,11 +1,14 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_timezone/flutter_timezone.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest_all.dart' as tzdata;
 import 'package:timezone/timezone.dart' as tz;
 
 import '../core/app_log.dart';
+import '../core/missed_connection.dart';
 
 /// Thin wrapper around flutter_local_notifications for the OS notifications the
 /// app fires: one-shot results (e.g. "Split-Ticket-Analyse fertig"), live trip
@@ -18,6 +21,15 @@ class NotificationService {
   static final _plugin = FlutterLocalNotificationsPlugin();
   static bool _ready = false;
   static bool _exactAlarms = false;
+  static const _missedPayloadPrefix = 'missed-connection:';
+  static const _pendingMissedKey = 'pending_missed_connection_v1';
+  static final _missedRescues =
+      StreamController<MissedConnectionRescue>.broadcast();
+
+  /// Emits when the rider taps "Alternativen suchen" while the app is alive.
+  /// Cold starts use [takePendingMissedRescue] instead.
+  static Stream<MissedConnectionRescue> get missedRescues =>
+      _missedRescues.stream;
 
   /// Lowest notification id used for *scheduled* trip reminders. Reserved range
   /// so [cancelReminders] can reconcile them without touching the one-shot
@@ -86,6 +98,11 @@ class NotificationService {
         // also run when the app cold-starts from a notification tap.
         onDidReceiveNotificationResponse: _onResponse,
       );
+      final launch = await _plugin.getNotificationAppLaunchDetails();
+      if (launch?.didNotificationLaunchApp == true &&
+          launch?.notificationResponse != null) {
+        await _handleResponse(launch!.notificationResponse!);
+      }
       final android_ = _plugin.resolvePlatformSpecificImplementation<
           AndroidFlutterLocalNotificationsPlugin>();
       await android_?.createNotificationChannel(_channel);
@@ -222,6 +239,54 @@ class NotificationService {
     }
   }
 
+  /// Ask rather than assert when GPS suggests that a train/connection was
+  /// missed. The affirmative action launches the app and carries the exact
+  /// station from which alternatives should be searched.
+  static Future<void> showMissedConnectionPrompt({
+    required int id,
+    required MissedConnectionRescue rescue,
+  }) async {
+    if (!_ready) await init();
+    await _ensurePermission();
+    try {
+      final details = NotificationDetails(
+        android: AndroidNotificationDetails(
+          'trip_alerts',
+          'Reise-Hinweise',
+          channelDescription:
+              'Abfahrts-Erinnerungen, Verspätungen und Umstiege',
+          importance: Importance.high,
+          priority: Priority.high,
+          actions: const <AndroidNotificationAction>[
+            AndroidNotificationAction(
+              'missed_alternatives',
+              'Alternativen suchen',
+              showsUserInterface: true,
+              cancelNotification: true,
+            ),
+            AndroidNotificationAction(
+              'missed_no',
+              'Nein',
+              cancelNotification: true,
+            ),
+          ],
+        ),
+        iOS: const DarwinNotificationDetails(),
+        macOS: const DarwinNotificationDetails(),
+      );
+      await _plugin.show(
+        id: 4000 + (id % 1000),
+        title: '${rescue.label}?',
+        body: 'Deine Position spricht dafür. Jetzt Alternativen ab '
+            '${rescue.from.name} suchen?',
+        notificationDetails: details,
+        payload: '$_missedPayloadPrefix${rescue.encode()}',
+      );
+    } catch (e) {
+      AppLog.log('missed connection prompt failed ($e)', tag: 'notify');
+    }
+  }
+
   // ---- Scheduled trip reminders (planned offline from the timetable) ----
 
   /// Schedule a reminder to fire at [when] (a wall-clock instant in the local
@@ -352,6 +417,41 @@ class NotificationService {
   static void _onResponse(NotificationResponse r) {
     if (r.actionId == 'stop_alarm') {
       AppLog.log('arrival alarm stopped by user', tag: 'notify');
+    }
+    unawaited(_handleResponse(r));
+  }
+
+  static Future<void> _handleResponse(NotificationResponse response) async {
+    final payload = response.payload;
+    if (payload == null || !payload.startsWith(_missedPayloadPrefix)) return;
+    if (response.actionId == 'missed_no') return;
+    if (response.actionId != null &&
+        response.actionId!.isNotEmpty &&
+        response.actionId != 'missed_alternatives') {
+      return;
+    }
+    try {
+      final raw = payload.substring(_missedPayloadPrefix.length);
+      final rescue = MissedConnectionRescue.decode(raw);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_pendingMissedKey, raw);
+      _missedRescues.add(rescue);
+    } catch (e) {
+      AppLog.log('missed notification payload invalid ($e)', tag: 'notify');
+    }
+  }
+
+  /// Consume a rescue tap persisted before the Flutter UI was ready.
+  static Future<MissedConnectionRescue?> takePendingMissedRescue() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.reload();
+    final raw = prefs.getString(_pendingMissedKey);
+    if (raw == null) return null;
+    await prefs.remove(_pendingMissedKey);
+    try {
+      return MissedConnectionRescue.decode(raw);
+    } catch (_) {
+      return null;
     }
   }
 }

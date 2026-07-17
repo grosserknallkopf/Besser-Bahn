@@ -5,6 +5,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'app.dart';
 import 'core/app_log.dart';
 import 'core/tile_cache.dart';
+import 'services/background_trip_tracking.dart';
 import 'services/notification_service.dart';
 
 Future<void> main() async {
@@ -22,6 +23,9 @@ Future<void> main() async {
   TileCache.warmStyle();
   // Best-effort: local notifications (Split-Ticket-Ergebnis). Non-fatal.
   await NotificationService.init();
+  // Persist the Android headless callback before a journey starts. Once the
+  // GPS companion is enabled, native updates can reach Dart without the UI.
+  await BackgroundTripTracking.registerHeadlessCallback();
   runApp(
     const ProviderScope(
       child: BessereBahnApp(),
