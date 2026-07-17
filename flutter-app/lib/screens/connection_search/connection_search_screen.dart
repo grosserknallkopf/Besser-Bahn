@@ -276,8 +276,6 @@ class _ConnectionSearchScreenState
           ),
         ),
 
-        _buildSavedRoutes(context),
-
         // The filter and the notices belong to a result, so they arrive with
         // one. Kept in the header rather than in the list: they are chrome for
         // the connections below, and scrolling them away would hide why the
@@ -317,6 +315,11 @@ class _ConnectionSearchScreenState
                       controller: _fromController,
                       onSelected: notifier.setFrom,
                       dense: true,
+                      // Saved routes live in the From field's menu now: one tap
+                      // fills both ends. Surfaces the feature where you start
+                      // typing, instead of as a separate chip strip (#38).
+                      savedRoutes: ref.watch(libraryProvider).routes,
+                      onRouteSelected: _applyRoute,
                     ),
                     const SizedBox(height: 4),
                     StationSearchField(
@@ -606,58 +609,6 @@ class _ConnectionSearchScreenState
         isLabelVisible: count > 0,
         label: Text('$count'),
         child: const Icon(Icons.tune, size: 20),
-      ),
-    );
-  }
-
-  Widget _buildSavedRoutes(BuildContext context) {
-    final routes = ref.watch(libraryProvider).routes;
-    if (routes.isEmpty) return const SizedBox.shrink();
-    return _glassStrip(
-      children: [
-        for (final route in routes)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 3),
-            child: ActionChip(
-              avatar: const Icon(Icons.bookmark, size: 16),
-              visualDensity: VisualDensity.compact,
-              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              label: Text(
-                '${route.from.name} → ${route.to.name}',
-                overflow: TextOverflow.ellipsis,
-              ),
-              onPressed: () => _applyRoute(route),
-            ),
-          ),
-      ],
-    );
-  }
-
-  /// A floating pill of glass holding one horizontally scrolling row of chips —
-  /// the shape the bottom nav bar wears, so the filter and the saved routes
-  /// read as the same furniture.
-  ///
-  /// A [SingleChildScrollView] + [Row] rather than the horizontal [ListView]
-  /// these rows used to be: a horizontal list has no intrinsic height, so it
-  /// forces one to be hardcoded here and forces every chip to exactly that —
-  /// which is precisely how a chip that grew a few px (a longer label, a larger
-  /// system text scale) becomes the next "3 px overflow". The Row takes the
-  /// chips' own height instead, and since the header is *measured*
-  /// ([_MeasuredHeight]) the results re-pad themselves to whatever that is. No
-  /// number to get wrong.
-  ///
-  /// Both rows are short (≤ 7 chips) and the lists they replace passed
-  /// `children:`, so they were built eagerly already — nothing is lost.
-  Widget _glassStrip({required List<Widget> children}) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 8),
-      child: GlassPanel(
-        radius: GlassPanel.pillRadius,
-        child: SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.all(4),
-          child: Row(children: children),
-        ),
       ),
     );
   }

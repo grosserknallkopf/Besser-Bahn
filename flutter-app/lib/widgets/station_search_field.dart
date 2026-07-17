@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../models/library_models.dart';
 import '../models/station.dart';
 import '../providers/library_provider.dart';
 import '../providers/station_search_provider.dart';
@@ -16,6 +17,13 @@ class StationSearchField extends ConsumerStatefulWidget {
   /// where the form must stay tight (the connection search header).
   final bool dense;
 
+  /// Saved from→to routes to surface at the top of the suggestion menu (before
+  /// favorites/recents). Only shown when [onRouteSelected] is wired.
+  final List<SavedRoute> savedRoutes;
+
+  /// Picking a saved route — the caller fills *both* the From and To fields.
+  final ValueChanged<SavedRoute>? onRouteSelected;
+
   const StationSearchField({
     super.key,
     required this.hint,
@@ -24,6 +32,8 @@ class StationSearchField extends ConsumerStatefulWidget {
     this.prefixIcon,
     this.controller,
     this.dense = false,
+    this.savedRoutes = const [],
+    this.onRouteSelected,
   });
 
   @override
@@ -204,7 +214,10 @@ class _StationSearchFieldState extends ConsumerState<StationSearchField> {
     final library = ref.watch(libraryProvider);
     final favorites = library.favorites;
     final recents = library.recents;
-    if (favorites.isEmpty && recents.isEmpty) return const SizedBox.shrink();
+    final routes = widget.onRouteSelected != null ? widget.savedRoutes : const [];
+    if (routes.isEmpty && favorites.isEmpty && recents.isEmpty) {
+      return const SizedBox.shrink();
+    }
 
     return ConstrainedBox(
       constraints: const BoxConstraints(maxHeight: 320),
@@ -212,6 +225,10 @@ class _StationSearchFieldState extends ConsumerState<StationSearchField> {
         padding: EdgeInsets.zero,
         shrinkWrap: true,
         children: [
+          if (routes.isNotEmpty) ...[
+            _sectionHeader('Gespeicherte Strecken'),
+            ...routes.map((r) => _routeTile(r as SavedRoute)),
+          ],
           if (favorites.isNotEmpty) ...[
             _sectionHeader('Favoriten'),
             ...favorites.map((s) => _stationTile(ref, s)),
@@ -222,6 +239,43 @@ class _StationSearchFieldState extends ConsumerState<StationSearchField> {
           ],
         ],
       ),
+    );
+  }
+
+  /// One saved route: "Kiel Hbf → München Hbf". Tapping fills both fields via
+  /// [StationSearchField.onRouteSelected] and dismisses the menu.
+  Widget _routeTile(SavedRoute route) {
+    return ListTile(
+      dense: true,
+      leading: const Icon(Icons.bookmark, size: 20),
+      title: Row(
+        children: [
+          Flexible(
+            child: Text(route.from.name,
+                style: const TextStyle(fontSize: 14),
+                overflow: TextOverflow.ellipsis),
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 6),
+            child: Icon(Icons.arrow_forward, size: 14),
+          ),
+          Flexible(
+            child: Text(route.to.name,
+                style: const TextStyle(fontSize: 14),
+                overflow: TextOverflow.ellipsis),
+          ),
+        ],
+      ),
+      onTap: () {
+        _suppressDismiss = true;
+        _showSavedOnFocus = false;
+        _removeOverlay();
+        _focusNode.unfocus();
+        widget.onRouteSelected!(route);
+        Future.delayed(const Duration(milliseconds: 100), () {
+          _suppressDismiss = false;
+        });
+      },
     );
   }
 
