@@ -51,12 +51,19 @@ class TabPager extends StatefulWidget {
   /// scrollables. Index 2 (Bahnhof) is a `TabBarView` of Zug / Abfahrten /
   /// Karte, and its Karte page is a `FlutterMap` that swallows horizontal drags
   /// whole. So on that tab a sideways drag was never going to reach this strip
-  /// from the body anyway — but it *would* have reached it from the AppBar and
-  /// the TabBar above, which is worse than not working: a swipe that depends on
-  /// where your thumb landed. We take the choice instead of letting the arena
-  /// take it: on Bahnhof the sideways drag belongs to the inner tabs, full
-  /// stop, and the nav bar is how you leave. Everywhere else the strip is
-  /// yours.
+  /// from the body anyway — but it *would* have reached it from the chrome
+  /// above, which is worse than not working: a swipe that depends on where your
+  /// thumb landed. We take the choice instead of letting the arena take it: on
+  /// Bahnhof the sideways drag belongs to the inner tabs, full stop, and the
+  /// nav bar is how you leave. Everywhere else the strip is yours.
+  ///
+  /// **Still true after the Bahnhof redesign, and re-checked then.** The chrome
+  /// that would have leaked the drag used to be an AppBar and a TabBar; it is
+  /// now one floating `GlassSwitcher` pill, and the leak is the same one — the
+  /// pill only claims *taps*, and this strip's PageView is its ancestor, so it
+  /// is in the arena for every drag that starts on the pill. The day the
+  /// TabBarView underneath goes, this goes with it. `nearby_screen_test.dart`
+  /// pins that the TabBarView is still there.
   static const swipeBlocked = <int>{2};
 
   @override
