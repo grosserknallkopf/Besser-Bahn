@@ -20,7 +20,7 @@ class OAuthBrowser {
         {'url': url, 'callbackUrlScheme': callbackUrlScheme},
       );
       if (result == null) {
-        throw const PlatformException(
+        throw PlatformException(
           code: 'FAILED',
           message: 'Authentication returned no callback URL',
         );
