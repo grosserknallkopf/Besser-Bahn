@@ -228,7 +228,7 @@ class BackgroundJourneyPlan {
       a.id.isNotEmpty && b.id.isNotEmpty ? a.id == b.id : a.name == b.name;
 
   static DateTime? _planned(DateTime? live, int? delaySeconds) =>
-      live == null ? null : live.subtract(Duration(seconds: delaySeconds ?? 0));
+      live?.subtract(Duration(seconds: delaySeconds ?? 0));
 }
 
 /// Owns persistence and notification decisions for the background stream.
