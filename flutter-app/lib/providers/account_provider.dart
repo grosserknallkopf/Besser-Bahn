@@ -488,6 +488,9 @@ class _BahnBonusCo2Cache {
 /// Official current-year CO₂ balance from BahnBonus, with the same
 /// stale-while-revalidate behaviour as the points card.
 class BahnbonusCo2Controller extends AsyncNotifier<DbBahnBonusCo2Balance?> {
+  bool _needsAuthorization = false;
+  bool get needsAuthorization => _needsAuthorization;
+
   Future<DbBahnBonusCo2Balance?> _currentCached() async {
     final cached = await _BahnBonusCo2Cache.load();
     return cached?.year == DateTime.now().year ? cached : null;
@@ -496,23 +499,37 @@ class BahnbonusCo2Controller extends AsyncNotifier<DbBahnBonusCo2Balance?> {
   @override
   Future<DbBahnBonusCo2Balance?> build() async {
     final auth = ref.watch(dbAuthProvider);
-    if (!auth.isLoggedIn) return null;
-    final cached = await _currentCached();
-    if (cached != null) {
-      _refreshInBackground();
-      return cached;
+    if (!auth.isLoggedIn) {
+      _needsAuthorization = false;
+      return null;
     }
-    return _fetchAndPersist();
+    final service = ref.read(dbAccountServiceProvider);
+    if (!await service.hasBahnBonusAuthorization()) {
+      _needsAuthorization = true;
+      return null;
+    }
+    try {
+      _needsAuthorization = false;
+      return await _fetchAndPersist();
+    } on DbBahnBonusAuthorizationRequired {
+      _needsAuthorization = true;
+      return null;
+    }
   }
 
   Future<void> refresh() async {
     if (!ref.read(dbAuthProvider).isLoggedIn) {
+      _needsAuthorization = false;
       state = const AsyncData(null);
       return;
     }
     try {
       final fresh = await _fetchAndPersist();
+      _needsAuthorization = false;
       state = AsyncData(fresh);
+    } on DbBahnBonusAuthorizationRequired {
+      _needsAuthorization = true;
+      state = const AsyncData(null);
     } catch (e, st) {
       final cached = await _currentCached();
       state = cached != null ? AsyncData(cached) : AsyncError(e, st);
@@ -520,10 +537,14 @@ class BahnbonusCo2Controller extends AsyncNotifier<DbBahnBonusCo2Balance?> {
   }
 
   Future<void> connect() async {
+    _needsAuthorization = false;
     state = const AsyncLoading();
     try {
       state = AsyncData(await _fetchAndPersist(connect: true));
     } catch (e, st) {
+      if (e is DbBahnBonusAuthorizationRequired) {
+        _needsAuthorization = true;
+      }
       state = AsyncError(e, st);
     }
   }

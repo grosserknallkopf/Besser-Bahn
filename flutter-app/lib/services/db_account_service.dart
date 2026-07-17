@@ -300,6 +300,12 @@ class DbAccountService {
     _bahnBonusExpiresAt = expiry != null ? DateTime.tryParse(expiry) : null;
   }
 
+  Future<bool> hasBahnBonusAuthorization() async {
+    if (_bahnBonusAccessToken != null) return true;
+    return await _read(_kBahnBonusAccess) != null ||
+        await _read(_kBahnBonusRefresh) != null;
+  }
+
   Future<void> _storeBahnBonusTokens(Map<String, dynamic> token) async {
     final access = token['access_token'] as String?;
     final refresh = token['refresh_token'] as String?;
