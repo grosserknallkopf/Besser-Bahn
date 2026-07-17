@@ -103,16 +103,23 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
           // *over* that the rider would want to reach, and pushing the padding
           // down into three screens would only be three chances to forget it.
           Positioned.fill(
-            child: Padding(
-              padding: EdgeInsets.only(top: GlassSwitcher.insetOf(context)),
-              child: TabBarView(
-                controller: _tabs,
-                children: const [
-                  TrainLookupScreen(embedded: true),
-                  DepartureBoardScreen(embedded: true),
-                  StationMapScreen(embedded: true),
-                ],
-              ),
+            child: TabBarView(
+              controller: _tabs,
+              children: [
+                // Zug and Abfahrten open with a search field that must clear the
+                // floating switcher, so they start below it.
+                Padding(
+                  padding: EdgeInsets.only(top: GlassSwitcher.insetOf(context)),
+                  child: const TrainLookupScreen(embedded: true),
+                ),
+                Padding(
+                  padding: EdgeInsets.only(top: GlassSwitcher.insetOf(context)),
+                  child: const DepartureBoardScreen(embedded: true),
+                ),
+                // The map runs full-bleed *under* the switcher — it floats its
+                // own search on glass, so nothing needs to clear the top here.
+                const StationMapScreen(embedded: true),
+              ],
             ),
           ),
           Positioned(
