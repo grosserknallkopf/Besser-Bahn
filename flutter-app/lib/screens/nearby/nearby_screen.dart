@@ -5,13 +5,22 @@ import '../../providers/departure_board_provider.dart';
 import '../../providers/nearby_tab_provider.dart';
 import '../../providers/station_map_provider.dart';
 import '../../widgets/app_menu_button.dart';
+import '../../widgets/glass_switcher.dart';
 import '../departure_board/departure_board_screen.dart';
 import '../station_map/station_map_screen.dart';
 import '../train_lookup/train_lookup_screen.dart';
 
 /// Combines the former Zug / Abfahrten / Karte tabs into a single screen with
-/// an internal, swipeable tab bar — fewer bottom-bar destinations, one place
+/// an internal, swipeable switcher — fewer bottom-bar destinations, one place
 /// for everything about a station.
+///
+/// **This screen has no AppBar and no TabBar, on purpose.** It used to wear
+/// both: a 56 px bar whose only word was "Bahnhof" — which the bottom nav bar
+/// already says, in the tab the rider pressed to get here — over a 72 px
+/// icon-and-text [TabBar]. 128 px of chrome before the first departure, under a
+/// screen that also gives its bottom to a floating nav bar. In its place one
+/// [GlassSwitcher]: the nav bar's own pill, moved to the top, floating over the
+/// content instead of pushing it down.
 class NearbyScreen extends ConsumerStatefulWidget {
   const NearbyScreen({super.key});
 
@@ -77,24 +86,66 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
 
     return Scaffold(
       resizeToAvoidBottomInset: false,
-      appBar: AppBar(
-        title: const Text('Bahnhof'),
-        actions: const [AppMenuButton()],
-        bottom: TabBar(
-          controller: _tabs,
-          tabs: const [
-            Tab(icon: Icon(Icons.train), text: 'Zug'),
-            Tab(icon: Icon(Icons.departure_board), text: 'Abfahrten'),
-            Tab(icon: Icon(Icons.map), text: 'Karte'),
-          ],
-        ),
-      ),
-      body: TabBarView(
-        controller: _tabs,
-        children: const [
-          TrainLookupScreen(embedded: true),
-          DepartureBoardScreen(embedded: true),
-          StationMapScreen(embedded: true),
+      body: Stack(
+        children: [
+          // The three views, full width, starting below the floating switcher.
+          //
+          // Padded here rather than inside each view: all three open with a
+          // search field, which is the one thing on the screen that may never
+          // be under the glass — so there is nothing for the switcher to float
+          // *over* that the rider would want to reach, and pushing the padding
+          // down into three screens would only be three chances to forget it.
+          Positioned.fill(
+            child: Padding(
+              padding: EdgeInsets.only(top: GlassSwitcher.insetOf(context)),
+              child: TabBarView(
+                controller: _tabs,
+                children: const [
+                  TrainLookupScreen(embedded: true),
+                  DepartureBoardScreen(embedded: true),
+                  StationMapScreen(embedded: true),
+                ],
+              ),
+            ),
+          ),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            // Rebuilt off the controller, not off `nearbyTabProvider`: the
+            // provider is only written once a swipe *settles* (see initState),
+            // and the highlight has to leave with the tap that started it.
+            child: AnimatedBuilder(
+              animation: _tabs,
+              builder: (context, _) => SafeArea(
+                bottom: false,
+                child: GlassSwitcher(
+                  index: _tabs.index,
+                  onChanged: _tabs.animateTo,
+                  // The AppBar's overflow menu, which had nowhere else to go
+                  // once the AppBar did.
+                  trailing: const AppMenuButton(),
+                  items: const [
+                    GlassSwitcherItem(
+                      icon: Icons.train_outlined,
+                      activeIcon: Icons.train,
+                      label: 'Zug',
+                    ),
+                    GlassSwitcherItem(
+                      icon: Icons.departure_board_outlined,
+                      activeIcon: Icons.departure_board,
+                      label: 'Abfahrten',
+                    ),
+                    GlassSwitcherItem(
+                      icon: Icons.map_outlined,
+                      activeIcon: Icons.map,
+                      label: 'Karte',
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ],
       ),
     );

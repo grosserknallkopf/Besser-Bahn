@@ -18,7 +18,6 @@ import '../../widgets/app_map.dart';
 import '../../widgets/app_nav_bar.dart';
 import '../../widgets/bay_departures_sheet.dart';
 import '../../widgets/app_menu_button.dart';
-import '../../widgets/embedded_action_bar.dart';
 import '../../widgets/station_search_field.dart';
 
 /// Highlight colour for a journey role: Einstieg green, Ausstieg red, Umstieg
@@ -54,8 +53,8 @@ class StationMapScreen extends ConsumerStatefulWidget {
   /// just this station's map, not a place to browse other stations or settings.
   final bool dedicated;
 
-  /// When embedded in the combined "Bahnhof" screen, drop our own AppBar (the
-  /// parent provides one + the tab bar) and surface the centre action inline.
+  /// When embedded in the combined "Bahnhof" screen, drop our own AppBar — the
+  /// parent screen's floating switcher is the chrome there.
   final bool embedded;
 
   const StationMapScreen({super.key, this.dedicated = false, this.embedded = false});
@@ -204,17 +203,6 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
       }
     });
 
-    final actions = <Widget>[
-      if (map != null)
-        IconButton(
-          tooltip: 'Auf Karte zentrieren',
-          // A framing/centre glyph — distinct from the "Mein Standort" GPS
-          // crosshair so the two buttons no longer look identical.
-          icon: const Icon(Icons.center_focus_strong),
-          onPressed: () => _recenter(map),
-        ),
-    ];
-
     return Scaffold(
       appBar: widget.embedded
           ? null
@@ -224,13 +212,10 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
                 // Browse mode (Karte tab) keeps the app overflow menu; the
                 // dedicated per-journey map drops it.
                 if (!widget.dedicated) const AppMenuButton(),
-                ...actions,
               ],
             ),
       body: Column(
         children: [
-          if (widget.embedded && actions.isNotEmpty)
-            EmbeddedActionBar(actions: actions),
           // Station search only in browse mode. The dedicated map already knows
           // its station (shown in the AppBar title) — a search box there is
           // misleading, it isn't for picking a different station.
@@ -459,6 +444,24 @@ class _StationMapScreenState extends ConsumerState<StationMapScreen> {
             crossAxisAlignment: CrossAxisAlignment.end,
             mainAxisSize: MainAxisSize.min,
             children: [
+              // Frame the station (or the Gleis this map was opened for) again.
+              //
+              // Lives on the map, with the map's other controls, rather than in
+              // a strip of chrome above it: it acts on the map, and the strip is
+              // gone. Bottom-anchored *above the nav bar's footprint*
+              // (`navInset`) — the glass pill floats over this map, so a control
+              // pinned to the raw bottom edge would sit under it forever. Away
+              // from the top edge as well, which is where the floating switcher
+              // is now.
+              FloatingActionButton.small(
+                heroTag: 'station-map-center',
+                tooltip: 'Auf Karte zentrieren',
+                // A framing/centre glyph — distinct from the "Mein Standort" GPS
+                // crosshair so the two buttons no longer look identical.
+                child: const Icon(Icons.center_focus_strong),
+                onPressed: () => _recenter(map),
+              ),
+              const SizedBox(height: 8),
               // Toggle the DB indoor floor plan; the OSM base map, Gleis numbers
               // and A–I sectors stay regardless.
               _IndoorToggle(

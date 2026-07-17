@@ -38,22 +38,46 @@ class _Page extends StatelessWidget {
   );
 }
 
-/// The Bahnhof tab's shape: an inner tab bar with a swipeable TabBarView — a
-/// second horizontal gesture living *inside* the strip.
+/// The Bahnhof tab's shape: a swipeable TabBarView — a second horizontal
+/// gesture living *inside* the strip — under a strip of chrome that switches it
+/// and claims only taps.
+///
+/// That is the shape, not the widgets: the real screen's chrome is a floating
+/// `GlassSwitcher` over its TabBarView (it used to be an AppBar over a TabBar),
+/// and neither one is named here on purpose. What the strip has to answer for
+/// is the geometry — an inner horizontal gesture, and a band above it where
+/// there is none — and that has survived both.
 class _InnerTabsPage extends StatelessWidget {
   const _InnerTabsPage();
+
+  /// The chrome band, tappable but not draggable — where a leaked drag would
+  /// have reached the outer strip.
+  static const chromeKey = ValueKey('bahnhof-chrome');
 
   @override
   Widget build(BuildContext context) => SizedBox.expand(
     key: const ValueKey('page-BAHNHOF'),
     child: DefaultTabController(
       length: 3,
-      child: Column(
-        children: const [
-          TabBar(tabs: [Tab(text: 'Zug'), Tab(text: 'Abf'), Tab(text: 'Kt')]),
-          Expanded(
-            child: TabBarView(
-              children: [_Page('ZUG'), _Page('ABFAHRTEN'), _Page('KARTE')],
+      child: Stack(
+        children: [
+          const Positioned.fill(
+            child: Padding(
+              padding: EdgeInsets.only(top: 56),
+              child: TabBarView(
+                children: [_Page('ZUG'), _Page('ABFAHRTEN'), _Page('KARTE')],
+              ),
+            ),
+          ),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: GestureDetector(
+              key: chromeKey,
+              behavior: HitTestBehavior.opaque,
+              onTap: () {},
+              child: const SizedBox(height: 56),
             ),
           ),
         ],
@@ -259,7 +283,10 @@ void main() {
     // the drag: still nothing. The refusal is the whole tab, not just the parts
     // that happen to have a scrollable under them — otherwise the swipe would
     // work or not work depending on where your thumb landed.
-    await tester.drag(find.byType(TabBar), const Offset(-600, 0));
+    await tester.drag(
+      find.byKey(_InnerTabsPage.chromeKey),
+      const Offset(-600, 0),
+    );
     await tester.pumpAndSettle();
     expect(router.state.uri.path, '/nearby');
     expect(_pageRect(tester, 'BAHNHOF')!.left, moreOrLessEquals(0, epsilon: 0.5));
