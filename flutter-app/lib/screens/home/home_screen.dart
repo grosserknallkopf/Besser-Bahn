@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:go_router/go_router.dart';
 
 import '../../vendor/chuk_ui/chuk_nav_bar.dart';
@@ -10,11 +11,12 @@ class HomeScreen extends StatefulWidget {
 
   const HomeScreen({super.key, required this.child});
 
-  /// How long a tab slide takes. Same 260 ms / easeOutCubic the nav bar's
-  /// highlight glides with — the bar and the page are one movement, and two
-  /// curves would read as two separate things happening at once.
-  static const slideDuration = Duration(milliseconds: 260);
-  static const slideCurve = Curves.easeOutCubic;
+  /// How long a tab slide takes. Literally the motion the nav bar's highlight
+  /// glides and its labels collapse with — the bar and the page are one
+  /// movement, and two curves would read as two separate things happening at
+  /// once.
+  static const slideDuration = AppNavBar.motionDuration;
+  static const slideCurve = AppNavBar.motionCurve;
 
   static int indexOfLocation(String location) {
     if (location.startsWith('/search')) return 0;
@@ -35,6 +37,68 @@ class _HomeScreenState extends State<HomeScreen> {
   /// side by side" instead of a cross-fade.
   int _index = 0;
   double _dir = 1;
+
+  /// What the bar is showing, and what the user's last drag asked for. They
+  /// differ on purpose: [_wantCollapsed] is the intent ("I scrolled down"),
+  /// [_collapsed] is what survives the guards in [_onScroll] — a page that
+  /// can't scroll never gets to hide its own labels.
+  bool _collapsed = false;
+  bool _wantCollapsed = false;
+
+  /// How far down a page must be before the labels may go. Under this the bar
+  /// stays open, so the top of a page always shows the full bar and a stray
+  /// pixel of drag there can't make it flinch.
+  static const _collapseAfter = 24.0;
+
+  /// Collapses the bar while the user reads down a tab and gives the labels
+  /// back on the way up.
+  ///
+  /// One listener in the shell, wrapped around the body: every scrollable a tab
+  /// builds bubbles its notifications up through here on its way to nowhere, so
+  /// all four tabs get this for free and none of them has to grow a controller,
+  /// a callback, or its own idea of "far enough". That also covers the lists
+  /// nested inside a tab (the Bahnhof tab's TabBarView children), which a
+  /// controller wired per screen would have missed.
+  bool _onScroll(ScrollNotification n) {
+    if (n.metrics.axis == Axis.horizontal) {
+      // A sideways drag is a swipe to another page (the Bahnhof tab's inner
+      // TabBarView), not reading. The page it lands on starts at its own top
+      // and may not scroll at all, and it won't say so — it never moves, so it
+      // never notifies. Treat the swipe like a shell tab change and hand the
+      // labels back, or they'd stay hidden over, say, the station map forever.
+      if (n is UserScrollNotification && n.direction != ScrollDirection.idle) {
+        _wantCollapsed = false;
+        _setCollapsed(false);
+      }
+      return false;
+    }
+    if (n is UserScrollNotification) {
+      switch (n.direction) {
+        // Content sliding up under the finger = reading further down.
+        case ScrollDirection.reverse:
+          _wantCollapsed = true;
+        case ScrollDirection.forward:
+          _wantCollapsed = false;
+        // Let go, fling settled: keep the last intent. The bar must stay small
+        // while you read, not spring open the moment you stop moving.
+        case ScrollDirection.idle:
+          break;
+      }
+    }
+    // Re-checked on every notification, not just on the one that set the
+    // intent: a drag that starts at the top reports "reverse" exactly once,
+    // while pixels is still 0 and the guard below still says no. Only the
+    // update notifications that follow carry it past the threshold.
+    final scrollable = n.metrics.maxScrollExtent > 0;
+    final atTop = n.metrics.pixels <= _collapseAfter;
+    _setCollapsed(_wantCollapsed && scrollable && !atTop);
+    return false;
+  }
+
+  void _setCollapsed(bool value) {
+    if (value == _collapsed) return;
+    setState(() => _collapsed = value);
+  }
 
   /// Slides the outgoing tab out and the incoming one in, in the direction the
   /// tabs actually sit — left tab leaves to the right, right tab comes from the
@@ -80,6 +144,12 @@ class _HomeScreenState extends State<HomeScreen> {
     if (index != _index) {
       _dir = index > _index ? 1 : -1;
       _index = index;
+      // The tab we're leaving may have been scrolled deep; the one arriving
+      // starts at its own top and might not scroll at all — and a page with no
+      // scrollable never sends a notification, so nothing else would ever open
+      // the bar again. Reset with the slide.
+      _collapsed = false;
+      _wantCollapsed = false;
     }
     return Scaffold(
       // Don't lift the bottom nav bar above the soft keyboard — it should sit
@@ -95,10 +165,16 @@ class _HomeScreenState extends State<HomeScreen> {
       body: Column(
         children: [
           const OfflineBanner(),
-          Expanded(child: _slide(widget.child)),
+          Expanded(
+            child: NotificationListener<ScrollNotification>(
+              onNotification: _onScroll,
+              child: _slide(widget.child),
+            ),
+          ),
         ],
       ),
       bottomNavigationBar: AppNavBar(
+        collapsed: _collapsed,
         index: _index,
         onChanged: (index) {
           switch (index) {
