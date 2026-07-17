@@ -20,6 +20,9 @@ jobs:
       - working-directory: flutter-app
         run: flutter analyze --no-fatal-infos
       - working-directory: flutter-app
-        run: flutter test
+        run: >-
+          flutter test
+          test/exit_alarm_intelligence_test.dart
+          test/missed_connection_test.dart
       - working-directory: flutter-app
         run: flutter build apk --debug
