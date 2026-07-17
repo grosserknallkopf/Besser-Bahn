@@ -1,0 +1,25 @@
+name: Temporary Flutter check
+
+on:
+  push:
+    branches:
+      - agent/background-exit-alarm-ci
+
+jobs:
+  flutter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.41.9'
+          channel: stable
+          cache: true
+      - working-directory: flutter-app
+        run: flutter pub get
+      - working-directory: flutter-app
+        run: flutter analyze
+      - working-directory: flutter-app
+        run: flutter test
+      - working-directory: flutter-app
+        run: flutter build apk --debug
