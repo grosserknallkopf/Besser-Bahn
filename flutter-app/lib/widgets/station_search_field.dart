@@ -39,6 +39,13 @@ class _StationSearchFieldState extends ConsumerState<StationSearchField> {
   OverlayEntry? _overlay;
   bool _suppressDismiss = false;
 
+  /// True from focusing an already-filled field until the first keystroke. The
+  /// field holds a committed station, so re-tapping it must reopen the
+  /// favorites/recents menu (not run a fruitless search for the full name) —
+  /// otherwise the only visible action is "clear", which hides the saved
+  /// stations the user came back for.
+  bool _showSavedOnFocus = false;
+
   @override
   void initState() {
     super.initState();
@@ -65,6 +72,16 @@ class _StationSearchFieldState extends ConsumerState<StationSearchField> {
 
   void _onFocusChange() {
     if (_focusNode.hasFocus) {
+      // A field that already holds a committed station reopens the saved menu
+      // and highlights its text, so the next keystroke overtypes it (instead
+      // of the user only being able to hit the clear button).
+      if (_controller.text.isNotEmpty) {
+        _showSavedOnFocus = true;
+        _controller.selection = TextSelection(
+          baseOffset: 0,
+          extentOffset: _controller.text.length,
+        );
+      }
       // Surface favorites/recents (or live results) as soon as the field is
       // focused, even before the user types.
       _showOverlay();
@@ -81,6 +98,7 @@ class _StationSearchFieldState extends ConsumerState<StationSearchField> {
 
   void _selectStation(Station station) {
     _suppressDismiss = true;
+    _showSavedOnFocus = false;
     _controller.text = station.name;
     ref.read(libraryProvider.notifier).recordStationUse(station);
     widget.onSelected(station);
@@ -103,20 +121,28 @@ class _StationSearchFieldState extends ConsumerState<StationSearchField> {
         width: renderBox.size.width,
         child: CompositedTransformFollower(
           link: _layerLink,
-          offset: Offset(0, renderBox.size.height + 4),
+          offset: Offset(0, renderBox.size.height + 2),
           showWhenUnlinked: false,
           child: Material(
-            elevation: 8,
-            borderRadius: BorderRadius.circular(12),
+            // A hairline-bordered, barely-raised sheet reads as an extension of
+            // the field. The old elevation-8 drop shadow floated it off as a
+            // separate, inconsistent slab (#38).
+            elevation: 1,
             clipBehavior: Clip.antiAlias,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(
+                  color: Theme.of(context).colorScheme.outlineVariant),
+            ),
             child: Consumer(
               builder: (context, ref, _) {
                 final query = _controller.text.trim();
                 final geo = parseGeoQuery(query);
-                // Short query → suggest saved favorites and recent stations.
-                // A coordinate is exempt: "geo:52.5,13.3" is already complete,
-                // and a pasted one can be shorter than a station name.
-                if (geo == null && query.length < 2) {
+                // Short query — or a just-focused committed field — suggests
+                // saved favorites and recent stations. A coordinate is exempt:
+                // "geo:52.5,13.3" is already complete, and a pasted one can be
+                // shorter than a station name.
+                if (_showSavedOnFocus || (geo == null && query.length < 2)) {
                   return _buildSuggestions(ref);
                 }
                 final results = ref.watch(stationSearchProvider);
@@ -341,6 +367,8 @@ class _StationSearchFieldState extends ConsumerState<StationSearchField> {
               : null,
         ),
         onChanged: (value) {
+          // The user is typing a new query — leave the saved-menu mode.
+          _showSavedOnFocus = false;
           ref.read(stationSearchProvider.notifier).search(value);
           _showOverlay();
           setState(() {});
