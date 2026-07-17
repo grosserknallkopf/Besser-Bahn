@@ -87,6 +87,7 @@ class _DepartureBoardScreenState extends ConsumerState<DepartureBoardScreen>
                     prefixIcon: Icons.location_city,
                     initialStation: state.station,
                     onSelected: notifier.setStation,
+                    dense: true,
                   ),
                 ),
                 ...actions,

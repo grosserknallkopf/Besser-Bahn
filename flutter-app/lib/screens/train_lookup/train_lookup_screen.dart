@@ -245,6 +245,7 @@ class _TrainLookupScreenState extends ConsumerState<TrainLookupScreen>
                     hint: 'Ab Haltestelle (für Busse/Tram)',
                     prefixIcon: Icons.location_on,
                     initialStation: _fromStation,
+                    dense: true,
                     onSelected: (station) {
                       setState(() => _fromStation = station);
                       // The stop is half the query — re-run it, the same way

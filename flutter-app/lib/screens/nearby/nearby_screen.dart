@@ -62,6 +62,13 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
     });
   }
 
+  /// A snappy tab jump. TabController defaults to 300 ms `Curves.ease`; the
+  /// switcher felt sluggish at that, so we land it faster on the app's own
+  /// easeOutCubic (the same curve the pill highlight and the tab pager use).
+  static const _switchDuration = Duration(milliseconds: 200);
+  void _goTo(int i) =>
+      _tabs.animateTo(i, duration: _switchDuration, curve: Curves.easeOutCubic);
+
   void _syncBoardStationToMap() {
     final board = ref.read(departureBoardProvider).station;
     if (board == null || board.id == _lastSyncedStationId) return;
@@ -81,7 +88,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
   Widget build(BuildContext context) {
     // External jumps (e.g. tapping a departure → open its train) drive the tab.
     ref.listen<int>(nearbyTabProvider, (_, next) {
-      if (_tabs.index != next) _tabs.animateTo(next);
+      if (_tabs.index != next) _goTo(next);
     });
 
     return Scaffold(
@@ -121,7 +128,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen>
                 bottom: false,
                 child: GlassSwitcher(
                   index: _tabs.index,
-                  onChanged: _tabs.animateTo,
+                  onChanged: _goTo,
                   // The AppBar's overflow menu, which had nowhere else to go
                   // once the AppBar did.
                   trailing: const AppMenuButton(),
