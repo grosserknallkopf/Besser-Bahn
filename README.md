@@ -167,7 +167,7 @@ uv run main.py "https://www.bahn.de/buchung/start?vbid=..." [--age 30] [--bahnca
 
 *   **Traewelldroid** – Check-in-App für ÖPNV/Fernverkehr in Europa, basiert auf
     Open-Data-Schnittstellen.
-    [GitHub](https://github.com/Traewelldroid/traewelldroid)
+    [Codeberg](https://codeberg.org/traewelldroid/traewelldroid)
 *   **Transportr** – quelloffene ÖPNV-App für viele Regionen weltweit.
     [GitHub](https://github.com/grote/Transportr)
 *   **OpenRailwayMap** – detaillierte interaktive Karte des weltweiten
