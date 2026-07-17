@@ -1,0 +1,24 @@
+name: Validate OAuth browser fix
+
+on:
+  push:
+    branches: [ci-oauth-browser-close]
+
+jobs:
+  flutter:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: flutter-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.41.9
+          channel: stable
+          cache: true
+      - run: flutter pub get
+      - run: dart format --output=none --set-exit-if-changed lib/services/oauth_browser.dart test/oauth_browser_test.dart
+      - run: flutter analyze --no-fatal-infos
+      - run: flutter test test/oauth_browser_test.dart
+      - run: flutter build apk --debug
