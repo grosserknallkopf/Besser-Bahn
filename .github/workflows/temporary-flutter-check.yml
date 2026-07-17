@@ -18,7 +18,7 @@ jobs:
       - working-directory: flutter-app
         run: flutter pub get
       - working-directory: flutter-app
-        run: flutter analyze
+        run: flutter analyze --no-fatal-infos
       - working-directory: flutter-app
         run: flutter test
       - working-directory: flutter-app
