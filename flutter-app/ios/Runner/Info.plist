@@ -8,6 +8,19 @@
 	     direction toward their boarding Gleis. -->
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Zeigt deinen Standort auf der Bahnhofskarte, damit du siehst, wo du bist und in welche Richtung dein Gleis liegt.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Begleitet deine aktivierte Reise im Hintergrund, warnt vor dem Ausstieg und erkennt mögliche ungemeldete Verspätungen.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>Erkennt stromsparend, ob du dich während einer aktivierten Reise bewegst.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+		<string>fetch</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>io.rezivure.libre_location.heartbeat</string>
+	</array>
 	<key>CFBundleDisplayName</key>
 	<string>Besser Bahn</string>
 	<key>CFBundleExecutable</key>

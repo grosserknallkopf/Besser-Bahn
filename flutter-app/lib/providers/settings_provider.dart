@@ -45,9 +45,10 @@ class AppSettings {
   /// since it's deliberately hard to sleep through.
   final bool arrivalAlarmSound;
 
-  /// GPS "Ausstiegsalarm": while on board and the app is open, ring the loud
-  /// alarm the moment the device enters the destination's radius — delay-proof,
-  /// unlike the timetable-based arrival ping. Off by default (uses location).
+  /// GPS journey companion: tracks a watched journey in the background, warns
+  /// near the destination and can infer a likely not-yet-reported delay from
+  /// timetable + position. [arrivalAlarmSound] separately decides whether the
+  /// destination warning becomes a real ringing alarm.
   final bool exitAlarmEnabled;
 
   /// How fast this rider changes trains. Scales how tight a transfer is judged
