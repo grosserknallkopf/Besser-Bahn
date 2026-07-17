@@ -6,18 +6,17 @@ import '../../models/departure.dart';
 import '../../providers/departure_board_provider.dart';
 import '../../providers/nearby_tab_provider.dart';
 import '../../providers/train_lookup_provider.dart';
+import '../../widgets/app_nav_bar.dart';
 import '../../widgets/station_search_field.dart';
 import '../../widgets/delay_badge.dart';
 import '../../widgets/platform_badge.dart';
 import '../../widgets/app_menu_button.dart';
-import '../../widgets/embedded_action_bar.dart';
 import '../../core/extensions.dart';
 import '../../core/auto_refresh.dart';
-import 'departure_map_view.dart';
 
 class DepartureBoardScreen extends ConsumerStatefulWidget {
-  /// When embedded in the combined "Bahnhof" screen, drop our own AppBar and
-  /// surface its actions as a slim row at the top of the body.
+  /// When embedded in the combined "Bahnhof" screen, drop our own AppBar — the
+  /// parent screen's floating switcher is the chrome there.
   final bool embedded;
 
   const DepartureBoardScreen({super.key, this.embedded = false});
@@ -39,19 +38,27 @@ class _DepartureBoardScreenState extends ConsumerState<DepartureBoardScreen>
     final notifier = ref.read(departureBoardProvider.notifier);
     final theme = Theme.of(context);
 
+    // What this screen can do with the station it has open — in the search
+    // row, next to the station they act on, exactly as on the Zug tab.
     final actions = <Widget>[
       if (state.station != null)
         IconButton(
-          tooltip: state.view == BoardView.map ? 'Liste' : 'Karte',
-          icon: Icon(state.view == BoardView.map
-              ? Icons.format_list_bulleted
-              : Icons.map_outlined),
-          onPressed: () => notifier.setView(
-            state.view == BoardView.map ? BoardView.list : BoardView.map,
-          ),
+          visualDensity: VisualDensity.compact,
+          tooltip: 'Auf der Karte zeigen',
+          icon: const Icon(Icons.map_outlined),
+          // Go to the Karte tab rather than opening a second map here. There
+          // used to be one — a whole other station map with its own floor
+          // switcher, living inside this tab — and it was the same map the tab
+          // next door already is. The switcher's listener carries this station
+          // over on the way (see `NearbyScreen`), so the map lands on the
+          // station the rider was just reading.
+          onPressed: () =>
+              ref.read(nearbyTabProvider.notifier).select(nearbyTabMap),
         ),
       if (state.station != null)
         IconButton(
+          visualDensity: VisualDensity.compact,
+          tooltip: 'Aktualisieren',
           icon: const Icon(Icons.refresh),
           onPressed: notifier.load,
         ),
@@ -65,20 +72,25 @@ class _DepartureBoardScreenState extends ConsumerState<DepartureBoardScreen>
           ? null
           : AppBar(
               title: Text(state.station?.name ?? 'Abfahrtstafel'),
-              actions: [const AppMenuButton(), ...actions],
+              actions: const [AppMenuButton()],
             ),
       body: Column(
         children: [
-          if (widget.embedded && actions.isNotEmpty)
-            EmbeddedActionBar(actions: actions),
           // Station search
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-            child: StationSearchField(
-              hint: 'Bahnhof suchen...',
-              prefixIcon: Icons.location_city,
-              initialStation: state.station,
-              onSelected: notifier.setStation,
+            child: Row(
+              children: [
+                Expanded(
+                  child: StationSearchField(
+                    hint: 'Bahnhof suchen...',
+                    prefixIcon: Icons.location_city,
+                    initialStation: state.station,
+                    onSelected: notifier.setStation,
+                  ),
+                ),
+                ...actions,
+              ],
             ),
           ),
 
@@ -88,21 +100,43 @@ class _DepartureBoardScreenState extends ConsumerState<DepartureBoardScreen>
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
               child: Row(
                 children: [
-                  SegmentedButton<BoardMode>(
-                    segments: const [
-                      ButtonSegment(
-                          value: BoardMode.departures,
-                          label: Text('Abfahrten'),
-                          icon: Icon(Icons.arrow_upward, size: 18)),
-                      ButtonSegment(
-                          value: BoardMode.arrivals,
-                          label: Text('Ankünfte'),
-                          icon: Icon(Icons.arrow_downward, size: 18)),
-                    ],
-                    selected: {state.mode},
-                    onSelectionChanged: (v) => notifier.setMode(v.first),
+                  // This row overflowed — the yellow-and-black stripes — on
+                  // every phone narrower than ~440 px, which is every phone.
+                  // Two fixes, because one alone would only move the cliff:
+                  //
+                  //  * the checkmark and the arrows are gone. Decoration on
+                  //    top of two words that already say which way the trains
+                  //    are going, and between them ~90 px of the overflow;
+                  //  * what is left scales down rather than overflowing. A
+                  //    [SegmentedButton] sizes itself to its labels and does
+                  //    not care what it was given, so *any* fixed layout here
+                  //    is one system text scale away from the stripes again.
+                  //    scaleDown only bites when it has to (the departure
+                  //    tile's own trick — see `_DepartureTile.leading`).
+                  Expanded(
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      alignment: Alignment.centerLeft,
+                      child: SegmentedButton<BoardMode>(
+                        showSelectedIcon: false,
+                        style: SegmentedButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        segments: const [
+                          ButtonSegment(
+                            value: BoardMode.departures,
+                            label: Text('Abfahrten'),
+                          ),
+                          ButtonSegment(
+                            value: BoardMode.arrivals,
+                            label: Text('Ankünfte'),
+                          ),
+                        ],
+                        selected: {state.mode},
+                        onSelectionChanged: (v) => notifier.setMode(v.first),
+                      ),
+                    ),
                   ),
-                  const Spacer(),
                   // Product filter
                   PopupMenuButton<String?>(
                     icon: Icon(
@@ -152,12 +186,8 @@ class _DepartureBoardScreenState extends ConsumerState<DepartureBoardScreen>
           else
             const SizedBox(height: 8),
 
-          // Board — list or map.
-          Expanded(
-            child: state.view == BoardView.map
-                ? const DepartureMapView()
-                : _buildBoard(context, ref, state),
-          ),
+          // The board.
+          Expanded(child: _buildBoard(context, ref, state)),
         ],
       ),
     );
@@ -194,7 +224,8 @@ class _DepartureBoardScreenState extends ConsumerState<DepartureBoardScreen>
       onRefresh: () =>
           ref.read(departureBoardProvider.notifier).refreshSilent(),
       child: ListView.separated(
-        padding: const EdgeInsets.only(bottom: 32),
+        // Clear the floating nav bar — it hovers over this list.
+        padding: EdgeInsets.only(bottom: 32 + AppNavBar.insetOf(context)),
         itemCount: departures.length,
         separatorBuilder: (_, __) => const Divider(height: 1, indent: 72),
         itemBuilder: (context, index) {

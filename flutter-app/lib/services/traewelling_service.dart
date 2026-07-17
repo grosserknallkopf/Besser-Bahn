@@ -8,6 +8,7 @@ import 'package:flutter_web_auth_2/flutter_web_auth_2.dart';
 import 'package:http/http.dart' as http;
 
 import '../core/constants.dart';
+import '../core/user_agent_client.dart';
 import '../models/traewelling_models.dart';
 
 /// Raised when an API call fails. [status] carries the HTTP code so callers can
@@ -29,18 +30,27 @@ class CheckinCollisionException extends TraewellingException {
 /// Träwelling client: OAuth2 (Authorization Code + PKCE, public client — no
 /// secret) plus the REST endpoints the app uses. Tokens live in the platform
 /// secure store; a 401 triggers a single transparent refresh + retry.
+///
+/// Every request leaves through a [UserAgentClient]: Träwelling gates its whole
+/// surface — OAuth token exchange, refresh and the REST API alike — on an
+/// identifiable `User-Agent` and answers 403 without one (#34).
 class TraewellingService {
-  TraewellingService({FlutterSecureStorage? storage})
+  TraewellingService({FlutterSecureStorage? storage, http.Client? client})
       : _storage = storage ??
             const FlutterSecureStorage(
               // iOS: allow reads after first unlock since boot. Android 10.x
               // uses its own ciphers by default; no extra options needed.
               iOptions:
                   IOSOptions(accessibility: KeychainAccessibility.first_unlock),
-            );
+            ),
+        _client = UserAgentClient(client ?? http.Client(), _userAgent);
+
+  /// Identifies this app to Träwelling. Kept as a named constant so the tests
+  /// assert the very string the service ships.
+  static const _userAgent = AppConstants.userAgent;
 
   final FlutterSecureStorage _storage;
-  final http.Client _client = http.Client();
+  final http.Client _client;
 
   static const _kAccess = 'trwl_access_token';
   static const _kRefresh = 'trwl_refresh_token';

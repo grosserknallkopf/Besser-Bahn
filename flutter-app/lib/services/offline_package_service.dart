@@ -188,10 +188,13 @@ class OfflinePackageService {
     final targets = <({String key, String cat, int number, String eva, DateTime time})>[];
     for (final leg in legs) {
       final line = leg.line;
-      final time = leg.departure ?? leg.plannedDeparture;
+      // Scheduled first: this both keys the request on the right service date
+      // and makes the STORED key identical to the one the live fetch reads back
+      // offline — a live-keyed copy of a delayed train would never be found (#32).
+      final time = leg.plannedDeparture ?? leg.departure;
       if (line == null || time == null || leg.origin.id.isEmpty) continue;
       final k = CoachSequenceService.sequenceKeyFor(line.productName, line.fahrtNr);
-      if (k == null) continue; // S-Bahn/bus/tram — no Wagenreihung exists
+      if (k == null) continue; // bus/tram — no Wagenreihung exists
       targets.add((
         key: CoachSequenceService.cacheKeyFor(
             category: k.category,

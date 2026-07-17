@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -11,16 +13,15 @@ import '../../services/hafas_service.dart';
 import '../../core/extensions.dart';
 import '../../core/auto_refresh.dart';
 import '../../widgets/app_menu_button.dart';
-import '../../widgets/embedded_action_bar.dart';
+import '../../widgets/app_nav_bar.dart';
 import '../../widgets/station_search_field.dart';
 import '../../widgets/traewelling_logo.dart';
 import '../../widgets/trwl_checkin_sheet.dart';
 import 'widgets/train_detail_view.dart';
 
 class TrainLookupScreen extends ConsumerStatefulWidget {
-  /// When embedded inside the combined "Bahnhof" screen, drop our own AppBar
-  /// (the parent provides one + the tab bar) and surface the AppBar actions as
-  /// a slim row at the top of the body instead.
+  /// When embedded inside the combined "Bahnhof" screen, drop our own AppBar —
+  /// the parent screen's floating switcher is the chrome there.
   final bool embedded;
 
   const TrainLookupScreen({super.key, this.embedded = false});
@@ -36,16 +37,61 @@ class _TrainLookupScreenState extends ConsumerState<TrainLookupScreen>
   Station? _fromStation;
   bool _showStationField = false;
 
+  /// Pending auto-search — see [_debounceDelay].
+  Timer? _debounce;
+
+  /// The query the last auto-search actually spent a lookup on. Stops a
+  /// rebuild-triggered [_onQueryChanged] (the location toggle, a station pick)
+  /// from sweeping the same text twice.
+  String? _searchedQuery;
+
+  /// How long the typed train number has to sit still before we look it up.
+  ///
+  /// The Bahnhof field looks up as you type, so this one does too (see
+  /// [_onQueryChanged]) — but what the station field can take for granted and
+  /// this one cannot is the network. `findTrainsByNumber` with no stop given
+  /// sweeps FIVE major departure boards at once, and the /mob backend rate-
+  /// limits per client for minutes once it has had enough. So: only a settled
+  /// query, only one sweep per distinct query, and only a query that could name
+  /// a train at all ([_looksLikeTrain]).
+  static const _debounceDelay = Duration(milliseconds: 600);
+
   // Silently re-fetch the open train's live delays/platforms while the screen
   // is visible; keeps the current trip if a fetch fails (offline).
   @override
   Future<void> onAutoRefresh() =>
       ref.read(trainLookupProvider.notifier).refreshSilent();
 
-  void _search() {
+  /// Whether [query] is worth a lookup: `findTrainsByNumber` throws away every
+  /// non-digit and gives up on an empty number, so "ICE" is five requests for a
+  /// guaranteed empty answer — exactly what a per-keystroke search must not do.
+  static bool _looksLikeTrain(String query) =>
+      query.length >= 2 && RegExp(r'\d').hasMatch(query);
+
+  /// Typing: the field searches for itself, no button to press. Empties clear
+  /// the result, so backspacing out of a train leaves the welcome screen rather
+  /// than a stale one.
+  void _onQueryChanged(String value) {
+    _debounce?.cancel();
+    final query = value.trim();
+    if (query.isEmpty) {
+      _searchedQuery = null;
+      ref.read(trainLookupProvider.notifier).clear();
+      return;
+    }
+    if (!_looksLikeTrain(query) || query == _searchedQuery) return;
+    _debounce = Timer(_debounceDelay, () => _search(unfocus: false));
+  }
+
+  /// Look the typed train up now. [unfocus] closes the keyboard — right for a
+  /// submit or a station pick, wrong for the debounce, which fires *while* the
+  /// rider is still in the field.
+  void _search({bool unfocus = true}) {
+    _debounce?.cancel();
     final query = _controller.text.trim();
     if (query.isEmpty) return;
-    _focusNode.unfocus();
+    _searchedQuery = query;
+    if (unfocus) _focusNode.unfocus();
     ref.read(trainLookupProvider.notifier).lookupTrain(
           query,
           fromStationId: _fromStation?.id,
@@ -64,7 +110,9 @@ class _TrainLookupScreenState extends ConsumerState<TrainLookupScreen>
   }
 
   void _lookupSaved(SavedTrain train) {
+    _debounce?.cancel();
     _controller.text = train.query;
+    _searchedQuery = train.query;
     _focusNode.unfocus();
     ref.read(trainLookupProvider.notifier).lookupTrain(
           train.query,
@@ -74,6 +122,7 @@ class _TrainLookupScreenState extends ConsumerState<TrainLookupScreen>
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();
@@ -84,13 +133,17 @@ class _TrainLookupScreenState extends ConsumerState<TrainLookupScreen>
     final state = ref.watch(trainLookupProvider);
     final theme = Theme.of(context);
 
-    // AppBar actions, reused inline when embedded in the combined screen.
+    // What this screen can do with the train it has open. They ride in the
+    // search row (below) rather than in an AppBar or a strip of their own: this
+    // screen is one field and one train, and the field's row is where the
+    // rider's eye already is.
     final actions = <Widget>[
       if (state.trip != null)
         Builder(builder: (context) {
           final train = _savedTrainFor(state);
           final saved = ref.watch(libraryProvider).hasTrain(train.key);
           return IconButton(
+            visualDensity: VisualDensity.compact,
             icon: Icon(saved ? Icons.star : Icons.star_border,
                 color: saved ? Colors.amber.shade700 : null),
             tooltip: saved ? 'Zug entfernen' : 'Zug speichern',
@@ -107,13 +160,16 @@ class _TrainLookupScreenState extends ConsumerState<TrainLookupScreen>
         }),
       if (state.trip != null)
         IconButton(
+          visualDensity: VisualDensity.compact,
           icon: const TraewellingLogo(size: 22),
           tooltip: 'In Träwelling einchecken',
           onPressed: () => startTrwlCheckin(context, ref, state.trip!),
         ),
       if (state.trip != null)
         IconButton(
+          visualDensity: VisualDensity.compact,
           icon: const Icon(Icons.refresh),
+          tooltip: 'Aktualisieren',
           onPressed: () => ref.read(trainLookupProvider.notifier).refresh(),
         ),
     ];
@@ -123,12 +179,10 @@ class _TrainLookupScreenState extends ConsumerState<TrainLookupScreen>
           ? null
           : AppBar(
               title: const Text('Zugnummer'),
-              actions: [const AppMenuButton(), ...actions],
+              actions: const [AppMenuButton()],
             ),
       body: Column(
         children: [
-          if (widget.embedded && actions.isNotEmpty)
-            EmbeddedActionBar(actions: actions),
           // Search bar
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
@@ -141,40 +195,47 @@ class _TrainLookupScreenState extends ConsumerState<TrainLookupScreen>
                         controller: _controller,
                         focusNode: _focusNode,
                         decoration: InputDecoration(
-                          hintText: 'z.B. ICE 148, RE 70, S3, Bus 310...',
+                          hintText: 'z.B. ICE 148, RE 70, Bus 310',
                           prefixIcon: const Icon(Icons.train),
-                          suffixIcon: IconButton(
-                            icon: Icon(
-                              _showStationField
-                                  ? Icons.location_off
-                                  : Icons.location_on_outlined,
-                              size: 20,
-                            ),
-                            tooltip: 'Haltestelle angeben (für Busse)',
-                            onPressed: () {
-                              setState(() {
-                                _showStationField = !_showStationField;
-                                if (!_showStationField) _fromStation = null;
-                              });
-                            },
-                          ),
+                          // The spinner takes the suffix while a lookup runs —
+                          // with no search button left, this is the only place
+                          // the field itself can say it is working.
+                          suffixIcon: state.isLoading
+                              ? const Padding(
+                                  padding: EdgeInsets.all(14),
+                                  child: SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
+                                  ),
+                                )
+                              : IconButton(
+                                  icon: Icon(
+                                    _showStationField
+                                        ? Icons.location_off
+                                        : Icons.location_on_outlined,
+                                    size: 20,
+                                  ),
+                                  tooltip: 'Haltestelle angeben (für Busse)',
+                                  onPressed: () {
+                                    setState(() {
+                                      _showStationField = !_showStationField;
+                                      if (!_showStationField) {
+                                        _fromStation = null;
+                                      }
+                                    });
+                                  },
+                                ),
                         ),
                         textInputAction: TextInputAction.search,
+                        onChanged: _onQueryChanged,
+                        // Still honoured, and it beats the debounce: a rider who
+                        // hits Enter has said they are done typing.
                         onSubmitted: (_) => _search(),
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    FilledButton(
-                      onPressed: state.isLoading ? null : _search,
-                      child: state.isLoading
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                  strokeWidth: 2, color: Colors.white),
-                            )
-                          : const Icon(Icons.search),
-                    ),
+                    ...actions,
                   ],
                 ),
                 // Optional station field for buses/trams
@@ -186,6 +247,10 @@ class _TrainLookupScreenState extends ConsumerState<TrainLookupScreen>
                     initialStation: _fromStation,
                     onSelected: (station) {
                       setState(() => _fromStation = station);
+                      // The stop is half the query — re-run it, the same way
+                      // picking a station re-runs the Abfahrten board. Cheap:
+                      // with a stop given the lookup reads one board, not five.
+                      if (_controller.text.trim().isNotEmpty) _search();
                     },
                   ),
                   if (_fromStation != null)
@@ -337,7 +402,8 @@ class _TrainLookupScreenState extends ConsumerState<TrainLookupScreen>
     return RefreshIndicator(
       onRefresh: () => ref.read(trainLookupProvider.notifier).refresh(),
       child: ListView(
-        padding: const EdgeInsets.only(bottom: 32),
+        // Clear the floating nav bar — it hovers over this list.
+        padding: EdgeInsets.only(bottom: 32 + AppNavBar.insetOf(context)),
         children: [
           TrainDetailView(
             trip: trip,
@@ -358,7 +424,8 @@ class _TrainLookupScreenState extends ConsumerState<TrainLookupScreen>
                         ? (
                             category: trip.line.productName,
                             trainNumber: trip.line.fahrtNr,
-                            time: stop.departure ?? stop.arrival,
+                            // Scheduled — keyed by service date (#32).
+                            time: stop.sequenceTime,
                           )
                         : null,
                     trainLabel: trip.line.displayName,

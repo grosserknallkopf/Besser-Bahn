@@ -409,6 +409,16 @@ class Stopover {
   String? get plannedPlatform =>
       plannedDeparturePlatform ?? plannedArrivalPlatform;
 
+  /// The time to ask the Wagenreihung endpoint with for this stop: the
+  /// SCHEDULED one, falling back to the live one for a stop that has no
+  /// timetable entry (an unscheduled extra stop). That endpoint selects a run
+  /// by its service DATE — which the caller derives from this very DateTime —
+  /// so a train running late past midnight must not hand it a live time, or it
+  /// asks for the next day's run and 404s (#32). One definition because the
+  /// fetch and the cache read must agree on the key down to the minute.
+  DateTime? get sequenceTime =>
+      plannedDeparture ?? plannedArrival ?? departure ?? arrival;
+
   bool get hasPlatformChange =>
       hasArrivalPlatformChange || hasDeparturePlatformChange;
 

@@ -2159,6 +2159,165 @@ def check_wagenreihung_transfer_sectors() -> str:
     return "; ".join(parts)
 
 
+def _delayed_board_trains(eva: str, cats: set, min_delay: int = 5) -> list:
+    """Board rows whose realtime departure runs >= min_delay behind the planned
+    one. Returns (category, number, planned, live, delay_min, label)."""
+    out = []
+    for p in _vendo_board(eva):
+        cat = (p.get("kurztext") or "").upper().strip()
+        if cat not in cats:
+            continue
+        plan, live = p.get("abgangsDatum"), p.get("ezAbgangsDatum")
+        if not plan or not live:
+            continue
+        dp, dl = datetime.fromisoformat(plan), datetime.fromisoformat(live)
+        delay = (dl - dp).total_seconds() / 60
+        if delay >= min_delay:
+            out.append((cat, p.get("zugnummer"), dp, dl, delay,
+                        p.get("mitteltext") or f"{cat} {p.get('zugnummer')}"))
+    out.sort(key=lambda x: -x[4])
+    return out
+
+
+def check_wagenreihung_time_key() -> str:
+    """WHICH parameter selects the run (#32) — the semantics the app's cache key
+    and every call site depend on.
+
+    Measured 2026-07-16: `time` is IGNORED. ICE 205 @ Köln Hbf returned a
+    byte-identical body for every time from −12 h to +12 h as long as `date`
+    stayed the service date, and 404'd the moment `date` moved by a day. So the
+    key is date + category + number + evaNumber.
+
+    That is *why* the app asks with the SCHEDULED time: it derives `date` from
+    the same DateTime, so a live time is harmless until a delay pushes it past
+    midnight — then it asks for tomorrow's run and gets nothing, exactly when
+    the rider needs the Wagenreihung most.
+
+    This check nails both halves down:
+      1. a really delayed train answers the SAME for its planned and its live
+         time (proves `time` is not the selector — if DB ever made it one, the
+         app must go back to caring which time it sends);
+      2. the same train on the next day's `date` does NOT return that body
+         (proves `date` IS the selector, so deriving it from a live time across
+         midnight really is a bug).
+
+    Soft: needs a >=5 min delayed long-distance train on the board right now.
+    """
+    delayed = []
+    for eva in (KOELN_HBF, "8000105"):  # Köln, Frankfurt(Main)Hbf
+        delayed += _delayed_board_trains(eva, {"ICE", "IC", "EC"}, min_delay=5)
+        if delayed:
+            break
+    if not delayed:
+        raise _SkipCheck("no delayed long-distance train on the board to probe")
+
+    for (cat, num, dp, dl, delay, label) in delayed[:4]:
+        r_plan = _wagenreihung_get({
+            "administrationId": "80", "category": cat,
+            "date": f"{dp.year}-{dp.month:02d}-{dp.day:02d}",
+            "evaNumber": eva, "number": str(num),
+            "time": dp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+        })
+        if r_plan.status_code != 200:
+            continue  # this train simply isn't served here — try the next
+        r_live = _wagenreihung_get({
+            "administrationId": "80", "category": cat,
+            "date": f"{dl.year}-{dl.month:02d}-{dl.day:02d}",
+            "evaNumber": eva, "number": str(num),
+            "time": dl.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+        })
+        # Same calendar day => `date` is unchanged => must be the same run.
+        if dl.date() == dp.date():
+            if r_live.status_code != 200:
+                raise CheckError(
+                    f"{label} +{delay:.0f}min: planned time 200 but live time "
+                    f"{r_live.status_code} on the SAME service date — `time` "
+                    f"has become a selector; the app's key assumptions (#32) "
+                    f"no longer hold")
+            # Bodies carry live fields (platform/status), so compare the
+            # composition, not the bytes.
+            a = [v.get("vehicleID") for g in r_plan.json().get("groups", [])
+                 for v in (g.get("vehicles") or [])]
+            b = [v.get("vehicleID") for g in r_live.json().get("groups", [])
+                 for v in (g.get("vehicles") or [])]
+            if a != b:
+                raise CheckError(
+                    f"{label} +{delay:.0f}min: planned and live time return "
+                    f"DIFFERENT compositions ({len(a)} vs {len(b)} cars) — "
+                    f"`time` now selects the run (#32)")
+        # `date` is the selector: tomorrow's date must not serve this run.
+        nxt = dp + timedelta(days=1)
+        r_next = _wagenreihung_get({
+            "administrationId": "80", "category": cat,
+            "date": f"{nxt.year}-{nxt.month:02d}-{nxt.day:02d}",
+            "evaNumber": eva, "number": str(num),
+            "time": dp.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+        })
+        date_matters = r_next.status_code != 200
+        return (f"{label} +{delay:.0f}min: planned & live time agree "
+                f"(time ignored); next-day date -> {r_next.status_code} "
+                f"({'date is the selector' if date_matters else 'date tolerated'})")
+    raise _SkipCheck("no delayed train that the endpoint actually serves")
+
+
+def check_wagenreihung_sbahn() -> str:
+    """S-Bahnen DO have a Wagenreihung (#33) — the app fetches them.
+
+    They were excluded for years on the premise "S-Bahn hat keine Sequenz".
+    Measured 2026-07-16 against the real endpoint (3 departures per network):
+    it's per-network and all-or-nothing, not random —
+
+      served  Rhein-Neckar (Heidelberg), Rhein-Ruhr (Essen), Nürnberg, Dresden
+      404     Hamburg, Berlin, München, Stuttgart, Rhein-Main
+
+    Note DB's OWN board flag `wagenreihung: true` is NOT evidence: München,
+    Stuttgart and Frankfurt set it and then 404. Only the endpoint counts.
+
+    Soft, and deliberately weak: it asserts that SOME S-Bahn network still
+    serves sequences, not that any particular one does. A single network
+    dropping out is DB's business; all of them dropping out means the `S`
+    category earns nothing but wasted requests and should come back out.
+    """
+    tried = served = 0
+    detail = []
+    for name, eva in (("Rhein-Neckar", "8000156"),  # Heidelberg Hbf
+                      ("Rhein-Ruhr", "8000098"),    # Essen Hbf
+                      ("Nürnberg", "8000284")):
+        rows = [p for p in _vendo_board(eva)
+                if (p.get("kurztext") or "").upper().strip() == "S"
+                and p.get("abgangsDatum")]
+        for p in rows[:2]:
+            tried += 1
+            seq = _wagenreihung("S", p.get("zugnummer"), eva,
+                                datetime.fromisoformat(p["abgangsDatum"]))
+            if not seq or not seq.get("groups"):
+                continue
+            cars = [v for g in seq["groups"] for v in (g.get("vehicles") or [])]
+            positioned = [c for c in cars
+                          if isinstance(c.get("platformPosition"), dict)
+                          and (c["platformPosition"].get("end", 0)
+                               - c["platformPosition"].get("start", 0)) > 0]
+            if not positioned:
+                # A sequence with no metres is useless to the drawing — the app
+                # would fetch it and draw nothing.
+                continue
+            served += 1
+            detail.append(f"{name} {p.get('mitteltext')}: {len(cars)} cars, "
+                          f"{len(positioned)} positioned, "
+                          f"{len(seq['groups'])} portion(s)")
+            break
+        if served:
+            break
+    if not tried:
+        raise _SkipCheck("no S-Bahn departures on the boards to probe")
+    if not served:
+        raise CheckError(
+            f"no S-Bahn sequence served across {tried} probes in Rhein-Neckar/"
+            f"Rhein-Ruhr/Nürnberg — the `S` category in "
+            f"coach_sequence_service.dart now only costs 404s (#33)")
+    return "; ".join(detail)
+
+
 def check_osm_platform_geometry() -> str:
     """OpenStreetMap platform + rail geometry via Overpass — the accurate track
     centre-line the platform train rides (services/osm_platform_service.dart →
@@ -2330,18 +2489,95 @@ def check_basemap_offline_bundle() -> str:
             f"pbf {len(tile.content) // 1024} KB, maxzoom {maxzoom}")
 
 
+def _app_user_agent() -> str:
+    """The identifying User-Agent the app actually ships, read out of
+    `AppConstants.userAgent` in the Dart source (not a copy of it) so this
+    check exercises the real string and cannot drift from it."""
+    src = (pathlib.Path(__file__).resolve().parent.parent
+           / "flutter-app" / "lib" / "core" / "constants.dart").read_text()
+    version = re.search(r"appVersion\s*=\s*'([^']+)'", src)
+    ua = re.search(r"userAgent\s*=\n?\s*'(BesserBahn/[^']+)'", src)
+    if not version or not ua:
+        raise CheckError("cannot read AppConstants.appVersion/userAgent from "
+                         "lib/core/constants.dart — did it get renamed?")
+    return ua.group(1).replace("$appVersion", version.group(1))
+
+
+def check_traewelling_user_agent() -> str:
+    """Träwelling gates its entire surface — OAuth token exchange, refresh and
+    the REST API alike — on an *identifiable* User-Agent, answering 403 "No
+    identifiable User-Agent provided" without one. That is what broke the login
+    in #34: the token exchange set no UA, so Dart sent its default
+    `Dart/x (dart:io)`, which is rejected just like a missing one.
+
+    Measured live against traewelling.de: no UA, `Dart/…`, `curl/…` and
+    `python-requests/…` all 403 regardless of the route; our
+    `BesserBahn/<version> (+<repo>)` gets past the gate — 200 on the public
+    `/api/v1/statuses`, 401 on this auth-gated route. The tell is 403 vs 401:
+    403 means "who are you", 401 means the UA was fine and only a token is
+    missing.
+
+    So this pins both directions:
+      - a generic UA must still be refused (the requirement is real, and the
+        `_isRejectedUa` shape our tests reproduce still matches reality), and
+      - the UA the app actually ships must still be accepted (if Träwelling
+        ever tightened the rule against us, the login would break again).
+
+    Soft, like the check-in probe below: an optional third-party social feature,
+    so traewelling.de being down must not fail the whole run.
+    """
+    url = "https://traewelling.de/api/v1/trains/station/autocomplete/Berlin"
+
+    # Direction 1: a generic library UA is refused. (`requests` sends
+    # `python-requests/x` by default — one of the UAs Träwelling blocks.)
+    generic = _get(url, headers={"Accept": "application/json"}, timeout=TIMEOUT)
+    if generic.status_code != 403:
+        raise CheckError(
+            "Träwelling no longer 403s a generic User-Agent "
+            f"(status={generic.status_code}) — the UA rule changed; re-check "
+            "the reproduction in test/traewelling_user_agent_test.dart")
+    if "identifiable User-Agent" not in generic.text:
+        raise CheckError(f"403 but not the UA rejection: {generic.text[:120]}")
+
+    # Direction 2: the UA the app ships is accepted. This is the one that has
+    # to keep working — everything else is diagnosis.
+    ua = _app_user_agent()
+    ours = _get(url, headers={"Accept": "application/json", "User-Agent": ua},
+                timeout=TIMEOUT)
+    if ours.status_code == 403:
+        raise CheckError(
+            f"Träwelling rejects the app's own User-Agent ({ua!r}): "
+            f"{ours.text[:160]} — the Träwelling login is broken (#34)")
+    if ours.status_code in (404, 410):
+        raise CheckError(f"autocomplete path gone (status={ours.status_code})")
+    if ours.status_code not in (200, 401):
+        raise CheckError(f"unexpected status {ours.status_code}")
+
+    return (f"UA rule holds: generic 403, {ua!r} → {ours.status_code}")
+
+
 def check_traewelling_api() -> str:
     """Träwelling REST host the check-in flow rides on. The endpoints we call
     (station autocomplete, departures, trip, checkin) all require a Bearer token
     — without one a *live* endpoint answers 401, while a removed/renamed path is
     404/410. So we assert the autocomplete route still exists (status != 404),
     which confirms the path shape the app builds. Soft: optional social feature,
-    and we can't exercise the authenticated body from CI."""
+    and we can't exercise the authenticated body from CI.
+
+    Sends the app's identifying User-Agent, because Träwelling 403s without one.
+    This check used to tolerate 403 as "reachable" and send no UA — so it went
+    green against the very rejection that made the login fail in #34. A 403 is
+    now a failure here; `check_traewelling_user_agent` owns the UA rule."""
     url = "https://traewelling.de/api/v1/trains/station/autocomplete/Berlin"
-    r = _get(url, headers={"Accept": "application/json"}, timeout=TIMEOUT)
+    r = _get(url,
+             headers={"Accept": "application/json",
+                      "User-Agent": _app_user_agent()},
+             timeout=TIMEOUT)
     if r.status_code in (404, 410):
         raise CheckError(f"autocomplete path gone (status={r.status_code})")
-    if r.status_code not in (200, 401, 403):
+    if r.status_code == 403:
+        raise CheckError(f"403 despite an identifying UA: {r.text[:160]}")
+    if r.status_code not in (200, 401):
         raise CheckError(f"unexpected status {r.status_code}")
     return f"trains/station/autocomplete reachable (status={r.status_code})"
 
@@ -2414,6 +2650,50 @@ def check_db_account_endpoints_require_auth() -> str:
             f"(status={r.status_code}/{r2.status_code})")
 
 
+def check_db_account_forced_refresh_shape() -> str:
+    """Pull-to-refresh on the Profil tab fetches every account source *forced*:
+    same request as always, minus the conditional `If-None-Match` (#31).
+
+    Without that, the server answers 304 and the app re-serves the very cache
+    the pull was meant to replace — which is how a changed address or BahnBonus
+    balance stayed invisible until a logout/login.
+
+    Both shapes must reach the auth gate (401/403). A 400/415 on either would
+    mean the edge started policing the conditional header, and the app's refresh
+    (or its DB-Navigator parity) needs rethinking. Auth-gated, so this proves
+    the request shape is *accepted*, not what it returns. Soft: can't carry a
+    real token in CI."""
+    url = "https://app.services-bahn.de/mob/emobilebahncards"
+    media = "application/x.db.vendo.mob.emobilebahncards.v2+json"
+    # 429 counts as accepted: the per-client limiter sits *behind* the edge, so
+    # being rate-limited proves the route and the request shape were fine. A
+    # 429 is never evidence that the API changed (project_vendo_rate_limit).
+    ok = (401, 403, 429)
+
+    # Forced: exactly what a pull sends — no If-None-Match, call-trigger manual.
+    forced_headers = _vendo_headers(media)
+    forced_headers["call-trigger"] = "manual"
+    forced = _get(url, headers=forced_headers, timeout=TIMEOUT)
+    if forced.status_code not in ok:
+        raise CheckError(
+            f"forced refresh shape rejected (status={forced.status_code}, "
+            "expected the 401/403 auth gate)")
+
+    # Conditional: the background revalidation, which keeps sending the ETag.
+    cond_headers = _vendo_headers(media)
+    cond_headers["If-None-Match"] = 'W/"probe-not-a-real-etag"'
+    cond_headers["call-trigger"] = "auto"
+    cond = _get(url, headers=cond_headers, timeout=TIMEOUT)
+    if cond.status_code not in ok:
+        raise CheckError(
+            f"conditional refresh shape rejected (status={cond.status_code}, "
+            "expected the 401/403 auth gate)")
+
+    return ("forced (no if-none-match) + conditional refresh shapes both "
+            f"accepted, auth-gated (status={forced.status_code}/"
+            f"{cond.status_code})")
+
+
 # (name, callable, soft) — soft checks warn instead of fail.
 CHECKS = [
     ("bahn.de web API blocked (reiseloesung)", check_bahn_web_api_blocked, True),
@@ -2445,6 +2725,11 @@ CHECKS = [
     ("wagenreihung wing-train split (RE)", check_wagenreihung_split, True),
     ("wagenreihung transfer sectors (#27)",
      check_wagenreihung_transfer_sectors, True),
+    # Soft: both need the right train on the board right now (a delayed
+    # long-distance run / an S-Bahn in a served network), so a quiet board is a
+    # skip, not a broken API.
+    ("wagenreihung time-vs-date key (#32)", check_wagenreihung_time_key, True),
+    ("wagenreihung S-Bahn served (#33)", check_wagenreihung_sbahn, True),
     ("osm platform geometry (overpass)", check_osm_platform_geometry, False),
     ("basemap (OpenFreeMap Positron vector)", check_basemap_tiles, True),
     ("basemap offline style bundle (#29)", check_basemap_offline_bundle, True),
@@ -2452,9 +2737,11 @@ CHECKS = [
     ("map bay ↔ departures link", check_bay_departure_link, True),
     ("map Gleis ↔ departures (normalised)", check_gleis_departure_link, False),
     ("bahnhof.de sitemap", check_bahnhof_sitemap, False),
+    ("traewelling UA requirement (#34)", check_traewelling_user_agent, True),
     ("traewelling check-in API", check_traewelling_api, True),
     ("DB account token endpoint (kf_mobile)", check_db_account_token_endpoint, True),
     ("DB account mob endpoints (auth-gated)", check_db_account_endpoints_require_auth, True),
+    ("DB account forced refresh shape (#31)", check_db_account_forced_refresh_shape, True),
     ("HAFAS rest mirror (flaky)", check_hafas_rest, True),
     ("website journey blocked check", check_website_journey_still_blocked, True),
 ]

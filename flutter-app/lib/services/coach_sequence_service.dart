@@ -18,8 +18,10 @@ class CoachSequenceService {
   /// [category] - Train category: ICE, IC, EC, etc.
   /// [number] - Train number (e.g., 148)
   /// [stationEva] - Station EVA number
-  /// [date] - Date of travel
-  /// [time] - Departure time at the station (ISO 8601)
+  /// [date] - SERVICE date of the run — the one selector that matters (#32)
+  /// [time] - Time of day at the station (ISO 8601). Measured to be ignored by
+  ///   the endpoint; pass the scheduled time anyway so [date] stays the
+  ///   timetable's service date.
   Future<CoachSequence> getCoachSequence({
     required String category,
     required int number,
@@ -70,7 +72,7 @@ class CoachSequenceService {
 
   /// Normalise a leg's product + train number the way the vehicle-sequence
   /// endpoint expects, or null when this train has no sequence to fetch
-  /// (S-Bahn/bus/tram, or an unparseable number). Shared so the offline package
+  /// (bus/tram/U-Bahn, or an unparseable number). Shared so the offline package
   /// decides "is there a Wagenreihung here at all?" by exactly the same rule the
   /// live fetch uses — otherwise a package would report a part as missing that
   /// was never fetchable.
@@ -121,17 +123,49 @@ class CoachSequenceService {
   /// (ICE/IC/EC) *and* the regional trains (RE/RB/IRE) — the latter matters for
   /// wing trains (Flügelzüge, e.g. the RE7 that splits in Neumünster into a Kiel
   /// and a Flensburg portion): the Wagenreihung is the only source that says
-  /// *which* coaches go where. S-Bahn / bus / tram have no sequence → skipped.
+  /// *which* coaches go where.
+  ///
+  /// `S` is in the list despite the old "S-Bahn has no sequence" rule, which was
+  /// simply wrong (#33). Measured over 9 networks (3 departures each, real
+  /// endpoint, not DB's own board flag — that flag claims a Wagenreihung for
+  /// München/Stuttgart/Frankfurt and then 404s): it is per-NETWORK and
+  /// all-or-nothing, not random.
+  ///
+  ///   served 3/3  Rhein-Neckar (Heidelberg), Rhein-Ruhr (Essen),
+  ///               Nürnberg, Dresden          → real cars, metres and sectors
+  ///   served 0/3  Hamburg, Berlin, München, Stuttgart, Rhein-Main → 404
+  ///
+  /// So roughly half of all S-Bahn departures carry one, and where a network
+  /// doesn't, the endpoint 404s and the app stays quiet exactly as it already
+  /// does for a regional train's terminus. Worth having: the Rhein-Neckar S-Bahn
+  /// even splits (S1 Homburg / S3 Germersheim portions coupled together), which
+  /// is precisely the "which portion do I board" case this data exists for.
+  ///
+  /// Bus / tram / U-Bahn have no sequence → still skipped.
   static const _coachCategories = {
     'ICE', 'IC', 'EC', 'ECE', 'RE', 'RB', 'IRE', 'RJ', 'RJX', 'EN', 'NJ', 'D',
+    'S',
   };
 
   /// Get coach sequence for a train portion.
   ///
-  /// [category] - product (ICE, IC, RE, RB, …).
+  /// [category] - product (ICE, IC, RE, RB, S, …).
   /// [trainNumber] - the *train* number (Zugnummer / fahrtNr, e.g. "11266"),
   ///   NOT the line number — a wing train's two portions share the line "RE 7"
   ///   but carry distinct train numbers.
+  /// [departureTime] - the SCHEDULED time at this stop, not the live one.
+  ///
+  /// WHY SCHEDULED (#32). Measured against the live endpoint: the run is
+  /// selected by `date` + category + number + evaNumber, and `time` is ignored
+  /// outright — ICE 205 @ Köln Hbf answered with a byte-identical body for
+  /// every time from −12 h to +12 h as long as `date` stayed the service date.
+  /// So a delay does NOT break the lookup the way it looks like it should…
+  /// except across midnight: [date] is derived from this very DateTime, so a
+  /// live departure that slips past 00:00 rolls it onto the NEXT service date
+  /// and 404s (verified: same train, date+1 → 404). The scheduled time keeps
+  /// the run on its own date, and for a punctual train the two are identical —
+  /// which also makes every caller's cache key agree instead of splitting into
+  /// a planned-keyed and a live-keyed copy of the same sequence.
   Future<CoachSequence?> getCoachSequenceForDeparture({
     required String category,
     required String trainNumber,

@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 import '../../models/db_account.dart';
 import '../../models/db_ticket.dart';
 import '../../providers/account_provider.dart';
+import '../../widgets/app_nav_bar.dart';
 import 'widgets/bahncard_view.dart';
 
 /// "Profil" tab — the signed-in DB account: identity, BahnBonus, BahnCards and
@@ -34,19 +35,17 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Coming back to the app — e.g. after completing a purchase on bahn.de —
-    // re-pull the account data so a freshly bought ticket appears without a
-    // manual refresh.
+    // Coming back to the app — e.g. after completing a purchase or correcting
+    // the address on bahn.de — re-pull the account so the change is there
+    // without a manual refresh.
     //
-    // Refresh the *source*: ticketIndicesProvider is derived from
-    // reisenuebersichtProvider, so invalidating it only re-reads the overview
-    // already in memory and never hits the network — the freshly bought
-    // ticket wouldn't have shown up at all.
-    if (state == AppLifecycleState.resumed &&
-        ref.read(dbAuthProvider).isLoggedIn) {
-      ref.read(reisenuebersichtProvider.notifier).refresh();
-      ref.read(bahnbonusProvider.notifier).refresh();
-      ref.invalidate(bahncardsProvider);
+    // The same one-call refresh the pull uses, including the profile itself:
+    // this handler used to refresh BahnBonus, BahnCards and the trip overview
+    // but never the profile, so an address edited outside the app stayed on the
+    // old value until a re-login (#31). `auto` throttles it — resume fires far
+    // more often than the account changes.
+    if (state == AppLifecycleState.resumed) {
+      ref.read(accountRefreshProvider).refresh(auto: true);
     }
   }
 
@@ -69,7 +68,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
       body: !auth.initialized
           ? const Center(child: CircularProgressIndicator())
           : auth.isLoggedIn
-              ? _LoggedIn(profile: auth.profile!)
+              ? _LoggedIn(auth: auth)
               : _LoggedOut(auth: auth),
     );
   }
@@ -116,7 +115,10 @@ class _LoggedOutState extends ConsumerState<_LoggedOut> {
     final theme = Theme.of(context);
     return Center(
       child: SingleChildScrollView(
-        padding: const EdgeInsets.all(24),
+        // Bottom pad clears the floating nav bar, so the login button can
+        // always be scrolled out from under the glass.
+        padding:
+            EdgeInsets.fromLTRB(24, 24, 24, 24 + AppNavBar.insetOf(context)),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -220,8 +222,10 @@ class _LoggedOutState extends ConsumerState<_LoggedOut> {
 // --- Logged-in dashboard ----------------------------------------------------
 
 class _LoggedIn extends ConsumerWidget {
-  final DbProfile profile;
-  const _LoggedIn({required this.profile});
+  final DbAuthState auth;
+  const _LoggedIn({required this.auth});
+
+  DbProfile get profile => auth.profile!;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -230,19 +234,20 @@ class _LoggedIn extends ConsumerWidget {
     final tickets = ref.watch(ticketIndicesProvider);
 
     return RefreshIndicator(
-      onRefresh: () async {
-        await ref.read(dbAuthProvider.notifier).reload();
-        // Refresh the sources, not the derived views — see the resume handler.
-        await Future.wait([
-          ref.read(bahnbonusProvider.notifier).refresh(),
-          ref.read(reisenuebersichtProvider.notifier).refresh(),
-        ]);
-        ref.invalidate(bahncardsProvider);
-      },
+      // One pull = one coordinated set of requests for every source on this
+      // screen: profile/address, BahnBonus, BahnCards, tickets. The screen used
+      // to refresh each of them by hand while also invalidating them, which
+      // fired every request twice and rate-limited the refresh into serving the
+      // stale cache it was meant to replace (#31).
+      onRefresh: () => ref.read(accountRefreshProvider).refresh(),
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
+        physics: const AlwaysScrollableScrollPhysics(),
+        // Clear the floating nav bar — it hovers over this list.
+        padding:
+            EdgeInsets.fromLTRB(16, 12, 16, 32 + AppNavBar.insetOf(context)),
         children: [
           _header(context),
+          _refreshStatus(context),
           const SizedBox(height: 16),
           // BahnBonus — same rule as BahnCard below: never blank the card just
           // because a refresh is in flight or failed. `.value` (unlike
@@ -369,6 +374,42 @@ class _LoggedIn extends ConsumerWidget {
           ),
         ),
       ],
+    );
+  }
+
+  /// "Zuletzt aktualisiert …" — so a pull that found nothing new is visibly
+  /// different from a pull that failed. A failed refresh used to be invisible
+  /// here: the error landed in the state, and only the logged-out view ever
+  /// rendered it, so a rate-limited refresh looked like "nothing changed" (#31).
+  Widget _refreshStatus(BuildContext context) {
+    final theme = Theme.of(context);
+    final failed = auth.error != null;
+    final at = auth.lastRefreshedAt;
+    if (!failed && at == null) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Row(
+        children: [
+          Icon(
+            failed ? Icons.sync_problem : Icons.sync,
+            size: 14,
+            color: failed ? theme.colorScheme.error : theme.colorScheme.outline,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              failed
+                  ? auth.error!
+                  : 'Zuletzt aktualisiert: '
+                      '${DateFormat('dd.MM.yyyy, HH:mm').format(at!)}',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color:
+                    failed ? theme.colorScheme.error : theme.colorScheme.outline,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

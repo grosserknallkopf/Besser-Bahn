@@ -428,6 +428,18 @@ List<({List<LatLng> outline, Coach coach, bool boarding})> platformTrainCars(
         map, gleis: gleis, section: section, cs: cs, osmRail: osmRail);
   }
 
+  // A Wagenreihung that publishes NO sector table at all can't be anchored to
+  // sectors either — same situation as a station without cubes, so take the
+  // same way out instead of drawing nothing. This is the norm for S-Bahn (#33):
+  // of the networks the endpoint serves, only Rhein-Neckar ships a sector
+  // table; Essen, Nürnberg and Dresden send real cars and metres with no
+  // sectors at all. Bailing here would fetch their Wagenreihung and then draw
+  // nothing with it.
+  if (cs.platform.sectors.every((s) => letterIdx(s.name) == null)) {
+    return platformTrainFromComposition(
+        map, gleis: gleis, section: section, cs: cs, osmRail: osmRail);
+  }
+
   // (Wagenreihung metre offset → arc-length ALONG the curve) anchors, from the
   // sectors present as real cubes.
   final anchors = <({double off, double arc})>[];
