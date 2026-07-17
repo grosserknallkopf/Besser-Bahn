@@ -93,6 +93,24 @@ class DbAccountConstants {
   /// Mobile backend base (same as VendoService, but authenticated here).
   static const mobBase = 'https://app.services-bahn.de/mob';
 
+  /// BahnBonus' personal CO₂ statistics. This is the same authenticated
+  /// service the official BahnBonus app uses for its current-year balance.
+  static const bahnbonusCo2Base =
+      'https://apis.deutschebahn.com/db/apis/bahnbonus/co2-service/v1';
+
+  /// OAuth client used by the official BahnBonus app. CO₂ deliberately does
+  /// not accept DB Navigator's `kf_mobile` bearer, even for the same account.
+  static const bahnbonusOAuthClientId = 'fe_bb_app';
+  static const bahnbonusRedirectUrl = 'bahnbonus://authentication/redirect';
+  static const bahnbonusCallbackScheme = 'bahnbonus';
+  static const bahnbonusScope = 'openid offline_access self-impersonation';
+
+  // Public app credentials shipped with the BahnBonus Android client. They
+  // identify the calling app at DB's API gateway; the user's OAuth bearer is
+  // still required separately and is what authorizes access to personal data.
+  static const bahnbonusClientId = 'b4ceb052260d1df18955c9769f2f6ee1';
+  static const bahnbonusApiKey = 'af42968e4445cf550ad06f8b114f0cda';
+
   // Per-endpoint vendo media types (exact-matched by the DB edge).
   static const profileMedia = 'application/x.db.vendo.mob.kundenkonto.v7+json';
   static const bahnbonusMedia = 'application/x.db.vendo.mob.bahnbonus.v1+json';
@@ -108,8 +126,7 @@ class DbAccountConstants {
       'application/x.db.vendo.mob.freiereisen.v5+json';
 
   /// Bahnhof-Favoriten (GET /mob/kundendatensatz/{id}/favoriten).
-  static const favoritenMedia =
-      'application/x.db.vendo.mob.favoriten.v1+json';
+  static const favoritenMedia = 'application/x.db.vendo.mob.favoriten.v1+json';
 
   /// Customer contingents (abos like the Deutschland-Ticket) —
   /// GET /mob/kundenkontingente.

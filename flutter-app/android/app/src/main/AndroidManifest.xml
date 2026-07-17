@@ -66,6 +66,8 @@
              - dbnav://     — Deutsche-Bahn account login; DB's Keycloak
                               redirects straight into the DB Navigator app
                               scheme, which we capture here.
+             - bahnbonus:// — separate BahnBonus OAuth token for the official
+                              personal CO₂ statistics service.
 
              `taskAffinity=""` is required by the plugin and was missing (#35).
              Without it this activity inherits the application's affinity, while
@@ -87,6 +89,7 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="besserbahn" />
                 <data android:scheme="dbnav" />
+                <data android:scheme="bahnbonus" />
             </intent-filter>
         </activity>
         <!-- flutter_local_notifications: deliver scheduled reminders and re-arm

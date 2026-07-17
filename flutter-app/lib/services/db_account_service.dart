@@ -30,6 +30,14 @@ class DbAccountException implements Exception {
   String toString() => 'DbAccountException($status): $message';
 }
 
+/// Raised when the account is signed in for DB Navigator data, but has not yet
+/// granted this installation a BahnBonus token. The two public OAuth clients
+/// are intentionally separate at DB.
+class DbBahnBonusAuthorizationRequired extends DbAccountException {
+  const DbBahnBonusAuthorizationRequired()
+      : super('BahnBonus muss einmalig verknüpft werden', 403);
+}
+
 /// Authenticated client for the signed-in user's DB account: profile,
 /// BahnBonus, BahnCards and booked tickets — read from the same DB Navigator
 /// backend (`app.services-bahn.de/mob`) the official app uses, authenticated
@@ -53,8 +61,9 @@ class DbAccountService {
               // flutter_secure_storage 10.x uses its own ciphers by default
               // (the legacy EncryptedSharedPreferences flag is deprecated and
               // ignored), so no aOptions needed.
-              iOptions:
-                  IOSOptions(accessibility: KeychainAccessibility.first_unlock),
+              iOptions: IOSOptions(
+                accessibility: KeychainAccessibility.first_unlock,
+              ),
             );
 
   final FlutterSecureStorage _storage;
@@ -70,6 +79,10 @@ class DbAccountService {
   static const _kRefresh = 'db_refresh_token';
   static const _kExpiry = 'db_expires_at'; // ISO-8601
   static const _kKontoId = 'db_kundenkonto_id';
+  static const _kBahnBonusAccess = 'db_bahnbonus_access_token';
+  static const _kBahnBonusRefresh = 'db_bahnbonus_refresh_token';
+  static const _kBahnBonusExpiry = 'db_bahnbonus_expires_at';
+
   /// Stable per-install pair of UUIDs DB Navigator stamps on every request as
   /// `x-correlation-id` — same value for the whole session/install life. Stored
   /// in secure storage so it survives reinstall-less updates; regenerated only
@@ -85,6 +98,8 @@ class DbAccountService {
 
   String? _accessToken;
   DateTime? _expiresAt;
+  String? _bahnBonusAccessToken;
+  DateTime? _bahnBonusExpiresAt;
   String? _kundenkontoId;
   String? _correlationId;
   // Lazy-loaded device descriptors. We never lie about the device — sending
@@ -148,6 +163,7 @@ class DbAccountService {
         'response_type': 'code',
         'client_id': DbAccountConstants.clientId,
         'state': state,
+        'nonce': _randomString(24),
         'code_challenge': challenge,
         'code_challenge_method': 'S256',
         'prompt': 'login',
@@ -182,7 +198,9 @@ class DbAccountService {
   }
 
   Future<Map<String, dynamic>> _exchangeCode(
-      String code, String verifier) async {
+    String code,
+    String verifier,
+  ) async {
     final res = await _client.post(
       Uri.parse(DbAccountConstants.tokenUrl),
       headers: {'Accept': 'application/json'},
@@ -196,7 +214,9 @@ class DbAccountService {
     ).timeout(_timeout);
     if (res.statusCode != 200) {
       throw DbAccountException(
-          'Anmeldung fehlgeschlagen: ${res.body}', res.statusCode);
+        'Anmeldung fehlgeschlagen: ${res.body}',
+        res.statusCode,
+      );
     }
     return json.decode(res.body) as Map<String, dynamic>;
   }
@@ -231,21 +251,24 @@ class DbAccountService {
       return _RefreshOutcome.transient;
     }
     AppLog.log(
-        'refresh HTTP ${res.statusCode} (refresh ttl=${refresh.length}B)',
-        tag: 'db-account');
+      'refresh HTTP ${res.statusCode} (refresh ttl=${refresh.length}B)',
+      tag: 'db-account',
+    );
     if (res.statusCode == 200) {
       // fall through to _storeTokens below
     } else if (res.statusCode == 400 || res.statusCode == 401) {
       // Keycloak explicitly rejected the refresh token — it's dead.
       AppLog.log(
-          'refresh rejected · body: ${res.body.substring(0, res.body.length.clamp(0, 200))}',
-          tag: 'db-account');
+        'refresh rejected · body: ${res.body.substring(0, res.body.length.clamp(0, 200))}',
+        tag: 'db-account',
+      );
       return _RefreshOutcome.rejected;
     } else {
       // 5xx / unexpected — keep tokens, next try recovers.
       AppLog.log(
-          'refresh non-200 (transient) · body: ${res.body.substring(0, res.body.length.clamp(0, 200))}',
-          tag: 'db-account');
+        'refresh non-200 (transient) · body: ${res.body.substring(0, res.body.length.clamp(0, 200))}',
+        tag: 'db-account',
+      );
       return _RefreshOutcome.transient;
     }
     await _storeTokens(json.decode(res.body) as Map<String, dynamic>);
@@ -275,8 +298,161 @@ class DbAccountService {
     // "logged out on relaunch" report from a real device.
     final persisted = await _read(_kRefresh);
     AppLog.log(
-        'storeTokens ok · refresh persisted: ${persisted != null}',
-        tag: 'db-account');
+      'storeTokens ok · refresh persisted: ${persisted != null}',
+      tag: 'db-account',
+    );
+  }
+
+  Future<void> _loadBahnBonusTokens() async {
+    _bahnBonusAccessToken ??= await _read(_kBahnBonusAccess);
+    final expiry = await _read(_kBahnBonusExpiry);
+    _bahnBonusExpiresAt = expiry != null ? DateTime.tryParse(expiry) : null;
+  }
+
+  Future<bool> hasBahnBonusAuthorization() async {
+    if (_bahnBonusAccessToken != null) return true;
+    return await _read(_kBahnBonusAccess) != null ||
+        await _read(_kBahnBonusRefresh) != null;
+  }
+
+  Future<void> _storeBahnBonusTokens(Map<String, dynamic> token) async {
+    final access = token['access_token'] as String?;
+    final refresh = token['refresh_token'] as String?;
+    final expiresIn = (token['expires_in'] as num?)?.toInt();
+    if (access == null) {
+      throw const DbAccountException(
+        'BahnBonus-Token-Antwort ohne access_token',
+      );
+    }
+    _bahnBonusAccessToken = access;
+    _bahnBonusExpiresAt = expiresIn != null
+        ? DateTime.now().add(Duration(seconds: expiresIn))
+        : null;
+    await _writeKey(_kBahnBonusAccess, access);
+    if (refresh != null) await _writeKey(_kBahnBonusRefresh, refresh);
+    if (_bahnBonusExpiresAt != null) {
+      await _writeKey(
+        _kBahnBonusExpiry,
+        _bahnBonusExpiresAt!.toIso8601String(),
+      );
+    }
+    AppLog.log('BahnBonus OAuth token stored', tag: 'db-account');
+  }
+
+  Future<void> _clearBahnBonusTokens() async {
+    _bahnBonusAccessToken = null;
+    _bahnBonusExpiresAt = null;
+    await _delete(_kBahnBonusAccess);
+    await _delete(_kBahnBonusRefresh);
+    await _delete(_kBahnBonusExpiry);
+  }
+
+  Future<_RefreshOutcome> _refreshBahnBonus() async {
+    final refresh = await _read(_kBahnBonusRefresh);
+    if (refresh == null) return _RefreshOutcome.rejected;
+    try {
+      final res = await _client.post(
+        Uri.parse(DbAccountConstants.tokenUrl),
+        headers: {'Accept': 'application/json'},
+        body: {
+          'grant_type': 'refresh_token',
+          'refresh_token': refresh,
+          'client_id': DbAccountConstants.bahnbonusOAuthClientId,
+        },
+      ).timeout(_timeout);
+      if (res.statusCode == 200) {
+        await _storeBahnBonusTokens(
+          json.decode(res.body) as Map<String, dynamic>,
+        );
+        return _RefreshOutcome.success;
+      }
+      if (res.statusCode == 400 || res.statusCode == 401) {
+        await _clearBahnBonusTokens();
+        return _RefreshOutcome.rejected;
+      }
+      return _RefreshOutcome.transient;
+    } on TimeoutException {
+      return _RefreshOutcome.transient;
+    } catch (_) {
+      return _RefreshOutcome.transient;
+    }
+  }
+
+  /// Creates the separate BahnBonus OAuth session. The authorization request
+  /// intentionally has no `prompt=login`: an existing DB browser session can
+  /// approve it without asking for credentials again.
+  Future<void> _authorizeBahnBonus() async {
+    final verifier = _randomString(64);
+    final challenge = _codeChallenge(verifier);
+    final state = 'bahnbonus-${_randomString(10)}';
+    final authUrl = Uri.parse(DbAccountConstants.authorizeUrl).replace(
+      queryParameters: {
+        'response_type': 'code',
+        'client_id': DbAccountConstants.bahnbonusOAuthClientId,
+        'state': state,
+        'code_challenge': challenge,
+        'code_challenge_method': 'S256',
+        'scope': DbAccountConstants.bahnbonusScope,
+        'redirect_uri': DbAccountConstants.bahnbonusRedirectUrl,
+        'kc_locale': 'de',
+      },
+    );
+    final result = await FlutterWebAuth2.authenticate(
+      url: authUrl.toString(),
+      callbackUrlScheme: DbAccountConstants.bahnbonusCallbackScheme,
+    );
+    final returned = Uri.parse(result);
+    final code = returned.queryParameters['code'];
+    if (returned.queryParameters['state'] != state) {
+      throw const DbAccountException(
+        'BahnBonus-Autorisierung: State stimmt nicht überein',
+      );
+    }
+    if (code == null) {
+      final message = returned.queryParameters['error_description'] ??
+          returned.queryParameters['error'] ??
+          'BahnBonus-Autorisierung abgebrochen';
+      throw DbAccountException(message);
+    }
+    final res = await _client.post(
+      Uri.parse(DbAccountConstants.tokenUrl),
+      headers: {'Accept': 'application/json'},
+      body: {
+        'grant_type': 'authorization_code',
+        'client_id': DbAccountConstants.bahnbonusOAuthClientId,
+        'redirect_uri': DbAccountConstants.bahnbonusRedirectUrl,
+        'code_verifier': verifier,
+        'code': code,
+      },
+    ).timeout(_timeout);
+    if (res.statusCode != 200) {
+      throw DbAccountException(
+        'BahnBonus-Autorisierung fehlgeschlagen',
+        res.statusCode,
+      );
+    }
+    await _storeBahnBonusTokens(
+      json.decode(res.body) as Map<String, dynamic>,
+    );
+  }
+
+  Future<void> _ensureBahnBonusAccess({required bool connect}) async {
+    await _loadBahnBonusTokens();
+    final stillValid = _bahnBonusAccessToken != null &&
+        (_bahnBonusExpiresAt == null ||
+            DateTime.now().isBefore(
+              _bahnBonusExpiresAt!.subtract(const Duration(seconds: 20)),
+            ));
+    if (stillValid) return;
+    final refresh = await _refreshBahnBonus();
+    if (refresh == _RefreshOutcome.success) return;
+    if (refresh == _RefreshOutcome.transient) {
+      throw const DbAccountException(
+        'BahnBonus ist temporär nicht erreichbar',
+      );
+    }
+    if (!connect) throw const DbBahnBonusAuthorizationRequired();
+    await _authorizeBahnBonus();
   }
 
   Future<void> logout() async {
@@ -288,19 +464,21 @@ class DbAccountService {
     await _delete(_kRefresh);
     await _delete(_kExpiry);
     await _delete(_kKontoId);
+    await _clearBahnBonusTokens();
     // Drop the per-install correlation-id and every cached ETag so the next
     // login looks like a fresh install — no cross-account leak of the prior
     // user's id or cache state.
     await _delete(_kCorrelationId);
     try {
       final prefs = await SharedPreferences.getInstance();
-      final keys = prefs.getKeys()
-          .where((k) => k.startsWith(_kEtagPrefix))
-          .toList();
+      final keys =
+          prefs.getKeys().where((k) => k.startsWith(_kEtagPrefix)).toList();
       for (final k in keys) {
         await prefs.remove(k);
       }
-    } catch (_) {/* best effort */}
+    } catch (_) {
+      /* best effort */
+    }
   }
 
   /// The `kundenkontoid` claim carried in the access-token JWT — the id used in
@@ -370,7 +548,9 @@ class DbAccountService {
         _deviceModel = '${info.manufacturer} ${info.model}'.trim();
         return;
       }
-    } catch (_) {/* fall through to safe defaults */}
+    } catch (_) {
+      /* fall through to safe defaults */
+    }
     _deviceOsName = 'Android';
     _deviceOsVersion = '33';
     _deviceModel = 'samsung SM-A705FN';
@@ -403,7 +583,9 @@ class DbAccountService {
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('$_kEtagPrefix$url', etag);
-    } catch (_) {/* best effort */}
+    } catch (_) {
+      /* best effort */
+    }
   }
 
   /// Sends an authenticated request, transparently refreshing the access token
@@ -480,13 +662,17 @@ class DbAccountService {
         }
         if (r == _RefreshOutcome.transient) {
           throw const DbAccountException(
-              'Anmeldung temporär nicht erreichbar', null);
+            'Anmeldung temporär nicht erreichbar',
+            null,
+          );
         }
       }
     }
     // Pre-emptive refresh: the access token only lives 5 minutes.
     if (_expiresAt != null &&
-        DateTime.now().isAfter(_expiresAt!.subtract(const Duration(seconds: 20)))) {
+        DateTime.now().isAfter(
+          _expiresAt!.subtract(const Duration(seconds: 20)),
+        )) {
       await _refresh();
     }
 
@@ -522,7 +708,8 @@ class DbAccountService {
       }
     } on TimeoutException {
       throw const DbAccountException(
-          'Zeitüberschreitung – die Bahn antwortet nicht.');
+        'Zeitüberschreitung – die Bahn antwortet nicht.',
+      );
     }
 
     // 429: caller spammed the endpoint (multiple concurrent fetches of the
@@ -530,15 +717,19 @@ class DbAccountService {
     // and try once more — the BahnCard endpoint hit this when restore and
     // the profile-screen provider both fired in parallel.
     if (res.statusCode == 429 && retryOn401) {
-      final retryAfterSec =
-          int.tryParse(res.headers['retry-after'] ?? '') ?? 2;
+      final retryAfterSec = int.tryParse(res.headers['retry-after'] ?? '') ?? 2;
       final delay = Duration(seconds: retryAfterSec.clamp(1, 5));
-      AppLog.log('429 on ${Uri.parse(url).path} → backoff ${delay.inSeconds}s',
-          tag: 'db-account');
+      AppLog.log(
+        '429 on ${Uri.parse(url).path} → backoff ${delay.inSeconds}s',
+        tag: 'db-account',
+      );
       await Future.delayed(delay);
       return _dispatch(method, url,
-          media: media, body: body, retryOn401: false,
-          extraHeaders: extraHeaders, bypassEtag: bypassEtag);
+          media: media,
+          body: body,
+          retryOn401: false,
+          extraHeaders: extraHeaders,
+          bypassEtag: bypassEtag);
     }
 
     // DB's mob backend returns **403** (not 401) when the access token has
@@ -546,13 +737,18 @@ class DbAccountService {
     // answered 403 immediately while a refresh-able session sat on disk.
     // Treat 401 and 403 identically: refresh + retry once.
     if ((res.statusCode == 401 || res.statusCode == 403) && retryOn401) {
-      AppLog.log('${res.statusCode} on ${Uri.parse(url).path} → refreshing',
-          tag: 'db-account');
+      AppLog.log(
+        '${res.statusCode} on ${Uri.parse(url).path} → refreshing',
+        tag: 'db-account',
+      );
       final r = await _refresh();
       if (r == _RefreshOutcome.success) {
         return _dispatch(method, url,
-            media: media, body: body, retryOn401: false,
-            extraHeaders: extraHeaders, bypassEtag: bypassEtag);
+            media: media,
+            body: body,
+            retryOn401: false,
+            extraHeaders: extraHeaders,
+            bypassEtag: bypassEtag);
       }
       // Only wipe the stored tokens when Keycloak EXPLICITLY rejected the
       // refresh — the previous behaviour wiped them on any failure (incl. a
@@ -563,7 +759,9 @@ class DbAccountService {
         throw const DbAccountException('Sitzung abgelaufen', 401);
       }
       throw const DbAccountException(
-          'Sitzung temporär nicht erreichbar — bitte erneut versuchen', null);
+        'Sitzung temporär nicht erreichbar — bitte erneut versuchen',
+        null,
+      );
     }
     // 2xx with a fresh ETag → remember it for the next conditional GET.
     if (method == 'GET' && res.statusCode >= 200 && res.statusCode < 300) {
@@ -582,10 +780,11 @@ class DbAccountService {
     _kundenkontoId = await _read(_kKontoId);
     final hasRefresh = (await _read(_kRefresh)) != null;
     AppLog.log(
-        'loadTokens access=${_accessToken != null} '
-        'refresh=$hasRefresh exp=${_expiresAt?.toIso8601String() ?? '?'} '
-        'konto=${_kundenkontoId != null}',
-        tag: 'db-account');
+      'loadTokens access=${_accessToken != null} '
+      'refresh=$hasRefresh exp=${_expiresAt?.toIso8601String() ?? '?'} '
+      'konto=${_kundenkontoId != null}',
+      tag: 'db-account',
+    );
   }
 
   Map<String, dynamic> _decode(http.Response res, String what) {
@@ -637,6 +836,76 @@ class DbAccountService {
     return DbBahnBonus.fromJson(_decode(res, 'bbStatus'));
   }
 
+  /// Official current-year CO₂ balance shown by the BahnBonus app.
+  ///
+  /// The API groups the requested period by `YEARLY`. Asking from January 1
+  /// through today yields the same live year tile as BahnBonus. A 304 means
+  /// the provider should retain its persisted last-good value.
+  Future<DbBahnBonusCo2Balance?> bahnbonusCo2Balance({
+    DateTime? now,
+    bool connect = false,
+  }) async {
+    final today = now ?? DateTime.now();
+    final date = today.toIso8601String().split('T').first;
+    final startDate = '${today.year.toString().padLeft(4, '0')}-01-01';
+    final uri =
+        Uri.parse('${DbAccountConstants.bahnbonusCo2Base}/statistics').replace(
+      queryParameters: {
+        'interval': 'YEARLY',
+        'startDate': startDate,
+        'endDate': date,
+      },
+    );
+    final res = await _sendBahnBonus(uri, connect: connect);
+    if (res.statusCode == 304 || res.statusCode == 404) return null;
+    final data = _decode(res, 'co2-statistics');
+    final items = (data['items'] as List<dynamic>? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .toList();
+    if (items.isEmpty) return null;
+    final yearPrefix = '${today.year}-';
+    final item = items.firstWhere((entry) {
+      final period = entry['periodOfTime'] as Map<String, dynamic>? ?? const {};
+      return (period['startDate'] ?? '').toString().startsWith(yearPrefix);
+    }, orElse: () => items.last);
+    return DbBahnBonusCo2Balance.fromJson(item);
+  }
+
+  Future<http.Response> _sendBahnBonus(
+    Uri uri, {
+    required bool connect,
+    bool retry = true,
+  }) async {
+    await _ensureDeviceInfo();
+    await _ensureBahnBonusAccess(connect: connect);
+    final res = await _client.get(
+      uri,
+      headers: {
+        'Authorization': 'Bearer $_bahnBonusAccessToken',
+        'Accept': 'application/json',
+        'Accept-Language': 'de',
+        'DB-Client-Id': DbAccountConstants.bahnbonusClientId,
+        'DB-Api-Key': DbAccountConstants.bahnbonusApiKey,
+        'User-Agent':
+            'BahnBonus/3.6.3 Android/${_deviceOsVersion ?? 'unknown'}',
+      },
+    ).timeout(_timeout);
+    if ((res.statusCode == 401 || res.statusCode == 403) && retry) {
+      final refresh = await _refreshBahnBonus();
+      if (refresh == _RefreshOutcome.success) {
+        return _sendBahnBonus(uri, connect: connect, retry: false);
+      }
+      if (refresh == _RefreshOutcome.transient) {
+        throw const DbAccountException(
+          'BahnBonus ist temporär nicht erreichbar',
+        );
+      }
+      await _clearBahnBonusTokens();
+      throw const DbBahnBonusAuthorizationRequired();
+    }
+    return res;
+  }
+
   /// Fetch BahnCards. Returns null when the server replies 304 Not Modified
   /// (the on-disk cache is still authoritative — caller keeps using it).
   /// [trigger] is sent as `call-trigger` and mirrors DB Navigator's per-
@@ -653,8 +922,9 @@ class DbAccountService {
         extraHeaders: {'call-trigger': trigger},
         bypassEtag: forceFresh);
     AppLog.log(
-        'bahncards HTTP ${res.statusCode} (${res.bodyBytes.length}B)',
-        tag: 'db-account');
+      'bahncards HTTP ${res.statusCode} (${res.bodyBytes.length}B)',
+      tag: 'db-account',
+    );
     if (res.statusCode == 304) return null;
     if (res.statusCode < 200 || res.statusCode >= 300) {
       // Log first ~200 chars of error body so the user sees the actual reason
@@ -662,11 +932,14 @@ class DbAccountService {
       try {
         final body = utf8.decode(res.bodyBytes);
         AppLog.log(
-            'bahncards body: ${body.substring(0, body.length.clamp(0, 200))}',
-            tag: 'db-account');
+          'bahncards body: ${body.substring(0, body.length.clamp(0, 200))}',
+          tag: 'db-account',
+        );
       } catch (_) {}
-      throw DbAccountException('bahncards HTTP ${res.statusCode}',
-          res.statusCode);
+      throw DbAccountException(
+        'bahncards HTTP ${res.statusCode}',
+        res.statusCode,
+      );
     }
     final data = json.decode(utf8.decode(res.bodyBytes));
     if (data is! List) return const [];
@@ -713,24 +986,32 @@ class DbAccountService {
         .whereType<Map<String, dynamic>>()
         .map(DbReiseIndex.fromJson)
         .toList()
-      ..sort((a, b) => (b.aenderungsDatum ?? DateTime(0))
-          .compareTo(a.aenderungsDatum ?? DateTime(0)));
+      ..sort(
+        (a, b) => (b.aenderungsDatum ?? DateTime(0)).compareTo(
+          a.aenderungsDatum ?? DateTime(0),
+        ),
+      );
     final saved = (data['reiseIndizes'] as List<dynamic>? ?? const [])
         .whereType<Map<String, dynamic>>()
         .map(DbSavedReiseIndex.fromJson)
         .toList()
-      ..sort((a, b) => (b.startDatum ?? b.aenderungsDatum ?? DateTime(0))
-          .compareTo(a.startDatum ?? a.aenderungsDatum ?? DateTime(0)));
+      ..sort(
+        (a, b) => (b.startDatum ?? b.aenderungsDatum ?? DateTime(0))
+            .compareTo(a.startDatum ?? a.aenderungsDatum ?? DateTime(0)),
+      );
     return DbReisenUebersicht(orders: orders, saved: saved);
   }
 
-  Future<DbReisenUebersicht> reisenuebersicht({bool onlyCurrent = false}) async {
+  Future<DbReisenUebersicht> reisenuebersicht({
+    bool onlyCurrent = false,
+  }) async {
     final data = await reisenuebersichtJson(onlyCurrent: onlyCurrent);
     if (data == null) return const DbReisenUebersicht();
     final parsed = parseReisenuebersicht(data);
     AppLog.log(
-        '${parsed.orders.length} Auftrag/Aufträge, ${parsed.saved.length} gemerkte Reise(n)',
-        tag: 'db-account');
+      '${parsed.orders.length} Auftrag/Aufträge, ${parsed.saved.length} gemerkte Reise(n)',
+      tag: 'db-account',
+    );
     return parsed;
   }
 
@@ -739,12 +1020,14 @@ class DbAccountService {
   /// result's `verbindung`, so the result is fed to
   /// `VendoService.parseConnection` to render the same Reiseplan view.
   Future<Map<String, dynamic>?> savedReiseVerbindung(String rkUuid) async {
-    final uri =
-        Uri.parse('${DbAccountConstants.mobBase}/reisen/$rkUuid').replace(
-      queryParameters: {'alternativeHalteBerechnung': 'true'},
+    final uri = Uri.parse(
+      '${DbAccountConstants.mobBase}/reisen/$rkUuid',
+    ).replace(queryParameters: {'alternativeHalteBerechnung': 'true'});
+    final res = await _send(
+      'GET',
+      uri.toString(),
+      media: DbAccountConstants.freieReisenMedia,
     );
-    final res = await _send('GET', uri.toString(),
-        media: DbAccountConstants.freieReisenMedia);
     if (res.statusCode != 200) return null;
     final data = _decode(res, 'reise/$rkUuid');
     final details = data['reiseDetails'] as Map<String, dynamic>?;
@@ -760,10 +1043,12 @@ class DbAccountService {
     final p = await profile();
     final kdId = p.kundendatensatzId;
     if (kdId == null) return const [];
-    final url =
-        '${DbAccountConstants.mobBase}/kundendatensatz/$kdId/favoriten';
-    final res = await _send('GET', url,
-        media: DbAccountConstants.favoritenMedia);
+    final url = '${DbAccountConstants.mobBase}/kundendatensatz/$kdId/favoriten';
+    final res = await _send(
+      'GET',
+      url,
+      media: DbAccountConstants.favoritenMedia,
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) return const [];
     final data = json.decode(utf8.decode(res.bodyBytes));
     if (data is! List) return const [];
@@ -778,8 +1063,10 @@ class DbAccountService {
   /// the user actually owns an abo); the caller decides how to interpret them.
   Future<List<Map<String, dynamic>>> kundenkontingente() async {
     final res = await _send(
-        'GET', '${DbAccountConstants.mobBase}/kundenkontingente',
-        media: DbAccountConstants.kundenkontingenteMedia);
+      'GET',
+      '${DbAccountConstants.mobBase}/kundenkontingente',
+      media: DbAccountConstants.kundenkontingenteMedia,
+    );
     if (res.statusCode < 200 || res.statusCode >= 300) return const [];
     final data = json.decode(utf8.decode(res.bodyBytes));
     if (data is! List) return const [];
@@ -791,11 +1078,12 @@ class DbAccountService {
   /// the Reisen tab keeps showing real ticket cards across cold starts and
   /// no-network). Parse with [DbTicket.fromJson]. Returns null on 304.
   Future<Map<String, dynamic>?> ticketJson(
-      String auftragsnummer, String kundenwunschId) async {
+    String auftragsnummer,
+    String kundenwunschId,
+  ) async {
     final url = '${DbAccountConstants.mobBase}/auftrag/$auftragsnummer'
         '/kundenwunsch/$kundenwunschId';
-    final res =
-        await _send('GET', url, media: DbAccountConstants.auftragMedia);
+    final res = await _send('GET', url, media: DbAccountConstants.auftragMedia);
     if (res.statusCode == 304) return null;
     return _decode(res, 'auftrag');
   }
@@ -831,14 +1119,18 @@ class DbAccountService {
         'zielLocationId': toLocationId,
       },
     };
-    final res = await _send('POST', '${DbAccountConstants.mobBase}/reisen',
-        media: DbAccountConstants.freieReisenMedia,
-        body: utf8.encode(json.encode(body)));
+    final res = await _send(
+      'POST',
+      '${DbAccountConstants.mobBase}/reisen',
+      media: DbAccountConstants.freieReisenMedia,
+      body: utf8.encode(json.encode(body)),
+    );
     if (res.statusCode != 201 && res.statusCode != 200) {
       AppLog.log('saveReise HTTP ${res.statusCode}', tag: 'db-account');
       return null;
     }
-    final data = json.decode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+    final data =
+        json.decode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
     final details = data['reiseDetails'] as Map<String, dynamic>?;
     return details?['rkUuid'] as String?;
   }
@@ -846,8 +1138,10 @@ class DbAccountService {
   /// Remove a saved trip from the DB account by its `rkUuid`.
   Future<bool> deleteReise(String rkUuid) async {
     final res = await _send(
-        'DELETE', '${DbAccountConstants.mobBase}/reisen/$rkUuid',
-        media: DbAccountConstants.freieReisenMedia);
+      'DELETE',
+      '${DbAccountConstants.mobBase}/reisen/$rkUuid',
+      media: DbAccountConstants.freieReisenMedia,
+    );
     return res.statusCode == 204 || res.statusCode == 200;
   }
 
@@ -858,8 +1152,10 @@ class DbAccountService {
 
   String _randomString(int length) {
     final rnd = Random.secure();
-    return List.generate(length, (_) => _chars[rnd.nextInt(_chars.length)])
-        .join();
+    return List.generate(
+      length,
+      (_) => _chars[rnd.nextInt(_chars.length)],
+    ).join();
   }
 
   String _codeChallenge(String verifier) {
