@@ -221,11 +221,20 @@ class DbBahnBonusCo2Balance {
   });
 
   factory DbBahnBonusCo2Balance.fromJson(Map<String, dynamic> j) {
-    final period = j['periodOfTime'] as Map<String, dynamic>? ?? const {};
-    final emissions = j['emissions'] as Map<String, dynamic>? ?? const {};
+    // Reject a partial/drifted payload rather than manufacturing an official
+    // "0 kg for the current year" that would overwrite the last-good cache.
+    final period = j['periodOfTime'];
+    final emissions = j['emissions'];
+    if (period is! Map<String, dynamic> || emissions is! Map<String, dynamic>) {
+      throw const FormatException('CO₂ balance: missing periodOfTime/emissions');
+    }
     final startDate = (period['startDate'] ?? '').toString();
+    final year = int.tryParse(startDate.split('-').first);
+    if (year == null) {
+      throw const FormatException('CO₂ balance: unparseable startDate');
+    }
     return DbBahnBonusCo2Balance(
-      year: int.tryParse(startDate.split('-').first) ?? DateTime.now().year,
+      year: year,
       startDate: startDate,
       endDate: (period['endDate'] ?? '').toString(),
       trainEmissionKg:

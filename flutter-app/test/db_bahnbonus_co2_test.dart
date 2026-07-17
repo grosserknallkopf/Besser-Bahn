@@ -40,4 +40,23 @@ void main() {
     expect(restored.reductionKg, original.reductionKg);
     expect(restored.travelDistanceKm, original.travelDistanceKm);
   });
+
+  // A drifted/partial payload must fail parsing so the provider keeps its
+  // last-good cache instead of showing a fabricated "0 kg this year".
+  test('rejects a payload missing periodOfTime/emissions', () {
+    expect(
+      () => DbBahnBonusCo2Balance.fromJson({'travelDistance': 900}),
+      throwsFormatException,
+    );
+  });
+
+  test('rejects a payload with an unparseable startDate', () {
+    expect(
+      () => DbBahnBonusCo2Balance.fromJson({
+        'periodOfTime': {'startDate': '', 'endDate': ''},
+        'emissions': {'co2Reduction': 12.0},
+      }),
+      throwsFormatException,
+    );
+  });
 }

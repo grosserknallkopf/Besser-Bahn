@@ -620,8 +620,11 @@ class BahnbonusCo2Controller extends AsyncNotifier<DbBahnBonusCo2Balance?> {
 
   @override
   Future<DbBahnBonusCo2Balance?> build() async {
-    final auth = ref.watch(dbAuthProvider);
-    if (!auth.isLoggedIn) {
+    // Login flag only — watching the whole DbAuthState rebuilt this on every
+    // profile/refresh update and raced a second CO₂ GET into a 429 (#31), the
+    // same trap the points and BahnCard controllers already avoid.
+    final loggedIn = ref.watch(dbAuthProvider.select((s) => s.isLoggedIn));
+    if (!loggedIn) {
       _needsAuthorization = false;
       return null;
     }
@@ -630,8 +633,16 @@ class BahnbonusCo2Controller extends AsyncNotifier<DbBahnBonusCo2Balance?> {
       _needsAuthorization = true;
       return null;
     }
+    _needsAuthorization = false;
+
+    // Serve this year's cached balance instantly (offline cold start still
+    // shows the official figure) and revalidate in the background.
+    final cached = await _currentCached();
+    if (cached != null) {
+      _refreshInBackground();
+      return cached;
+    }
     try {
-      _needsAuthorization = false;
       return await _fetchAndPersist();
     } on DbBahnBonusAuthorizationRequired {
       _needsAuthorization = true;
@@ -687,6 +698,11 @@ class BahnbonusCo2Controller extends AsyncNotifier<DbBahnBonusCo2Balance?> {
       try {
         final fresh = await _fetchAndPersist();
         if (fresh != null) state = AsyncData(fresh);
+      } on DbBahnBonusAuthorizationRequired {
+        // The one-time link was revoked upstream — flip back to the connect
+        // prompt instead of silently serving a stale figure.
+        _needsAuthorization = true;
+        state = const AsyncData(null);
       } catch (e) {
         AppLog.log(
           'CO2 balance background refresh failed: $e',

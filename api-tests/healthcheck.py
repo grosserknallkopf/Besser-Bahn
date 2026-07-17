@@ -2694,6 +2694,29 @@ def check_db_account_forced_refresh_shape() -> str:
             f"{cond.status_code})")
 
 
+def check_db_bahnbonus_co2() -> str:
+    """The Statistik tab's official CO₂ balance comes from BahnBonus' own
+    CO₂ service (`apis.deutschebahn.com/.../co2-service/v1/statistics`, #37),
+    authorized with the separate BahnBonus OAuth client — not the DB-Navigator
+    mob backend. We can't carry that token in CI, so we only prove the route
+    still exists and is auth-gated: unauthenticated a live path answers
+    401/403, a gone path 404/410. The response shape (periodOfTime/emissions,
+    parsed by DbBahnBonusCo2Balance) can only be checked with a real token.
+    Soft: auth-gated + upstream availability."""
+    url = ("https://apis.deutschebahn.com/db/apis/bahnbonus/co2-service/v1"
+           "/statistics")
+    params = {"interval": "YEARLY",
+              "startDate": "2026-01-01", "endDate": "2026-01-01"}
+    r = _get(url, params=params, headers={"Accept": "application/json"},
+             timeout=TIMEOUT)
+    if r.status_code in (404, 410):
+        raise CheckError(f"co2-service path gone (status={r.status_code})")
+    if r.status_code not in (401, 403, 429):
+        # 200 unauthenticated would mean it stopped requiring auth — flag it.
+        raise CheckError(f"unexpected status {r.status_code} (expected 401/403)")
+    return f"co2-service/v1/statistics reachable, auth-gated (status={r.status_code})"
+
+
 # (name, callable, soft) — soft checks warn instead of fail.
 CHECKS = [
     ("bahn.de web API blocked (reiseloesung)", check_bahn_web_api_blocked, True),
@@ -2742,6 +2765,7 @@ CHECKS = [
     ("DB account token endpoint (kf_mobile)", check_db_account_token_endpoint, True),
     ("DB account mob endpoints (auth-gated)", check_db_account_endpoints_require_auth, True),
     ("DB account forced refresh shape (#31)", check_db_account_forced_refresh_shape, True),
+    ("DB BahnBonus CO₂ service (#37)", check_db_bahnbonus_co2, True),
     ("HAFAS rest mirror (flaky)", check_hafas_rest, True),
     ("website journey blocked check", check_website_journey_still_blocked, True),
 ]
