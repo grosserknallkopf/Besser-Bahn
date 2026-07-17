@@ -55,6 +55,7 @@ class TraewellingService {
   static const _kAccess = 'trwl_access_token';
   static const _kRefresh = 'trwl_refresh_token';
   static const _kExpiry = 'trwl_expires_at'; // ISO-8601
+  static const _kUser = 'trwl_user'; // cached profile JSON
 
   /// Hard cap per request. Without this a stalled socket spins the loading
   /// spinner forever (the feed / "letzte Fahrten" bug) — with it a hung call
@@ -127,7 +128,24 @@ class TraewellingService {
     await _delete(_kAccess);
     await _delete(_kRefresh);
     await _delete(_kExpiry);
+    await _delete(_kUser);
   }
+
+  /// Last profile we successfully fetched, if any. Lets a valid session show
+  /// the user immediately on startup — even when `/auth/user` is momentarily
+  /// unreachable — instead of appearing logged out (#39).
+  Future<TrwlUser?> cachedUser() async {
+    final raw = await _read(_kUser);
+    if (raw == null) return null;
+    try {
+      return TrwlUser.fromJson(json.decode(raw) as Map<String, dynamic>);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _cacheUser(TrwlUser user) async =>
+      _write(_kUser, json.encode(user.toJson()));
 
   // --- OAuth (PKCE) ---------------------------------------------------------
 
@@ -313,7 +331,10 @@ class TraewellingService {
   Future<TrwlUser?> currentUser() async {
     final res = await _send('GET', '/auth/user');
     final data = _data(res);
-    return data is Map<String, dynamic> ? TrwlUser.fromJson(data) : null;
+    if (data is! Map<String, dynamic>) return null;
+    final user = TrwlUser.fromJson(data);
+    await _cacheUser(user);
+    return user;
   }
 
   Future<TrwlUser> userProfile(String username) async {

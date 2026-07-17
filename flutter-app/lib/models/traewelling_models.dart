@@ -66,6 +66,26 @@ class TrwlUser {
         blocked: j['blocked'] == true,
       );
 
+  /// Serialize for local caching, so a valid session can still show the
+  /// profile when `/auth/user` is briefly unreachable on startup.
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'displayName': displayName,
+        'username': username,
+        'profilePicture': profilePicture,
+        'bio': bio,
+        'totalDistance': totalDistance,
+        'totalDuration': totalDuration,
+        'points': points,
+        'mastodonUrl': mastodonUrl,
+        'privateProfile': privateProfile,
+        'following': following,
+        'followPending': followPending,
+        'followedBy': followedBy,
+        'muted': muted,
+        'blocked': blocked,
+      };
+
   /// Distance in km, one decimal.
   double get distanceKm => totalDistance / 1000;
 }

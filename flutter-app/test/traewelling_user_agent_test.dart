@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:besser_bahn/core/constants.dart';
@@ -171,6 +172,62 @@ void main() {
 
       expect(res.statusCode, 403);
       expect(res.body, contains('No identifiable User-Agent'));
+    });
+  });
+
+  // A valid session must survive a transient /auth/user failure on startup —
+  // a flaky network must never silently log the user out (#39).
+  group('session survives transient failures (#39)', () {
+    setUp(() => FlutterSecureStorage.setMockInitialValues({
+          'trwl_access_token': 'access-token',
+          'trwl_refresh_token': 'refresh-token',
+        }));
+
+    test('currentUser caches the profile for offline restore', () async {
+      final svc = TraewellingService(client: MockClient((req) async {
+        return http.Response(
+            json.encode({
+              'data': {'id': 7, 'username': 'stefan', 'displayName': 'Stefan'}
+            }),
+            200);
+      }));
+
+      final live = await svc.currentUser();
+      expect(live!.username, 'stefan');
+
+      // The next process can read the profile straight from storage.
+      final cached = await svc.cachedUser();
+      expect(cached, isNotNull);
+      expect(cached!.username, 'stefan');
+      expect(cached.id, 7);
+    });
+
+    test('a timing-out /auth/user does NOT clear the session', () async {
+      final svc = TraewellingService(client: MockClient((req) async {
+        throw TimeoutException('slow network');
+      }));
+
+      // The call surfaces an error…
+      await expectLater(svc.currentUser(), throwsA(isA<Object>()));
+      // …but the token is untouched, so we're still logged in.
+      expect(await svc.hasSession(), isTrue);
+    });
+
+    test('a genuine 401 with no refreshable token clears the session',
+        () async {
+      // No refresh token available → the 401 is terminal and must log out.
+      FlutterSecureStorage.setMockInitialValues({
+        'trwl_access_token': 'stale-token',
+      });
+      final svc = TraewellingService(
+          client: MockClient((req) async => http.Response('', 401)));
+
+      await expectLater(
+        svc.currentUser(),
+        throwsA(isA<TraewellingException>()
+            .having((e) => e.status, 'status', 401)),
+      );
+      expect(await svc.hasSession(), isFalse);
     });
   });
 }

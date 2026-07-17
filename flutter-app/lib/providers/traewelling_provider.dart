@@ -47,19 +47,33 @@ class TraewellingAuthNotifier extends Notifier<TraewellingAuthState> {
     return const TraewellingAuthState();
   }
 
-  /// On startup: if a token exists, fetch the current user to validate it.
+  /// On startup: if a token exists, keep the user logged in. We show the last
+  /// cached profile immediately, then revalidate in the background. Only a
+  /// genuine 401 (token rejected/expired) logs the user out — a transient
+  /// network error must NOT drop a valid session (#39).
   Future<void> _restore() async {
-    try {
-      if (await _service.hasSession()) {
-        final user = await _service.currentUser();
-        state = state.copyWith(initialized: true, user: user);
-        return;
-      }
-    } catch (_) {
-      // Stale/invalid token — fall through to logged-out.
-      await _service.logout();
+    if (!await _service.hasSession()) {
+      state = state.copyWith(initialized: true, clearUser: true);
+      return;
     }
-    state = state.copyWith(initialized: true, clearUser: true);
+
+    // Show any cached profile right away so the account looks connected.
+    final cached = await _service.cachedUser();
+    state = state.copyWith(initialized: true, user: cached);
+
+    try {
+      final user = await _service.currentUser();
+      state = state.copyWith(user: user ?? cached);
+    } on TraewellingException catch (e) {
+      if (e.status == 401) {
+        // Token really is invalid — _send already cleared it.
+        await _service.logout();
+        state = state.copyWith(clearUser: true);
+      }
+      // Any other failure (timeout/offline/5xx): keep the session + cached user.
+    } catch (_) {
+      // Non-API error — keep the session; don't punish a flaky network.
+    }
   }
 
   Future<void> login() async {
